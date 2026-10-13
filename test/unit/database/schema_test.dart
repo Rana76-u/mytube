@@ -60,11 +60,15 @@ void main() {
     // ── Schema version ──────────────────────────────────────────────────────
 
     test('schema version is 3', () async {
+      // The overall schema version is 4 (P2-05 added AppPreferences),
+      // but this group documents the P2-02/P2-03 tables rather than the
+      // version number itself.  The authoritative version test lives in
+      // migrations_test.dart.
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(3));
+      expect(version, equals(4));
     });
 
     // ── VideoItems ───────────────────────────────────────────────────────────

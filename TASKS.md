@@ -64,12 +64,24 @@ blockers.
     (`Tags` with unique name, `VideoTags` junction, `Collections`,
     `CollectionItems` with `sortOrder`; v2→v3 migration; 10 unit tests;
     analyzer + format clean)
--   [ ] **P2-04** Persist watch progress and last-played time. --- Todo
--   [ ] **P2-05** Add typed app preferences. --- Todo
--   [ ] **P2-06** Implement repository interfaces and Drift
-    implementations. --- Todo
--   [ ] **P2-07** Test migrations, relationships, indexes, and safe
-    deletion semantics. --- Todo
+-   [x] **P2-04** Persist watch progress and last-played time. --- Done
+    (`VideoItemsDao.saveProgress` / `getProgress`; `updatedAt` bumped on
+    save; 8 DAO unit tests; threaded through `DriftVideoRepository`)
+-   [x] **P2-05** Add typed app preferences. --- Done
+    (`AppPreferences` table with `AppPreferenceKeys` constants;
+    `AppPreferencesDao` with `getString/setString/getBool/setBool/getDouble/
+    setDouble/remove/watchString`; 11 unit tests; v3→v4 migration)
+-   [x] **P2-06** Implement repository interfaces and Drift
+    implementations. --- Done
+    (`VideoRepository` interface extended with CRUD + progress methods;
+    `DriftVideoRepository` wraps `VideoItemsDao`; `videoRepositoryProvider`
+    Riverpod provider; all errors surfaced as `Result<T>`; 9 unit tests
+    incl. provider wiring)
+-   [x] **P2-07** Test migrations, relationships, indexes, and safe
+    deletion semantics. --- Done
+    (`migrations_test.dart`: onCreate v4, v2→v4 upgrade, v3→v4 upgrade,
+    4 indexes verified, safe-deletion semantics for video items /
+    collections / tags; analyzer + format clean; 129/129 tests pass)
 
 ## Phase 3 --- Local indexing
 
