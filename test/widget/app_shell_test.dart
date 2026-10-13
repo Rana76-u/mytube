@@ -3,22 +3,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/app/app_error_handler.dart';
 import 'package:mytube/app/app_error_surface.dart';
-import 'package:mytube/app/app_info.dart';
+import 'package:mytube/app/main_scaffold.dart';
 import 'package:mytube/app/personal_video_hub_app.dart';
-import 'package:mytube/app/placeholder_home.dart';
 import 'package:mytube/app/uncaught_app_error.dart';
 import 'package:mytube/core/errors/app_exception.dart';
 import 'package:mytube/core/logging/privacy_safe_logger.dart';
 
 void main() {
-  testWidgets('app shell shows the product name and placeholder home', (
-    tester,
-  ) async {
+  testWidgets('app shell renders the five-tab scaffold', (tester) async {
     await tester.pumpWidget(const PersonalVideoHubApp());
 
-    expect(find.text(AppInfo.name), findsWidgets);
-    expect(find.text(PlaceholderHome.statusMessage), findsOneWidget);
     expect(find.byType(ProviderScope), findsOneWidget);
+    expect(find.byType(MainScaffold), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget);
+
+    // All five destination labels are present.
+    expect(find.text('Discover'), findsWidgets);
+    expect(find.text('Reels'), findsOneWidget);
+    expect(find.text('Library'), findsOneWidget);
+    expect(find.text('Saved'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
   });
 
   testWidgets('uncaught errors show a dismissible banner, not secrets', (
@@ -47,7 +51,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Could not reach this video. Try again.'), findsNothing);
-    expect(find.text(PlaceholderHome.statusMessage), findsOneWidget);
+    // After dismiss, Discover tab content is still visible.
+    expect(find.text('Discover'), findsWidgets);
   });
 
   testWidgets('widget failures show a user-facing surface without secrets', (

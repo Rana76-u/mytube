@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 
 /// Fallback UI for a widget that failed to build (ErrorWidget.builder).
+///
+/// Uses theme colours when a [Theme] ancestor is available, and falls back to
+/// safe neutral values otherwise (e.g., when the widget tree has not yet been
+/// fully wired). This lets the surface work correctly in both the dark and
+/// light themes introduced in P1-02.
 class AppErrorSurface extends StatelessWidget {
   const AppErrorSurface({
     super.key,
@@ -18,34 +23,44 @@ class AppErrorSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Resolve theme-aware colours. ErrorWidget.builder is invoked from inside
+    // the widget tree, so a Theme ancestor (provided by MaterialApp) is almost
+    // always present. The fallback colours below guard the rare edge case where
+    // an error fires before the theme ancestor has been mounted.
+    ColorScheme? colorScheme;
+    try {
+      colorScheme = Theme.of(context).colorScheme;
+    } catch (_) {
+      // Theme not yet available; use dark-safe fallback values.
+    }
+    final surfaceColor = colorScheme?.surface ?? const Color(0xFF121212);
+    final onSurfaceColor = colorScheme?.onSurface ?? const Color(0xFFE0E0E0);
+    final errorColor = colorScheme?.error ?? const Color(0xFFCF6679);
+
     Widget content = Material(
-      color: const Color(0xFFFFFFFF),
+      color: surfaceColor,
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.error_outline,
-                size: 48,
-                color: Color(0xFFB00020),
-              ),
+              Icon(Icons.error_outline, size: 48, color: errorColor),
               const SizedBox(height: 16),
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF000000),
+                  color: onSurfaceColor,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Color(0xFF000000)),
+                style: TextStyle(fontSize: 14, color: onSurfaceColor),
               ),
             ],
           ),
