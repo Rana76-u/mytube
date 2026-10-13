@@ -21,8 +21,9 @@ blockers.
 
 ## Phase 1 --- App shell
 
--   [ ] **P1-01** Create app shell and app-level error handling. ---
-    Todo
+-   [x] **P1-01** Create app shell and app-level error handling. ---
+    Done (`ProviderScope`, privacy-safe global errors; tabs/theme
+    deferred to P1-02–P1-04)
 -   [ ] **P1-02** Implement dark-first theme and follow-system option.
     --- Todo
 -   [ ] **P1-03** Implement Discover, Reels, Library, Saved, Settings

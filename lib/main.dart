@@ -1,16 +1,32 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/app_error_handler.dart';
+import 'package:mytube/app/personal_video_hub_app.dart';
+import 'package:mytube/app/uncaught_app_error.dart';
+import 'package:mytube/core/logging/privacy_safe_logger.dart';
 
 void main() {
-  runApp(const MainApp());
+  bootstrapAndRun();
 }
 
-class MainApp extends StatelessWidget {
-  const MainApp({super.key});
+/// Wires error hooks, a single [ProviderContainer], and [runApp].
+void bootstrapAndRun({
+  PrivacySafeLogger? logger,
+  ProviderContainer? container,
+  void Function(Widget app)? run,
+}) {
+  WidgetsFlutterBinding.ensureInitialized();
 
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: Scaffold(body: Center(child: Text('Hello World!'))),
-    );
-  }
+  final appLogger = logger ?? PrivacySafeLogger();
+  final appContainer = container ?? ProviderContainer();
+
+  AppErrorHandler(
+    logger: appLogger,
+    onPlatformError: (error, _) {
+      appContainer.read(uncaughtAppErrorProvider.notifier).report(error);
+    },
+  ).install();
+
+  final app = PersonalVideoHubApp(container: appContainer);
+  (run ?? runApp)(app);
 }

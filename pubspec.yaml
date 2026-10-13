@@ -1,5 +1,5 @@
 name: mytube
-description: "A new Flutter project."
+description: "Personal Video Hub — local-first Android video library."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_riverpod: ^3.4.3
 
 dev_dependencies:
   flutter_test:
