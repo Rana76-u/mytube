@@ -55,10 +55,15 @@ blockers.
     empty schema v1, `databaseProvider`, in-memory factory for tests;
     generated `app_database.g.dart`; 3 unit tests all pass; analyzer + format
     clean)
--   [ ] **P2-02** Create video-item and source-location
-    tables/migrations. --- Todo
--   [ ] **P2-03** Create tags, video-tags, collections, and
-    collection-items tables. --- Todo
+-   [x] **P2-02** Create video-item and source-location
+    tables/migrations. --- Done
+    (`VideoItems`, `SourceLocations` tables; v1→v2 migration; FK cascade;
+    `PRAGMA foreign_keys = ON` in `beforeOpen`; 7 unit tests)
+-   [x] **P2-03** Create tags, video-tags, collections, and
+    collection-items tables. --- Done
+    (`Tags` with unique name, `VideoTags` junction, `Collections`,
+    `CollectionItems` with `sortOrder`; v2→v3 migration; 10 unit tests;
+    analyzer + format clean)
 -   [ ] **P2-04** Persist watch progress and last-played time. --- Todo
 -   [ ] **P2-05** Add typed app preferences. --- Todo
 -   [ ] **P2-06** Implement repository interfaces and Drift
