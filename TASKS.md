@@ -24,19 +24,37 @@ blockers.
 -   [x] **P1-01** Create app shell and app-level error handling. ---
     Done (`ProviderScope`, privacy-safe global errors; tabs/theme
     deferred to P1-02–P1-04)
--   [ ] **P1-02** Implement dark-first theme and follow-system option.
-    --- Todo
--   [ ] **P1-03** Implement Discover, Reels, Library, Saved, Settings
-    tabs. --- Todo
--   [ ] **P1-04** Set Discover as the default launch tab. --- Todo
--   [ ] **P1-05** Add reusable loading, empty, error, and retry states.
-    --- Todo
--   [ ] **P1-06** Establish feature/domain/data/platform boundaries. ---
-    Todo
+-   [x] **P1-02** Implement dark-first theme and follow-system option.
+    --- Done (`AppTheme`, `ThemeModeNotifier`; dark default, system/light/dark
+    toggle; `AppErrorSurface` de-hardcoded; 9 new tests; analyzer + format
+    clean)
+-   [x] **P1-03** Implement Discover, Reels, Library, Saved, Settings
+    tabs. --- Done (`MainScaffold` with `NavigationBar` + `IndexedStack`;
+    five feature screen stubs; `PlaceholderHome` replaced; 8 new navigation
+    widget tests; analyzer + format clean)
+-   [x] **P1-04** Set Discover as the default launch tab. --- Done
+    (implemented as part of P1-03; `initialIndex = tabDiscover = 0`;
+    verified by NAV-002 test)
+-   [x] **P1-05** Add reusable loading, empty, error, and retry states.
+    --- Done (`LoadingIndicator`, `EmptyState`, `ErrorState`,
+    `AsyncValueWidget`; in `lib/core/ui/`; 9 P1-05 widget tests, all
+    secrets-safe; analyzer + format clean)
+-   [x] **P1-06** Establish feature/domain/data/platform boundaries. ---
+    Done (`domain/models/availability_state.dart`,
+    `domain/models/app_error.dart`, `domain/repositories/video_repository.dart`,
+    `core/result.dart`, `sources/source_adapter.dart`,
+    `playback/playback_controller.dart`, `platform/media_store_bridge.dart`;
+    16 unit tests for `Result`, `AppError`, `AvailabilityState`; all
+    directories per ARCHITECTURE §2; analyzer + format clean)
 
 ## Phase 2 --- Database
 
--   [ ] **P2-01** Add Drift/SQLite initialization. --- Todo
+-   [x] **P2-01** Add Drift/SQLite initialization. --- Done
+    (`drift: 2.35.2`, `drift_flutter: 0.3.1`, `sqlite3_flutter_libs: 0.6.0+eol`;
+    `drift_dev: 2.35.1`, `build_runner: 2.15.1` dev; `AppDatabase` with
+    empty schema v1, `databaseProvider`, in-memory factory for tests;
+    generated `app_database.g.dart`; 3 unit tests all pass; analyzer + format
+    clean)
 -   [ ] **P2-02** Create video-item and source-location
     tables/migrations. --- Todo
 -   [ ] **P2-03** Create tags, video-tags, collections, and
