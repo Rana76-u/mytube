@@ -85,10 +85,14 @@ blockers.
 
 ## Phase 3 --- Local indexing
 
--   [ ] **P3-01** Implement Android MediaStore video discovery/metadata
-    bridge. --- Todo
--   [ ] **P3-02** Implement SAF folder selection and persistable access
-    where supported. --- Todo
+-   [x] **P3-01** Implement Android MediaStore video discovery/metadata
+    bridge. --- Done (MediaStorePlugin.kt Kotlin MethodChannel bridge;
+    MediaStoreBridgeImpl Dart impl; mediaStoreBridgeProvider; permissions
+    added to manifest; 11 unit tests)
+-   [x] **P3-02** Implement SAF folder selection and persistable access
+    where supported. --- Done (SaffBridgePlugin.kt Kotlin MethodChannel
+    bridge; SafBridgeImpl Dart impl; SafBridge interface; safBridgeProvider;
+    documentfile dependency; 10 unit tests)
 -   [ ] **P3-03** Implement local source adapter and capabilities. ---
     Todo
 -   [ ] **P3-04** Merge overlapping scan results without losing source

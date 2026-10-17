@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Direct URL streams and future provider APIs (SEC-006: HTTPS when supported). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Local video read permissions (P3-01): API 24-32, 33, 34+ respectively. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
     <application
         android:label="mytube"
         android:name="${applicationName}"
