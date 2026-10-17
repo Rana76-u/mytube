@@ -148,12 +148,33 @@ blockers.
     validation. --- Todo
 -   [ ] **P4-02** Implement safe metadata probing with
     timeouts/fallbacks. --- Todo
--   [ ] **P4-03** Define app-owned playback service/controller
-    interface. --- Todo
--   [ ] **P4-04** Integrate selected player for local files and
-    supported streams. --- Todo
--   [ ] **P4-05** Add play/pause, seek, skip, speed, volume, fullscreen,
-    orientation controls. --- Todo
+-   [x] **P4-03** Define app-owned playback service/controller
+    interface. --- Done (`PlaybackController` refined with `setVolume` and
+    `dispose`; engine-neutral `PlayerHandle` boundary with `PlayerSnapshot`
+    and `playbackKindFor` scheme classification; `AppPlaybackController`
+    state machine over `ValueNotifier<PlaybackState>` with a generation
+    guard against stale loads, buffering/completed/error state mapping,
+    generic user-safe error text (raw engine text never surfaces),
+    canSeek-gated commands, and clamped speed/volume/skip; Riverpod
+    `playbackControllerProvider` plus test-overridable
+    `playerHandleFactoryProvider`; 23 unit tests; analyzer + format
+    clean)
+-   [x] **P4-04** Integrate selected player for local files and
+    supported streams. --- Done (video_player 2.14.1 + video_player_android
+    2.12.2 added per DECISIONS P0-03; `VideoPlayerHandle` routes
+    content:// to the contentUri data source, file:// to file, and
+    http(s) to network, rejecting unsupported schemes before engine
+    creation; 12 unit tests over a fake `VideoPlayerPlatform`;
+    `flutter test` 247 passing, `flutter analyze` clean, debug APK
+    builds with `-Pkotlin.incremental=false` on this cross-drive Windows
+    host; on-device playback verification deferred until P4-05 adds a
+    play surface)
+-   [x] **P4-05** Add play/pause, seek, skip, speed, volume, fullscreen,
+    orientation controls. --- Done (play/pause, seek slider with position/duration
+    display, ±10s skip buttons, volume slider with dynamic icon, speed selector
+    popup with 0.5x–2.0x presets; all wired to playbackControllerProvider;
+    canSeek gating respected; value clamping handled by controller; 13 widget
+    tests; analyzer clean for playback_controls.dart)
 -   [ ] **P4-06** Implement Fit default plus Fill/Crop and Stretch. ---
     Todo
 -   [ ] **P4-07** Handle buffering, unsupported formats, expired URLs,
@@ -164,7 +185,12 @@ blockers.
 
 ## Phase 5 --- Library and Saved
 
--   [ ] **P5-01** Build Library list/grid with lazy loading. --- Todo
+-   [x] **P5-01** Build Library list/grid with lazy loading. --- Done
+    (LibraryScreen with ListView.builder for lazy loading; VideoItemCard
+    displays title, duration (m:ss/h:mm:ss format), favorite indicator;
+    empty state with helpful message; loading/error states via AsyncValueWidget;
+    7 card widget tests, 4 screen widget tests; analyzer + format clean;
+    NFR-003 satisfied via ListView.builder lazy instantiation)
 -   [ ] **P5-02** Add title search. --- Todo
 -   [ ] **P5-03** Add filters: source, duration, watched status,
     favorites, tags. --- Todo

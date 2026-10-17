@@ -1,0 +1,48 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-10-17T19:23:54Z"
+modules:
+    "":
+        dir_name: MyTube Flutter Video Hub
+        title: MyTube Flutter Video Hub
+        scope:
+            - README.md
+            - ARCHITECTURE.md
+            - PROJECT_BRIEF.md
+            - REQUIREMENTS.md
+            - TASKS.md
+            - DECISIONS.md
+            - AGENTS.md
+            - analysis_options.yaml
+            - pubspec.yaml
+            - pubspec.lock
+            - .gitignore
+        source_files: []
+        children:
+            - platform_integration
+            - tests
+        depends_on: []
+        related_to: []
+    platform_integration:
+        dir_name: Android Platform Integration Layer
+        title: Android Platform Integration Layer
+        scope:
+            - android/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: tests
+    tests:
+        dir_name: Flutter Test Suite (Unit & Widget Tests)
+        title: Flutter Test Suite (Unit & Widget Tests)
+        scope:
+            - test/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: platform_integration

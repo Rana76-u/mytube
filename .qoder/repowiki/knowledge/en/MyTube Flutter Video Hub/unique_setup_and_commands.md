@@ -1,0 +1,1 @@
+Run the Flutter app from the repo root with `flutter run`; generate Drift DAOs/migrations with `dart run build_runner build` before running tests or the app.

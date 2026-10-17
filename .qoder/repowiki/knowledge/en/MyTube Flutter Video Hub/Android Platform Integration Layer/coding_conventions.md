@@ -1,0 +1,4 @@
+- Each platform feature is implemented as a class implementing `FlutterPlugin`, `MethodCallHandler`, `ActivityAware`, plus one activity-result listener interface, with a dedicated `MethodChannel` name under `com.example.mytube/...`.
+- Permission-sensitive operations branch on `Build.VERSION.SDK_INT` against `UPSIDE_DOWN_CAKE`, `TIRAMISU`, and the legacy path, selecting the appropriate `Manifest.permission` constant per tier.
+- Method dispatch uses a `when (call.method)` block with a catch-all `else -> result.notImplemented()` default, and each handler validates required arguments before proceeding.
+- Long-running or I/O-heavy work (e.g., recursive SAF directory traversal) is launched on a `CoroutineScope(Dispatchers.IO + SupervisorJob())` and marshals the final `result.success(...)` call back onto `Dispatchers.Main`.

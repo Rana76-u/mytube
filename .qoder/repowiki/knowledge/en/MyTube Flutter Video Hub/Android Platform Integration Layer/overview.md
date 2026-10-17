@@ -1,0 +1,1 @@
+Android host app that embeds the Flutter engine and exposes native video browsing capabilities through two custom MethodChannel plugins.

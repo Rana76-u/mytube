@@ -1,0 +1,4 @@
+- Dart code is organized into layered packages (`app`, `core`, `domain`, `data`, `features`, `sources`, `playback`, `platform`) as prescribed by ARCHITECTURE.md.
+- Platform-specific behavior (MediaStore, SAF, thumbnails, PiP, media session) is hidden behind narrow Dart interfaces and reached only through MethodChannel calls from the Dart side.
+- Domain models are kept separate from Drift row types; mappers live in `data/mappers` and widgets never query SQLite directly.
+- Each source provider (local, direct URL, OneDrive, Google Drive, Cloudflare R2) implements the `VideoSourceAdapter` interface rather than sharing implementation details.

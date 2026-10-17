@@ -1,0 +1,1 @@
+Flutter + Riverpod for state management, Drift + SQLite3 for local persistence, `video_player` for playback, with Android native code accessed exclusively through MethodChannel plugins; linting via `flutter_lints` and code generation via `drift_dev` + `build_runner`.

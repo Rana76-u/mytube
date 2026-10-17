@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: ""
+title: MyTube Flutter Video Hub
+scope:
+    - README.md
+    - ARCHITECTURE.md
+    - PROJECT_BRIEF.md
+    - REQUIREMENTS.md
+    - TASKS.md
+    - DECISIONS.md
+    - AGENTS.md
+    - analysis_options.yaml
+    - pubspec.yaml
+    - pubspec.lock
+    - .gitignore
+source_files: []
+depends_on: []
+related_to: []

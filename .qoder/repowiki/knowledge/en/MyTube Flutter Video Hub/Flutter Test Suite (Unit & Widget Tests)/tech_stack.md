@@ -1,0 +1,1 @@
+Flutter testing framework (`flutter_test`), Riverpod's `ProviderScope`/`ProviderContainer` for widget tests, and Drift's in-memory SQLite mode for database tests.

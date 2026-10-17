@@ -1,0 +1,1 @@
+Built as a Flutter module's Android host: run via `flutter run` from the repo root — the Gradle script delegates sources to `../..` so no standalone `./gradlew assemble` is needed for normal development.

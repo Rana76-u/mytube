@@ -1,0 +1,5 @@
+- Unit tests group related cases with `group('SubjectName', ...)` and set up per-test fixtures inside `setUp` / tear them down in `tearDown`.
+- External dependencies (source adapters, SAF/MediaStore bridges) are replaced by inline `FakeXxx implements Xxx` classes defined at the top of the test file under a `// Fakes` section.
+- Database-backed tests construct an in-memory `AppDatabase.inMemory()` in `setUp` and call `db.close()` in `tearDown`, seeding rows through Drift companion objects via helper functions.
+- Widget tests wrap the app in a `ProviderContainer` created in the test body and disposed via `addTearDown(container.dispose)`.
+- Assertions on Result-returning APIs unwrap via `(result as Ok<T>).value` after checking `result.isOk`.

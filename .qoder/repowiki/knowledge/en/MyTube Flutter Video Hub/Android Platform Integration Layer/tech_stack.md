@@ -1,0 +1,1 @@
+Kotlin on JVM 17, AndroidX Core, MediaStore API (with SDK-conditional branches for READ_EXTERNAL_STORAGE → READ_MEDIA_VIDEO → READ_MEDIA_VISUAL_USER_SELECTED), SAF `DocumentFile` tree API, kotlinx-coroutines-android for off-main traversal, Gradle Kotlin DSL build.
