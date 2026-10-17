@@ -90,3 +90,18 @@ final class UnexpectedError extends AppError {
 
   final Object? cause;
 }
+
+/// A refresh was suppressed because the minimum interval has not elapsed.
+///
+/// Callers that use [RefreshTrigger.automatic] should treat this as a
+/// signal to skip the refresh rather than showing an error to the user.
+final class RefreshThrottledError extends AppError {
+  const RefreshThrottledError({
+    super.userMessage = 'Refresh skipped — content is already up to date.',
+    required super.diagnosticMessage,
+    this.lastRefreshedAt,
+  });
+
+  /// The last time a successful refresh completed.
+  final DateTime? lastRefreshedAt;
+}

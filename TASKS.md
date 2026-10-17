@@ -101,10 +101,23 @@ blockers.
     results; deduplicates exact-URI overlaps; `localMediaAdapterProvider`;
     `videoSourceAdaptersProvider` in `source_registry.dart`; 14 unit
     tests; analyzer + format clean)
--   [ ] **P3-04** Merge overlapping scan results without losing source
-    locations. --- Todo
--   [ ] **P3-05** Add throttled foreground refresh and manual refresh.
-    --- Todo
+-   [x] **P3-04** Merge overlapping scan results without losing source
+    locations. --- Done (`ScanMergeService` domain service; merges
+    `SourceVideo` scan results into DB; creates new VideoItem+SourceLocation
+    pairs for new items; updates availability/metadata for existing items;
+    marks unseen sources `missing` without deleting rows or user metadata;
+    cross-provider isolation; `scanMergeServiceProvider`; new repository
+    methods added to interface + DriftVideoRepository; `uuid: ^4.5.1` added;
+    12 unit tests; analyzer + format clean)
+-   [x] **P3-05** Add throttled foreground refresh and manual refresh.
+    --- Done (`LibraryRefreshService` domain service with throttle,
+    cancellation, per-adapter error isolation, and `RefreshState` sealed
+    class stream (`RefreshIdle`, `RefreshInProgress`, `RefreshFailed`);
+    `RefreshThrottledError` added to `app_error.dart`;
+    `LibraryRefreshNotifier` / `libraryRefreshServiceProvider` Riverpod
+    `Notifier` integration; foreground-only per LOCAL-008; last-scan
+    timestamp in-memory only (persistence deferred);
+    12 unit tests; analyzer + format clean; total 193 tests pass)
 -   [ ] **P3-06** Handle revoked folder access, missing files, and
     permission denial. --- Todo
 -   [ ] **P3-07** Preserve user-owned metadata during rescans. --- Todo
