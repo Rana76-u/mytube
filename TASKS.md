@@ -118,8 +118,15 @@ blockers.
     `Notifier` integration; foreground-only per LOCAL-008; last-scan
     timestamp in-memory only (persistence deferred);
     12 unit tests; analyzer + format clean; total 193 tests pass)
--   [ ] **P3-06** Handle revoked folder access, missing files, and
-    permission denial. --- Todo
+-   [x] **P3-06** Handle revoked folder access, missing files, and
+    permission denial. --- Done (`AvailabilityCheckService` domain service;
+    checks all SourceLocations for a provider and updates availability states
+    without deleting rows or user metadata; `permissionRevoked`/`missing`/
+    `available` transitions handled; cross-provider isolation; cancellable;
+    `availabilityCheckServiceProvider`; `LocalMediaAdapter.resolveForPlayback`
+    now propagates errors (P3-03 fix A); `LocalMediaAdapter.getVideo` returns
+    `Ok(null)` on permission denied (P3-03 fix B); 10 availability + 3
+    adapter fix tests; analyzer + format clean)
 -   [ ] **P3-07** Preserve user-owned metadata during rescans. --- Todo
 -   [ ] **P3-08** Test indexing and verify behavior on Android
     devices/versions. --- Todo

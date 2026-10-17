@@ -139,7 +139,9 @@ class LocalMediaAdapter implements VideoSourceAdapter {
           return const Ok(null);
         case Err(:final error):
           if (error is PermissionDeniedError) {
-            return Err(error);
+            // Consistent with listVideos(): permission denial is a soft state,
+            // not a hard error — the item is unavailable but not gone.
+            return const Ok(null);
           }
           return Err(error);
       }
@@ -242,15 +244,16 @@ class LocalMediaAdapter implements VideoSourceAdapter {
     // For local files the content URI is stable for the lifetime of the item,
     // but callers must NOT assume this is true for cloud sources — those may
     // return short-lived signed URLs that must never be persisted.
-    String? mimeType;
     final videoResult = await getVideo(sourceId);
-    switch (videoResult) {
-      case Ok(:final value):
-        mimeType = value?.mimeType;
-      case Err():
-        // If getVideo fails, proceed with mimeType = null rather than
-        // propagating — the URI itself is sufficient for local playback.
-        mimeType = null;
+    if (videoResult case Err(:final error)) return Err(error);
+    final video = (videoResult as Ok<SourceVideo?>).value;
+
+    if (video == null) {
+      return Err(
+        NotFoundError(
+          diagnosticMessage: 'resolveForPlayback: source not found: $sourceId',
+        ),
+      );
     }
 
     final sourceType = sourceId.startsWith('content://media/')
@@ -262,7 +265,7 @@ class LocalMediaAdapter implements VideoSourceAdapter {
         uri: Uri.parse(sourceId),
         sourceId: sourceId,
         sourceType: sourceType,
-        mimeType: mimeType,
+        mimeType: video.mimeType,
         canSeek: true,
       ),
     );

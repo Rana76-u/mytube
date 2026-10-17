@@ -374,5 +374,52 @@ void main() {
         DownloadEligibility.prohibited,
       );
     });
+
+    // ── 15 ────────────────────────────────────────────────────────────────
+    test('resolveForPlayback() propagates Err when getVideo() returns Err '
+        '(P3-03 fix A)', () async {
+      // MediaStore returns a hard (non-permission) error → getVideo returns Err
+      // → resolveForPlayback must propagate Err, not swallow it.
+      fakeMs.videosResult = Err(
+        const UnexpectedError(diagnosticMessage: 'bridge io error'),
+      );
+
+      final result = await adapter.resolveForPlayback(
+        'content://media/external/video/media/1',
+      );
+
+      expect(result.isErr, isTrue);
+    });
+
+    // ── 16 ────────────────────────────────────────────────────────────────
+    test('resolveForPlayback() returns Err(NotFoundError) when video is absent '
+        '(P3-03 fix A)', () async {
+      // No videos in MediaStore → getVideo returns Ok(null) → NotFoundError.
+      fakeMs.videosResult = const Ok([]);
+
+      final result = await adapter.resolveForPlayback(
+        'content://media/external/video/media/missing',
+      );
+
+      expect(result.isErr, isTrue);
+      expect((result as Err<PlayableSource>).error, isA<NotFoundError>());
+    });
+
+    // ── 17 ────────────────────────────────────────────────────────────────
+    test('getVideo() returns Ok(null) on MediaStore permission denied '
+        '(P3-03 fix B)', () async {
+      fakeMs.videosResult = Err(
+        const PermissionDeniedError(
+          diagnosticMessage: 'READ_MEDIA_VIDEO not granted',
+        ),
+      );
+
+      final result = await adapter.getVideo(
+        'content://media/external/video/media/1',
+      );
+
+      expect(result.isOk, isTrue);
+      expect((result as Ok<SourceVideo?>).value, isNull);
+    });
   });
 }
