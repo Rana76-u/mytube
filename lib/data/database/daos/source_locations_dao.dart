@@ -41,4 +41,39 @@ class SourceLocationsDao extends DatabaseAccessor<AppDatabase>
   /// Deletes the source location with [id].
   Future<int> deleteLocation(String id) =>
       (delete(sourceLocations)..where((t) => t.id.equals(id))).go();
+
+  /// Returns all source locations for a given [providerType] name (e.g.
+  /// `"localMediaStore"`).
+  Future<List<SourceLocation>> getByProviderType(String providerType) =>
+      (select(
+        sourceLocations,
+      )..where((t) => t.providerType.equals(providerType))).get();
+
+  /// Updates mutable metadata fields for the source location with [id].
+  ///
+  /// Only non-null arguments are written.  [updatedAt] is always set to
+  /// [DateTime.now()].  Note: [durationMs] is NOT a column on this table —
+  /// it lives on [VideoItems]; callers must not pass it here.
+  Future<void> updateMetadata({
+    required String id,
+    String? displayName,
+    String? availability,
+    int? lastCheckedAt,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (update(sourceLocations)..where((t) => t.id.equals(id))).write(
+      SourceLocationsCompanion(
+        displayName: displayName != null
+            ? Value(displayName)
+            : const Value.absent(),
+        availability: availability != null
+            ? Value(availability)
+            : const Value.absent(),
+        lastCheckedAt: lastCheckedAt != null
+            ? Value(lastCheckedAt)
+            : const Value.absent(),
+        updatedAt: Value(now),
+      ),
+    );
+  }
 }
