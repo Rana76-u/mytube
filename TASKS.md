@@ -95,8 +95,12 @@ blockers.
     bridge; SafBridgeImpl Dart impl; SafBridge interface; safBridgeProvider;
     documentfile + kotlinx-coroutines-android dependencies; listVideosInFolder
     moved to Dispatchers.IO with depth/count guards; 14 unit tests)
--   [ ] **P3-03** Implement local source adapter and capabilities. ---
-    Todo
+-   [x] **P3-03** Implement local source adapter and capabilities. ---
+    Done (`LocalMediaAdapter` implementing `VideoSourceAdapter` for
+    `localMediaStore` and `selectedFolder`; combines MediaStore + SAF
+    results; deduplicates exact-URI overlaps; `localMediaAdapterProvider`;
+    `videoSourceAdaptersProvider` in `source_registry.dart`; 14 unit
+    tests; analyzer + format clean)
 -   [ ] **P3-04** Merge overlapping scan results without losing source
     locations. --- Todo
 -   [ ] **P3-05** Add throttled foreground refresh and manual refresh.
