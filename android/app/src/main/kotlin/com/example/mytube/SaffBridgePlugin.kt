@@ -10,6 +10,12 @@ import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SaffBridgePlugin :
     FlutterPlugin,
@@ -23,18 +29,29 @@ class SaffBridgePlugin :
     private var pendingFolderPickerResult: MethodChannel.Result? = null
     private val FOLDER_PICKER_REQUEST_CODE = 1002
 
+    /** Coroutine scope for background traversal; cancelled on engine detach. */
+    private var ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    /** Maximum number of video files returned per listVideosInFolder call. */
+    private val MAX_VIDEO_FILES = 5_000
+
+    /** Maximum directory depth for the recursive SAF tree walk. */
+    private val MAX_DEPTH = 20
+
     // -------------------------------------------------------------------------
     // FlutterPlugin
     // -------------------------------------------------------------------------
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         flutterPluginBinding = binding
+        ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         channel = MethodChannel(binding.binaryMessenger, "com.example.mytube/saf")
         channel.setMethodCallHandler(this)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        ioScope.cancel()
     }
 
     // -------------------------------------------------------------------------
@@ -158,26 +175,43 @@ class SaffBridgePlugin :
                 result.error("INVALID_ARGUMENT", "Missing 'uri' argument", null)
                 return
             }
-        try {
-            val context = flutterPluginBinding.applicationContext
-            val docFile = DocumentFile.fromTreeUri(context, Uri.parse(uriString))
-            val videoList = mutableListOf<Map<String, Any?>>()
-            collectVideoFiles(docFile, videoList)
-            result.success(videoList)
-        } catch (e: SecurityException) {
-            result.error("PERMISSION_DENIED", "Folder access revoked", null)
-        } catch (e: Exception) {
-            result.error("LIST_FAILED", e.message, null)
+        val context = flutterPluginBinding.applicationContext
+
+        // Run the recursive traversal off the main/channel thread to avoid
+        // blocking for seconds on large SD cards or deeply nested trees.
+        ioScope.launch {
+            try {
+                val docFile = DocumentFile.fromTreeUri(context, Uri.parse(uriString))
+                val videoList = mutableListOf<Map<String, Any?>>()
+                collectVideoFiles(docFile, videoList, depth = 0)
+                withContext(Dispatchers.Main) {
+                    result.success(videoList)
+                }
+            } catch (e: SecurityException) {
+                withContext(Dispatchers.Main) {
+                    result.error("PERMISSION_DENIED", "Folder access revoked", null)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    result.error("LIST_FAILED", e.message, null)
+                }
+            }
         }
     }
 
     private fun collectVideoFiles(
         docFile: DocumentFile?,
         results: MutableList<Map<String, Any?>>,
+        depth: Int,
     ) {
         if (docFile == null || !docFile.exists()) return
+        if (results.size >= MAX_VIDEO_FILES) return
         if (docFile.isDirectory) {
-            docFile.listFiles().forEach { collectVideoFiles(it, results) }
+            if (depth >= MAX_DEPTH) return
+            docFile.listFiles().forEach { child ->
+                if (results.size >= MAX_VIDEO_FILES) return
+                collectVideoFiles(child, results, depth + 1)
+            }
         } else if (isVideoFile(docFile)) {
             results.add(
                 mapOf(

@@ -88,11 +88,13 @@ blockers.
 -   [x] **P3-01** Implement Android MediaStore video discovery/metadata
     bridge. --- Done (MediaStorePlugin.kt Kotlin MethodChannel bridge;
     MediaStoreBridgeImpl Dart impl; mediaStoreBridgeProvider; permissions
-    added to manifest; 11 unit tests)
+    added to manifest; 12 unit tests; permanentlyDenied-without-activity
+    limitation documented in KDoc)
 -   [x] **P3-02** Implement SAF folder selection and persistable access
     where supported. --- Done (SaffBridgePlugin.kt Kotlin MethodChannel
     bridge; SafBridgeImpl Dart impl; SafBridge interface; safBridgeProvider;
-    documentfile dependency; 10 unit tests)
+    documentfile + kotlinx-coroutines-android dependencies; listVideosInFolder
+    moved to Dispatchers.IO with depth/count guards; 14 unit tests)
 -   [ ] **P3-03** Implement local source adapter and capabilities. ---
     Todo
 -   [ ] **P3-04** Merge overlapping scan results without losing source

@@ -232,5 +232,19 @@ void main() {
       final status = await impl.requestPermission();
       expect(status, MediaStorePermissionStatus.denied);
     });
+
+    test(
+      'requestPermission() "partiallyGranted" -> MediaStorePermissionStatus.partiallyGranted',
+      () async {
+        setHandler((call) async {
+          if (call.method == 'requestPermission') return 'partiallyGranted';
+          return null;
+        });
+
+        final impl = MediaStoreBridgeImpl();
+        final status = await impl.requestPermission();
+        expect(status, MediaStorePermissionStatus.partiallyGranted);
+      },
+    );
   });
 }

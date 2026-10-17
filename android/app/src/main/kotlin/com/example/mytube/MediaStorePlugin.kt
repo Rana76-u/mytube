@@ -81,6 +81,17 @@ class MediaStorePlugin :
     // Permission helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * Returns the current permission status as one of:
+     * "granted", "partiallyGranted", "denied", "permanentlyDenied".
+     *
+     * Limitation: `permanentlyDenied` requires an attached Activity to call
+     * `shouldShowRequestPermissionRationale`. If this method is called before
+     * the activity attaches (e.g. during background wake), it cannot distinguish
+     * "denied" from "permanentlyDenied" and returns "denied" as a safe fallback.
+     * Callers should ensure this is invoked while a foreground Activity is
+     * attached (i.e. after [onAttachedToActivity]).
+     */
     private fun checkPermissionStatus(): String {
         val context = flutterPluginBinding.applicationContext
         val activity = activityBinding?.activity

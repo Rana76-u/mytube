@@ -139,6 +139,26 @@ void main() {
       );
     });
 
+    test('releasePersistedUri() PlatformException returns Err', () async {
+      setHandler((call) async {
+        if (call.method == 'releasePersistedUri') {
+          throw PlatformException(
+            code: 'ERROR',
+            message: 'Platform error releasing URI',
+          );
+        }
+        return null;
+      });
+
+      final impl = SafBridgeImpl();
+      final result = await impl.releasePersistedUri(
+        'content://com.android.externalstorage.documents/tree/primary%3AMovies',
+      );
+
+      expect(result.isErr, isTrue);
+      expect((result as Err<void>).error, isA<UnexpectedError>());
+    });
+
     // -----------------------------------------------------------------------
     // listVideosInFolder
     // -----------------------------------------------------------------------
@@ -208,6 +228,49 @@ void main() {
       },
     );
 
+    test(
+      'listVideosInFolder() LIST_FAILED PlatformException returns Err(UnexpectedError)',
+      () async {
+        setHandler((call) async {
+          if (call.method == 'listVideosInFolder') {
+            throw PlatformException(
+              code: 'LIST_FAILED',
+              message: 'Traversal error',
+            );
+          }
+          return null;
+        });
+
+        final impl = SafBridgeImpl();
+        final result = await impl.listVideosInFolder(
+          'content://com.android.externalstorage.documents/tree/primary%3AMovies',
+        );
+
+        expect(result.isErr, isTrue);
+        expect((result as Err<List<SafVideo>>).error, isA<UnexpectedError>());
+      },
+    );
+
+    test(
+      'listVideosInFolder() forwards URI argument to platform channel',
+      () async {
+        const folderUri =
+            'content://com.android.externalstorage.documents/tree/primary%3AMovies';
+        MethodCall? captured;
+        setHandler((call) async {
+          captured = call;
+          if (call.method == 'listVideosInFolder') return <dynamic>[];
+          return null;
+        });
+
+        final impl = SafBridgeImpl();
+        await impl.listVideosInFolder(folderUri);
+
+        expect(captured?.method, 'listVideosInFolder');
+        expect((captured?.arguments as Map)['uri'], folderUri);
+      },
+    );
+
     // -----------------------------------------------------------------------
     // checkFolderAccess
     // -----------------------------------------------------------------------
@@ -241,5 +304,25 @@ void main() {
       expect(result.isOk, isTrue);
       expect((result as Ok<bool>).value, isFalse);
     });
+
+    test(
+      'checkFolderAccess() forwards URI argument to platform channel',
+      () async {
+        const folderUri =
+            'content://com.android.externalstorage.documents/tree/primary%3AMovies';
+        MethodCall? captured;
+        setHandler((call) async {
+          captured = call;
+          if (call.method == 'checkFolderAccess') return true;
+          return null;
+        });
+
+        final impl = SafBridgeImpl();
+        await impl.checkFolderAccess(folderUri);
+
+        expect(captured?.method, 'checkFolderAccess');
+        expect((captured?.arguments as Map)['uri'], folderUri);
+      },
+    );
   });
 }
