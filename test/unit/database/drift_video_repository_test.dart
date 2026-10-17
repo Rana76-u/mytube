@@ -6,6 +6,7 @@ import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/repositories/drift_video_repository.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:drift/drift.dart' show Value;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,6 +141,51 @@ void main() {
       final r = await repo.deleteItem(VideoItemId('nobody'));
       expect(r, isA<Ok<void>>());
     });
+
+    // ── insertVideoItem idempotency (P3-07) ────────────────────────────────
+
+    test(
+      'insertVideoItem with duplicate id is a no-op for existing user fields',
+      () async {
+        const sameId = 'dup-repo-id';
+
+        // First insert via repository.
+        await repo.insertVideoItem(
+          const VideoItemInsert(
+            id: sameId,
+            title: 'First',
+            createdAt: _now,
+            updatedAt: _now,
+          ),
+        );
+
+        // Simulate the user having set favourite and watch progress.
+        await (db.update(
+          db.videoItems,
+        )..where((t) => t.id.equals(sameId))).write(
+          VideoItemsCompanion(
+            isFavourite: const Value(true),
+            watchProgressMs: const Value(99000),
+          ),
+        );
+
+        // Second insert with the same id and a different title must be ignored.
+        await repo.insertVideoItem(
+          const VideoItemInsert(
+            id: sameId,
+            title: 'Should Not Win',
+            createdAt: _now,
+            updatedAt: _now,
+          ),
+        );
+
+        final item = await repo.getItemById(VideoItemId(sameId));
+        final summary = (item as Ok<VideoItemSummary>).value;
+        expect(summary.title, equals('First'));
+        expect(summary.isFavourite, isTrue);
+        expect(summary.watchProgressMs, equals(99000));
+      },
+    );
   });
 
   // ── Riverpod provider wiring ─────────────────────────────────────────────

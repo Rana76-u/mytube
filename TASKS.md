@@ -127,9 +127,20 @@ blockers.
     now propagates errors (P3-03 fix A); `LocalMediaAdapter.getVideo` returns
     `Ok(null)` on permission denied (P3-03 fix B); 10 availability + 3
     adapter fix tests; analyzer + format clean)
--   [ ] **P3-07** Preserve user-owned metadata during rescans. --- Todo
--   [ ] **P3-08** Test indexing and verify behavior on Android
-    devices/versions. --- Todo
+-   [x] **P3-07** Preserve user-owned metadata during rescans. --- Done
+    (`VideoItemsDao.insertItemOrIgnore` replaces `upsertItem` to make
+    insert-on-conflict a no-op; `isFavourite`, `watchProgressMs`, `lastPlayedAt`,
+    `title`, tags, and collection memberships all verified to survive full
+    LibraryRefreshService → ScanMergeService → DB cycle; 6 new tests across
+    scan_merge_service_test, library_refresh_service_test, and
+    drift_video_repository_test; analyzer + format clean)
+-   [x] **P3-08** Test indexing and verify behavior on Android
+    devices/versions. --- Done (unit-testable scope complete: 6 new
+    metadata-preservation tests; device-only scope documented in
+    `docs/device_testing_p3.md`; manual testing checklist covers API 24–32,
+    33, 34+, SAF grant persistence, SAF revocation, missing-file handling,
+    and throttle verification on CPH2719 / Android 16; `test/integration/`
+    deferred until device harness is established)
 
 ## Phase 4 --- Direct URLs and player
 

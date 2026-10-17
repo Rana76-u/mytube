@@ -57,9 +57,11 @@ class VideoItemsDao extends DatabaseAccessor<AppDatabase>
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
-  /// Inserts or replaces a video item row.
-  Future<void> upsertItem(VideoItemsCompanion companion) =>
-      into(videoItems).insertOnConflictUpdate(companion);
+  /// Inserts a new video item row.  If a row with the same `id` already
+  /// exists, this is a no-op — user-owned fields (`title`, `isFavourite`,
+  /// `watchProgressMs`, `lastPlayedAt`) are never overwritten.
+  Future<void> insertItemOrIgnore(VideoItemsCompanion companion) =>
+      into(videoItems).insert(companion, mode: InsertMode.insertOrIgnore);
 
   /// Deletes the video item with [id].
   ///

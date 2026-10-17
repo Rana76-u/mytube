@@ -8,6 +8,7 @@ import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/scan_merge_service.dart';
 import 'package:mytube/sources/source_adapter.dart';
+import 'package:drift/drift.dart' show Value;
 
 // ---------------------------------------------------------------------------
 // Fake adapter
@@ -455,5 +456,60 @@ void main() {
 
       expect(onDoneCalled, isTrue);
     });
+
+    // 13. P3-07 — user metadata survives a full refresh cycle ----------------
+    test(
+      'user metadata survives a full LibraryRefreshService refresh cycle',
+      () async {
+        // Insert a VideoItem with user-owned fields set.
+        await db
+            .into(db.videoItems)
+            .insert(
+              db_lib.VideoItemsCompanion.insert(
+                id: 'v1',
+                title: 'My Video',
+                isFavourite: const Value(true),
+                watchProgressMs: const Value(30000),
+                createdAt: 1_700_000_000_000,
+                updatedAt: 1_700_000_000_000,
+              ),
+            );
+        // Insert a SourceLocation for it.
+        await db
+            .into(db.sourceLocations)
+            .insert(
+              db_lib.SourceLocationsCompanion.insert(
+                id: 'sl1',
+                videoItemId: 'v1',
+                providerType: ProviderType.localMediaStore.name,
+                sourceId: 'content://media/v1',
+                availability: const Value('available'),
+                createdAt: 1_700_000_000_000,
+                updatedAt: 1_700_000_000_000,
+              ),
+            );
+
+        // Configure the adapter to return the same URI.
+        final adapter = FakeVideoSourceAdapter(
+          sourceType: ProviderType.localMediaStore,
+          videosToReturn: [_video('content://media/v1')],
+        );
+        final service = LibraryRefreshService(
+          adapters: [adapter],
+          mergeService: mergeService,
+          preferences: const LibraryRefreshPreferences(),
+        );
+        addTearDown(service.dispose);
+
+        // Run a full refresh.
+        final result = await service.refresh(trigger: RefreshTrigger.manual);
+        expect(result, isA<Ok<LibraryRefreshResult>>());
+
+        // User-owned fields must be unchanged.
+        final item = await db.videoItemsDao.getItemById('v1');
+        expect(item?.isFavourite, isTrue);
+        expect(item?.watchProgressMs, equals(30000));
+      },
+    );
   });
 }
