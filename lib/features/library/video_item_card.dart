@@ -4,12 +4,28 @@ import 'package:mytube/domain/repositories/video_repository.dart';
 /// Card widget for a single video item in the library list/grid (P5-01).
 ///
 /// Displays the video title, duration (if available), and favorite indicator.
-/// Thumbnails will be added in Phase 7 (P7-01).
+/// When [onToggleFavourite]/[onManageTags] are supplied the favorite indicator
+/// becomes an interactive toggle and a tag-management button is added (P5-05,
+/// P5-06); otherwise the card degrades to the read-only display used by the
+/// grid tests. Thumbnails will be added in Phase 7 (P7-01).
 class VideoItemCard extends StatelessWidget {
-  const VideoItemCard({super.key, required this.item, required this.onTap});
+  const VideoItemCard({
+    super.key,
+    required this.item,
+    required this.onTap,
+    this.onToggleFavourite,
+    this.onManageTags,
+    this.trailing,
+  });
 
   final VideoItemSummary item;
   final VoidCallback onTap;
+  final VoidCallback? onToggleFavourite;
+  final VoidCallback? onManageTags;
+
+  /// Optional widget rendered at the far end of the card row (e.g. a remove
+  /// button on the collection detail screen, P5-07).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -68,17 +84,52 @@ class VideoItemCard extends StatelessWidget {
                           ),
                         ],
                         const Spacer(),
-                        if (item.isFavourite)
+                        if (onToggleFavourite != null)
+                          IconButton(
+                            key: ValueKey('favourite_${item.id.value}'),
+                            icon: Icon(
+                              item.isFavourite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                            ),
+                            color: item.isFavourite
+                                ? colorScheme.error
+                                : colorScheme.onSurfaceVariant,
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 36,
+                              minHeight: 36,
+                            ),
+                            tooltip: item.isFavourite
+                                ? 'Remove from favorites'
+                                : 'Add to favorites',
+                            onPressed: onToggleFavourite,
+                          )
+                        else if (item.isFavourite)
                           Icon(
                             Icons.favorite,
                             size: 16,
                             color: colorScheme.error,
+                          ),
+                        if (onManageTags != null)
+                          IconButton(
+                            key: ValueKey('tags_${item.id.value}'),
+                            icon: const Icon(Icons.label_outline),
+                            color: colorScheme.onSurfaceVariant,
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 36,
+                              minHeight: 36,
+                            ),
+                            tooltip: 'Manage tags',
+                            onPressed: onManageTags,
                           ),
                       ],
                     ),
                   ],
                 ),
               ),
+              ?trailing,
             ],
           ),
         ),

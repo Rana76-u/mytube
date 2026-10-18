@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 
 import 'daos/app_preferences_dao.dart';
+import 'daos/collections_dao.dart';
 import 'daos/source_locations_dao.dart';
 import 'daos/video_items_dao.dart';
 import 'tables/app_preferences_table.dart';
@@ -32,7 +33,7 @@ part 'app_database.g.dart';
     CollectionItems,
     AppPreferences,
   ],
-  daos: [VideoItemsDao, SourceLocationsDao, AppPreferencesDao],
+  daos: [VideoItemsDao, SourceLocationsDao, AppPreferencesDao, CollectionsDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());

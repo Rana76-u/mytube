@@ -242,18 +242,138 @@ blockers.
     empty state with helpful message; loading/error states via AsyncValueWidget;
     7 card widget tests, 4 screen widget tests; analyzer + format clean;
     NFR-003 satisfied via ListView.builder lazy instantiation)
--   [ ] **P5-02** Add title search. --- Todo
--   [ ] **P5-03** Add filters: source, duration, watched status,
-    favorites, tags. --- Todo
--   [ ] **P5-04** Add sorts: recently added, last played, duration,
-    random. --- Todo
--   [ ] **P5-05** Implement favorites. --- Todo
--   [ ] **P5-06** Implement tag creation and assignment. --- Todo
--   [ ] **P5-07** Implement custom collections and Saved screen. ---
-    Todo
--   [ ] **P5-08** Persist progress/last-played state. --- Todo
--   [ ] **P5-09** Verify removing library entries never deletes
-    originals. --- Todo
+-   [x] **P5-02** Add title search. --- Done (`VideoRepository.searchItems`
+    added with a `VideoItemsDao.searchByTitle` LIKE query — case-insensitive
+    substring match on title, newest-first ordering, SQL `%`/`_`/`\` wildcards
+    escaped so a typed wildcard is a literal match, and a blank query falls back
+    to the full library (LIB-003); `LibraryScreen` app-bar search toggles a
+    `TextField` bound to a query-driven `FutureProvider.family` that calls the
+    repository (no DB query in the widget), showing a distinct "No Matches"
+    empty state versus an empty library and restoring the full list on clear;
+    5 repository tests in `drift_video_repository_test.dart` (case-insensitive,
+    ordering, blank query, wildcard-escape, no-match) + 4 title-search widget
+    tests in `library_screen_test.dart` (open field, filter, no-results, close
+    restores) pass; test fakes updated for the new interface method; `dart
+    format` + `dart analyze` clean on all touched files; the 14 pre-existing
+    widget-test "Timer is still pending" failures in
+    `app_shell`/`app_theme`/`main_scaffold`/`video_surface` reproduce identically
+    on the clean `main` branch and are unrelated to this change)
+-   [x] **P5-03** Add filters: source, duration, watched status,
+    favorites, tags. --- Done (new `VideoFilter` + `LibraryQuery` value types
+    in the domain; `VideoRepository.queryItems(LibraryQuery)` and
+    `VideoItemsDao.query` run a single SQLite statement combining the LIB-003
+    title `LIKE` search with AND-composed filters — favourites-only, watched /
+    unwatched (`lastPlayedAt` null-ness), duration buckets
+    (short <10 min / medium 10-30 / long >30), source (correlated `EXISTS`
+    against `source_locations.provider_type`) and tags (correlated `EXISTS`
+    against `video_tags.tag_id`) (LIB-004); `getTags`/`allTags` expose the tag
+    list for the filter UI; `LibraryScreen` gained an app-bar filter button
+    opening a new `LibraryFilterSheet` (switch, choice/filter chips, Reset +
+    Apply) with a distinct "No Matches / Clear filters" state; 6 filter
+    repository tests (default, favourites, watched/unwatched, duration
+    buckets, source `EXISTS`, tag `EXISTS`, search+filter AND) + 4 filter
+    widget tests (open sheet, tag options render, favourites narrows list,
+    no-matches state) pass)
+-   [x] **P5-04** Add sorts: recently added, last played, duration,
+    random. --- Done (`LibrarySort` enum drives `ORDER BY` in
+    `VideoItemsDao.query` — `recentlyAdded` (createdAt DESC), `lastPlayed`
+    (lastPlayedAt DESC, never-played NULLs last), `duration` (durationMs DESC,
+    unknown last) and `random` via `OrderingTerm.random()` (LIB-005);
+    `LibraryScreen` app-bar `PopupMenuButton<LibrarySort>` exposes the four
+    options and re-runs the query on selection through the value-keyed
+    `LibraryQuery` family provider; 3 sort repository tests (duration,
+    last-played null handling, random returns every row once) + 2 sort widget
+    tests (menu shows four options, Duration reorders list) pass; `dart format`
+    + `dart analyze` clean on all touched files; full suite `+358 -14` — the
+    same 14 pre-existing "Timer is still pending" widget failures reproduce on
+    the clean `main` branch and are unrelated to this change)
+-   [x] **P5-05** Implement favorites. --- Done (`VideoItemCard` gained an
+    optional `onToggleFavourite` heart `IconButton` (keyed `favourite_<id>`,
+    filled `Icons.favorite` vs `Icons.favorite_border`) that keeps the prior
+    read-only icon when no callback is supplied; `LibraryScreen._toggleFavourite`
+    calls the existing `VideoRepository.setFavourite` then invalidates the whole
+    `_libraryItemsProvider` family so a favourites-only filter re-runs and an
+    un-favourited row drops out (LIB-002). Watched status remains derived from
+    `lastPlayedAt` (LIB-003) and already filterable via P5-03; quick access to
+    favourites uses the existing filter sheet's Favourites-only switch; 2 widget
+    tests (heart favourites a video → two filled hearts; un-favouriting under
+    the active favourites filter shows No Matches) pass; `dart format` +
+    `dart analyze` clean; full suite `+368 -14` — the same 14 pre-existing
+    "Timer is still pending" failures reproduce on clean `main` and are
+    unrelated to this change)
+-   [x] **P5-06** Implement tag creation and assignment. --- Done (new
+    `VideoRepository`/`VideoItemsDao` methods `ensureTag` (trimmed, lower-cased,
+    `insertOrIgnore` so re-adding is idempotent), `addTagToVideo`/`removeTagFromVideo`
+    (link-scoped — other videos keep the tag) and `getTagsForVideo` (inner-join
+    `tags`↔`videoTags`, name-ordered), each Result-wrapped in
+    `DriftVideoRepository`; `VideoItemCard` gained an optional `onManageTags`
+    label button (keyed `tags_<id>`) opening a new `ManageTagsSheet` that lists
+    assigned tags as deletable `InputChip`s, a New-tag `TextField`+Add, and
+    existing tags as assignable `FilterChip`s; created tags invalidate
+    `libraryTagsProvider` so the P5-03 tag filter is now populated end-to-end
+    (LIB-004/LIB-009); 6 repository tests (create/reuse/blank-reject ensureTag,
+    link+list, idempotent add, scoped remove) + 2 widget tests (tag button opens
+    the sheet; typing a name creates and assigns a lower-cased chip) pass;
+    `dart format` + `dart analyze` clean; full suite `+368 -14` — the same 14
+    pre-existing "Timer is still pending" failures reproduce on clean `main` and
+    are unrelated to this change)
+-   [x] **P5-07** Implement custom collections and Saved screen. ---
+    Done (NAV-004/LIB-002): the pre-existing `collections`/`collection_items`
+    tables (P2-03) are now driven by a new `CollectionsDao` (registered in
+    `@DriftDatabase`, `build_runner` re-run) providing newest-first counts
+    (`selectOnly`+`leftOuterJoin`+`groupBy`), manually-ordered items
+    (`innerJoin` on `sortOrder`/`addedAt`), idempotent add (next `sortOrder` via
+    `max()`, `insertOrIgnore`), scoped remove, rename and delete; `VideoRepository`
+    gained 8 collection methods (`getCollections`/`create`/`rename`/`delete`/
+    `getCollectionItems`/`addVideoToCollection`/`removeVideoFromCollection`/
+    `getCollectionIdsForVideo`) plus a `CollectionSummary` value type, all
+    Result-wrapped in `DriftVideoRepository` (blank names rejected); Saved
+    providers (`savedCollections`/`favouriteItems`/`collectionItems` family/
+    `allLibraryItems`/`videoCollectionIds`) back the rewritten `SavedScreen`
+    (Favorites tile + collection list + create-collection FAB), new
+    `FavoritesScreen`, `CollectionScreen` (add/remove/rename/delete via an
+    app-bar menu) and `AddVideosSheet`; `VideoItemCard` gained an optional
+    `trailing` slot for the remove button; deleting a collection only removes the
+    grouping/links — never the video item or original (AGENTS safe-delete);
+    11 repository tests + 9 widget tests (create/list/navigate, remove keeps
+    item, rename, empty states, favorites) pass; the 4 existing `VideoRepository`
+    test fakes were extended with the new collection methods;
+    `dart format` + `dart analyze lib test` clean; full
+    suite `+386 -14` — the same 14 pre-existing "Timer is still pending" failures
+    reproduce on clean `main` and are unrelated to this change)
+-   [x] **P5-08** Persist progress/last-played state. ---
+    Done (LIB-002): the `(watchProgressMs, lastPlayedAt)` pair is already
+    stored/read by `VideoItemsDao`/`DriftVideoRepository` (P2-04) and already
+    drives the watched filter (P5-03) and last-played sort (P5-04); a new
+    `WatchProgressService` (domain, no Flutter state) now owns *when* live
+    playback position reaches storage so the future player screen can forward
+    every tick without hammering SQLite — `reportPosition` saves on the first
+    tick per item (so even a brief watch marks the item played) then throttles
+    to one write per configurable window, `flush` force-persists the newest
+    pending position for pause/stop/lifecycle boundaries, `resumePosition`
+    returns the stored `Duration` (null at start/never-played), and `forget`
+    drops in-memory state; persistence is best-effort — a failed repository
+    write is `debugPrint`-logged, never thrown to playback; wired via
+    `watchProgressServiceProvider`; 6 unit tests against the real in-memory
+    `DriftVideoRepository` + injected clock (immediate first save, throttle
+    window, flush, null resume, forget, and a closed-DB best-effort path) pass;
+    `dart format` + `dart analyze` clean)
+-   [x] **P5-09** Verify removing library entries never deletes
+    originals. ---
+    Done (LIB-007/LIB-008, ARCHITECTURE §5): verified `deleteItem` is
+    metadata-only — the FK cascade (`onDelete: cascade` on
+    source_locations/video_tags/collection_items, `PRAGMA foreign_keys = ON` in
+    `AppDatabase.beforeOpen`) prunes the item's own child rows while a sibling
+    item keeps all of its links and the shared tag definition survives (no
+    over-deletion); a dedicated test indexes a real temp file as a local source
+    and asserts the original still exists on disk after `deleteItem`;
+    `SourceLocationsDao.deleteLocation` removing one duplicate source keeps the
+    logical item and its other location (LIB-008); deleting a missing id stays
+    an idempotent `Ok`; no new production code needed — the deletion path already
+    performs only SQL and never touches files; 4 verification tests pass;
+    `dart format` + `dart analyze` clean; full suite `+396 -14` — the same 14
+    pre-existing "Timer is still pending" failures reproduce on clean `main` and
+    are unrelated to these changes)
 
 ## Phase 6 --- Reels and Discover
 

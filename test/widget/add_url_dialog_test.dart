@@ -71,6 +71,79 @@ class _RecordingRepository implements VideoRepository {
   ) async => Result.ok(locationsToReturn);
 
   @override
+  Future<Result<List<VideoItemSummary>>> searchItems(String query) async =>
+      getAllItems();
+
+  @override
+  Future<Result<List<VideoItemSummary>>> queryItems(LibraryQuery query) async =>
+      getAllItems();
+
+  @override
+  Future<Result<List<LibraryTag>>> getTags() async => Result.ok(const []);
+
+  @override
+  Future<Result<List<CollectionSummary>>> getCollections() async =>
+      Result.ok(const []);
+
+  @override
+  Future<Result<CollectionSummary>> createCollection({
+    required String name,
+    String? description,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> renameCollection({
+    required String id,
+    required String name,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> deleteCollection(String id) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<Result<List<VideoItemSummary>>> getCollectionItems(
+    String collectionId,
+  ) async => Result.ok(const []);
+
+  @override
+  Future<Result<void>> addVideoToCollection({
+    required String collectionId,
+    required VideoItemId videoId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> removeVideoFromCollection({
+    required String collectionId,
+    required VideoItemId videoId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<Set<String>>> getCollectionIdsForVideo(
+    VideoItemId videoId,
+  ) async => Result.ok(const {});
+
+  @override
+  Future<Result<List<LibraryTag>>> getTagsForVideo(VideoItemId id) async =>
+      Result.ok(const []);
+
+  @override
+  Future<Result<LibraryTag>> ensureTag(String name) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<Result<void>> addTagToVideo({
+    required VideoItemId id,
+    required String tagId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> removeTagFromVideo({
+    required VideoItemId id,
+    required String tagId,
+  }) async => throw UnimplementedError();
+
+  @override
   Future<Result<String>> insertVideoItem(VideoItemInsert item) async {
     insertedItems.add(item);
     return Result.ok(item.id);
