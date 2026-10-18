@@ -1,0 +1,1 @@
+Flutter app that indexes local and remote video sources into a Drift-backed library, exposes them through Android MethodChannel plugins, and plays them via an app-owned playback service.

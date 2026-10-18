@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: tests
-title: Flutter Test Suite (Unit & Widget Tests)
+title: MyTube Flutter Test Suite
 scope:
     - test/
 source_files: []

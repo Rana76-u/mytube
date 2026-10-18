@@ -1,0 +1,1 @@
+Flutter Android host app that embeds the Flutter engine and exposes system video browsing through two custom MethodChannel plugins: MediaStore queries and Storage Access Framework tree traversal.

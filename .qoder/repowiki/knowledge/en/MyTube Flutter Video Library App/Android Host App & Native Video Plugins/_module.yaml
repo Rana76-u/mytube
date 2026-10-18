@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: platform_integration
-title: Android Platform Integration Layer
+title: Android Host App & Native Video Plugins
 scope:
     - android/
 source_files: []

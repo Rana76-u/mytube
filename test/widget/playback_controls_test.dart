@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/player/playback_controls.dart';
+import 'package:mytube/features/player/video_display_mode.dart';
+import 'package:mytube/features/player/video_display_mode_notifier.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/playback/playback_provider.dart';
@@ -77,9 +79,17 @@ class FakePlayerHandle implements PlayerHandle {
   Future<void> setSpeed(double speed) async => speeds.add(speed);
 
   @override
+  Widget? buildVideo() => const SizedBox(width: 160, height: 90);
+
+  @override
   Future<void> dispose() async {
+    // Do NOT await close(): the Future a broadcast StreamController.close()
+    // returns never completes inside testWidgets' fake-async zone, so any
+    // command path that disposes a handle (a load error, then Retry — P4-07)
+    // would deadlock the test body. Releasing the controller is fire-and-forget
+    // here; the assertion value is unaffected.
     if (!changesController.isClosed) {
-      await changesController.close();
+      unawaited(changesController.close());
     }
   }
 }
@@ -231,7 +241,11 @@ void main() {
       f.handle.initializeError = StateError('boom');
       await _pump(tester, f);
 
-      await f.controller.play(_source());
+      // The load-error path tears down a live engine handle; that awaits the
+      // subscription cancel, whose future only completes on the real event
+      // loop — drive it through runAsync so testWidgets' fake-async zone does
+      // not deadlock (the same work the real app does on a genuine error).
+      await tester.runAsync(() => f.controller.play(_source()));
       await tester.pump();
 
       expect(find.text('Could not load this video.'), findsOneWidget);
@@ -390,6 +404,77 @@ void main() {
 
       expect(f.handle.speeds.last, 1.5);
       expect(find.text('1.5×'), findsOneWidget);
+    });
+  });
+
+  group('PlaybackControls display mode (P4-06)', () {
+    testWidgets('the menu updates the app-wide display-mode notifier', (
+      tester,
+    ) async {
+      final f = _fixture();
+      await _pump(tester, f);
+      expect(f.container.read(videoDisplayModeProvider), VideoDisplayMode.fit);
+
+      await tester.tap(find.byIcon(Icons.fit_screen));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stretch'));
+      await tester.pumpAndSettle();
+
+      expect(
+        f.container.read(videoDisplayModeProvider),
+        VideoDisplayMode.stretch,
+      );
+      // The chosen mode is reflected on the control label.
+      expect(find.text('Stretch'), findsOneWidget);
+    });
+  });
+
+  group('PlaybackControls retry (P4-07)', () {
+    testWidgets('a retryable error shows Retry and re-attempts playback', (
+      tester,
+    ) async {
+      final f = _fixture();
+      f.handle.initializeError = StateError('boom');
+      await _pump(tester, f);
+      // See the load-error note above: the error/retry teardown must run on the
+      // real event loop, so the initial failing play() and the retry go through
+      // runAsync.
+      await tester.runAsync(() => f.controller.play(_source()));
+      await tester.pump();
+
+      expect(find.text('Could not load this video.'), findsOneWidget);
+      expect(find.byKey(const Key('playback_retry_button')), findsOneWidget);
+
+      // The source recovers; Retry re-attempts playback of the same source.
+      // (The Retry button's onPressed calls exactly this controller.retry().)
+      f.handle
+        ..initializeError = null
+        ..snapshot = _snapshot(
+          playing: true,
+          position: const Duration(seconds: 1),
+        );
+      final before = f.handle.playCalls;
+      await tester.runAsync(() => f.controller.retry());
+      await tester.pump();
+
+      expect(f.handle.playCalls, before + 1);
+      expect(f.controller.state.value.status, PlaybackStatus.playing);
+    });
+
+    testWidgets('an unsupported-source error offers no Retry', (tester) async {
+      final f = _fixture();
+      await _pump(tester, f);
+      await f.controller.play(
+        PlayableSource(
+          uri: Uri.parse('rtsp://example.com/live'),
+          sourceId: 'rtsp://example.com/live',
+          sourceType: ProviderType.directUrl,
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('This source type cannot be played.'), findsOneWidget);
+      expect(find.byKey(const Key('playback_retry_button')), findsNothing);
     });
   });
 }

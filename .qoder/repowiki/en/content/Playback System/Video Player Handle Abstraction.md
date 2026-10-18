@@ -11,6 +11,14 @@
 - [video_player_handle_test.dart](file://test/unit/playback/video_player_handle_test.dart)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated implementation details to reflect fully realized VideoPlayerHandle with complete scheme routing
+- Enhanced platform-specific optimization documentation for content://, file://, and http/https URIs
+- Expanded error handling coverage based on comprehensive test suite
+- Added detailed lifecycle management documentation
+- Updated troubleshooting guide with specific error scenarios and solutions
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -25,21 +33,27 @@
 ## Introduction
 This document explains the `VideoPlayerHandle` abstraction that wraps the underlying video player engine (`video_player`, which uses Media3 ExoPlayer on Android). The abstraction provides a consistent interface for playback commands and state, isolating the rest of the application from engine-specific details. It also documents lifecycle management, resource allocation and cleanup, platform-specific scheme routing, performance considerations, extension points for new engines, debugging techniques, and troubleshooting guidance.
 
+The implementation is fully realized with comprehensive scheme routing supporting `content://`, `file://`, and `http/https` protocols, robust error handling, and complete lifecycle management through idempotent disposal mechanisms.
+
 ## Project Structure
 The video playback layer is organized around a small set of focused files:
 - `playback/player_handle.dart`: Defines the engine-agnostic `PlayerHandle` interface, `PlayerSnapshot`, and source classification helpers.
-- `playback/video_player_handle.dart`: Implements `PlayerHandle` using the official `video_player` package.
+- `playback/video_player_handle.dart`: Implements `PlayerHandle` using the official `video_player` package with full scheme routing.
 - `playback/playback_controller.dart`: Declares the app-facing `PlaybackController` API and `PlaybackState`.
 - `playback/app_playback_controller.dart`: Owns the playback state machine and coordinates with a `PlayerHandle`.
 - `sources/source_adapter.dart`: Defines `PlayableSource`, the ephemeral playable URI/metadata passed to the handle.
 - `pubspec.yaml`: Declares the `video_player` dependency and test-time platform interface used by tests.
-- `test/unit/playback/video_player_handle_test.dart`: Validates scheme routing, snapshot mapping, command forwarding, and lifecycle behavior.
+- `test/unit/playback/video_player_handle_test.dart`: Comprehensive test suite validating scheme routing, snapshot mapping, command forwarding, and lifecycle behavior.
 
 ```mermaid
 graph TB
 UI["UI Layer"] --> Controller["AppPlaybackController"]
 Controller --> HandleInterface["PlayerHandle (interface)"]
 HandleInterface --> VideoHandle["VideoPlayerHandle"]
+VideoHandle --> SchemeRouter["Scheme Router"]
+SchemeRouter --> ContentURI["content:// → contentUri()"]
+SchemeRouter --> FileURI["file:// → file()"]
+SchemeRouter --> NetworkURI["http/https → networkUrl()"]
 VideoHandle --> Engine["video_player / ExoPlayer"]
 Controller --> Source["PlayableSource"]
 ```
@@ -50,7 +64,7 @@ Controller --> Source["PlayableSource"]
 - [player_handle.dart:77-109](file://lib/playback/player_handle.dart#L77-L109)
 
 **Section sources**
-- [video_player_handle.dart:1-109](file://lib/playback/video_player_handle.dart#L1-L109)
+- [video_player_handle.dart:1-110](file://lib/playback/video_player_handle.dart#L1-L110)
 - [player_handle.dart:1-115](file://lib/playback/player_handle.dart#L1-L115)
 - [app_playback_controller.dart:1-422](file://lib/playback/app_playback_controller.dart#L1-L422)
 - [playback_controller.dart:1-150](file://lib/playback/playback_controller.dart#L1-L150)
@@ -72,7 +86,7 @@ Key responsibilities:
 - [player_handle.dart:3-34](file://lib/playback/player_handle.dart#L3-L34)
 - [player_handle.dart:36-75](file://lib/playback/player_handle.dart#L36-L75)
 - [player_handle.dart:77-115](file://lib/playback/player_handle.dart#L77-L115)
-- [video_player_handle.dart:19-109](file://lib/playback/video_player_handle.dart#L19-L109)
+- [video_player_handle.dart:19-110](file://lib/playback/video_player_handle.dart#L19-L110)
 - [app_playback_controller.dart:8-27](file://lib/playback/app_playback_controller.dart#L8-L27)
 
 ## Architecture Overview
@@ -155,7 +169,7 @@ VideoPlayerHandle --> PlayerSnapshot : "produces"
   - `content://` → `VideoPlayerController.contentUri`
   - `file://` → `VideoPlayerController.file`
   - `http(s)://` → `VideoPlayerController.networkUrl`
-  - Unsupported schemes throw early.
+  - Unsupported schemes throw early with descriptive error messages.
 - Attaches a listener before initialization so the first state changes are observable through `changes`.
 - Maps engine values to `PlayerSnapshot`, including readiness, playing/buffering/completed flags, position/duration, speed, volume, and raw error text.
 - Forwards commands directly to the controller.
@@ -168,7 +182,7 @@ Classify --> Scheme{"Scheme?"}
 Scheme --> |content| Content["VideoPlayerController.contentUri(uri)"]
 Scheme --> |file| File["VideoPlayerController.file(File.fromUri(uri))"]
 Scheme --> |http/https| Network["VideoPlayerController.networkUrl(uri)"]
-Scheme --> |unsupported| Throw["Throw StateError"]
+Scheme --> |unsupported| Throw["Throw StateError with scheme details"]
 Content --> Attach["Attach listener to controller"]
 File --> Attach
 Network --> Attach
@@ -187,8 +201,8 @@ Attach --> Ready(["Handle ready"])
 ### Lifecycle and Resource Management
 Lifecycle ownership:
 - `AppPlaybackController.play`:
-  - Rejects unsupported schemes early.
-  - Tears down previous handle.
+  - Rejects unsupported schemes early with user-friendly error messages.
+  - Tears down previous handle gracefully.
   - Creates a new handle via injected factory.
   - Subscribes to `handle.changes`.
   - Initializes the handle, applies speed/volume preferences, then plays.
@@ -237,7 +251,7 @@ Ctrl->>Ctrl : reduce(snapshot) -> state
 - [video_player_handle.dart:95-104](file://lib/playback/video_player_handle.dart#L95-L104)
 
 ### Snapshot Mapping and Error Handling
-`VideoPlayerHandle.snapshot` reads the engine’s value and produces a `PlayerSnapshot`. Errors from the engine surface as `errorText` in the snapshot. `AppPlaybackController._reduce` converts snapshots to `PlaybackState`, replacing raw engine errors with user-safe messages and preserving position/duration where applicable.
+`VideoPlayerHandle.snapshot` reads the engine's value and produces a `PlayerSnapshot`. Errors from the engine surface as `errorText` in the snapshot. `AppPlaybackController._reduce` converts snapshots to `PlaybackState`, replacing raw engine errors with user-safe messages and preserving position/duration where applicable.
 
 ```mermaid
 flowchart TD
@@ -264,11 +278,11 @@ Playing --> |No| Pause["PlaybackStatus.paused"]
 - [app_playback_controller.dart:145-205](file://lib/playback/app_playback_controller.dart#L145-L205)
 
 ### Platform-Specific Optimizations
-- Android content URIs (`content://media/...` and SAF document URIs) are routed to the engine’s content resolver path, enabling efficient access to MediaStore and SAF-backed media without copying data.
-- Local files use the engine’s file-based constructor, optimized for direct filesystem access.
-- Network streams use the engine’s network URL constructor, leveraging platform networking stacks.
+- Android content URIs (`content://media/...` and SAF document URIs) are routed to the engine's content resolver path, enabling efficient access to MediaStore and SAF-backed media without copying data.
+- Local files use the engine's file-based constructor, optimized for direct filesystem access.
+- Network streams use the engine's network URL constructor, leveraging platform networking stacks.
 
-These choices minimize overhead and leverage platform capabilities exposed by the underlying engine.
+These choices minimize overhead and leverage platform capabilities exposed by the underlying engine. The implementation ensures that each URI scheme is handled by the most appropriate engine constructor for optimal performance.
 
 **Section sources**
 - [video_player_handle.dart:22-30](file://lib/playback/video_player_handle.dart#L22-L30)
@@ -287,7 +301,7 @@ Guidelines:
 
 Example extension outline:
 - Create `CustomPlayerHandle` implementing `PlayerHandle`.
-- In `CustomPlayerHandle`, translate `PlayableSource.uri` to your engine’s data source type.
+- In `CustomPlayerHandle`, translate `PlayableSource.uri` to your engine's data source type.
 - Expose `customHandleFactory(source)` returning your handle.
 - Wire `customHandleFactory` into `AppPlaybackController.handleFactory`.
 
@@ -310,14 +324,14 @@ ctrl --> src
 - [pubspec.yaml:9-18](file://pubspec.yaml#L9-L18)
 - [source_adapter.dart:119-137](file://lib/sources/source_adapter.dart#L119-L137)
 - [player_handle.dart:1-115](file://lib/playback/player_handle.dart#L1-L115)
-- [video_player_handle.dart:1-109](file://lib/playback/video_player_handle.dart#L1-L109)
+- [video_player_handle.dart:1-110](file://lib/playback/video_player_handle.dart#L1-L110)
 - [app_playback_controller.dart:1-422](file://lib/playback/app_playback_controller.dart#L1-L422)
 
 **Section sources**
 - [pubspec.yaml:9-18](file://pubspec.yaml#L9-L18)
 - [source_adapter.dart:119-137](file://lib/sources/source_adapter.dart#L119-L137)
 - [player_handle.dart:1-115](file://lib/playback/player_handle.dart#L1-L115)
-- [video_player_handle.dart:1-109](file://lib/playback/video_player_handle.dart#L1-L109)
+- [video_player_handle.dart:1-110](file://lib/playback/video_player_handle.dart#L1-L110)
 - [app_playback_controller.dart:1-422](file://lib/playback/app_playback_controller.dart#L1-L422)
 
 ## Performance Considerations
@@ -327,6 +341,7 @@ ctrl --> src
 - Debounce UI updates: while the handle emits frequent changes, UI should coalesce updates if needed.
 - Speed and volume: apply preferences once after initialization to avoid redundant engine calls.
 - Generation-based stale handling: ensures rapid successive loads do not race or leak resources.
+- Efficient scheme routing: pre-classify URIs to avoid repeated scheme parsing.
 
 [No sources needed since this section provides general guidance]
 
@@ -335,21 +350,30 @@ Common issues and diagnostics:
 - Unsupported scheme errors:
   - Cause: Passing URIs with schemes like `rtsp` or `ftp`.
   - Resolution: Validate schemes upstream using `playbackKindFor`; reject unsupported schemes before creating a handle.
+  - Symptoms: `StateError` thrown during handle construction with scheme details.
 - Engine initialization failures:
   - Symptoms: `initialize()` throws; snapshot contains `errorText`.
   - Resolution: Inspect `PlayerSnapshot.errorText` for diagnostic detail; wrap in user-safe messages in the controller.
+  - Common causes: Invalid URIs, permission issues, unsupported codecs.
 - No state updates:
   - Check that the handle attached its listener before initialization and that `changes` is being listened to.
+  - Verify that the engine is emitting events through the platform interface.
 - Resource leaks:
   - Ensure `dispose()` is called exactly once per handle; verify idempotency.
+  - Check that stream subscriptions are properly cancelled.
 - Seeking disabled:
   - `canSeek` is derived from source metadata; non-seekable sources will ignore seek commands.
+  - Verify that the source adapter correctly reports seeking capabilities.
+- Performance issues:
+  - Monitor memory usage when switching between different URI schemes.
+  - Check for excessive snapshot creation during rapid state changes.
 
 Verification via tests:
 - Scheme routing tests confirm correct constructor selection and rejection of unsupported schemes.
 - Snapshot mapping tests verify buffering, playing, completed, and error states.
 - Command forwarding tests assert that play/pause/seek/volume/speed reach the platform layer.
 - Lifecycle tests ensure the `changes` stream closes and the engine is disposed exactly once.
+- Error handling tests validate that platform exceptions are properly surfaced and handled.
 
 **Section sources**
 - [video_player_handle_test.dart:117-152](file://test/unit/playback/video_player_handle_test.dart#L117-L152)
@@ -358,4 +382,8 @@ Verification via tests:
 - [video_player_handle_test.dart:347-424](file://test/unit/playback/video_player_handle_test.dart#L347-L424)
 
 ## Conclusion
-`VideoPlayerHandle` cleanly abstracts the underlying video player engine behind a stable interface. It centralizes scheme routing, state mapping, and resource management while keeping the rest of the application engine-agnostic. `AppPlaybackController` adds robust lifecycle control, preference carryover, and safe error handling. With this design, adding new engines requires only implementing `PlayerHandle` and injecting a factory, while existing UI and domain code remain unchanged. Proper testing and careful attention to lifecycle and scheme validation ensure reliable playback across platforms.
+`VideoPlayerHandle` cleanly abstracts the underlying video player engine behind a stable interface. It centralizes scheme routing, state mapping, and resource management while keeping the rest of the application engine-agnostic. The implementation is fully realized with comprehensive support for `content://`, `file://`, and `http/https` URI schemes, robust error handling, and complete lifecycle management.
+
+`AppPlaybackController` adds robust lifecycle control, preference carryover, and safe error handling. With this design, adding new engines requires only implementing `PlayerHandle` and injecting a factory, while existing UI and domain code remain unchanged. Proper testing and careful attention to lifecycle and scheme validation ensure reliable playback across platforms.
+
+The abstraction successfully isolates engine-specific details while providing a clean, testable interface for video playback functionality. The comprehensive test suite validates all critical paths including scheme routing, error handling, and resource management, ensuring the implementation meets production requirements.

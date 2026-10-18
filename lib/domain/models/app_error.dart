@@ -56,6 +56,19 @@ final class NotFoundError extends AppError {
   });
 }
 
+/// A user-entered URL failed syntax or scheme validation (P4-01, URL-002).
+///
+/// Only `http`/`https` URLs with a host are accepted for direct entry;
+/// anything else (ftp, rtsp, bare text, scheme-less input) is rejected before
+/// any network work so the mistake is reported immediately.
+final class InvalidUrlError extends AppError {
+  const InvalidUrlError({
+    super.userMessage =
+        'Enter a direct video link that starts with http:// or https://.',
+    required super.diagnosticMessage,
+  });
+}
+
 /// The source codec, container, or protocol is not supported.
 final class UnsupportedFormatError extends AppError {
   const UnsupportedFormatError({

@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-10-17T19:23:54Z"
+exported_at: "2026-10-18T03:47:32Z"
 modules:
     "":
-        dir_name: MyTube Flutter Video Hub
-        title: MyTube Flutter Video Hub
+        dir_name: MyTube Flutter Video Library App
+        title: MyTube Flutter Video Library App
         scope:
             - README.md
             - ARCHITECTURE.md
@@ -27,8 +27,8 @@ modules:
         depends_on: []
         related_to: []
     platform_integration:
-        dir_name: Android Platform Integration Layer
-        title: Android Platform Integration Layer
+        dir_name: Android Host App & Native Video Plugins
+        title: Android Host App & Native Video Plugins
         scope:
             - android/
         source_files: []
@@ -37,8 +37,8 @@ modules:
         related_to:
             - path: tests
     tests:
-        dir_name: Flutter Test Suite (Unit & Widget Tests)
-        title: Flutter Test Suite (Unit & Widget Tests)
+        dir_name: MyTube Flutter Test Suite
+        title: MyTube Flutter Test Suite
         scope:
             - test/
         source_files: []

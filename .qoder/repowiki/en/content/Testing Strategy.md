@@ -11,11 +11,24 @@
 - [media_store_bridge_impl_test.dart](file://test/unit/platform/media_store_bridge_impl_test.dart)
 - [local_media_adapter_test.dart](file://test/unit/sources/local_media_adapter_test.dart)
 - [app_playback_controller_test.dart](file://test/unit/playback/app_playback_controller_test.dart)
+- [video_player_handle_test.dart](file://test/unit/playback/video_player_handle_test.dart)
+- [library_screen_test.dart](file://test/widget/library_screen_test.dart)
+- [playback_controls_test.dart](file://test/widget/playback_controls_test.dart)
+- [video_item_card_test.dart](file://test/widget/video_item_card_test.dart)
 - [main_scaffold_test.dart](file://test/widget/main_scaffold_test.dart)
 - [state_widgets_test.dart](file://test/widget/state_widgets_test.dart)
 - [database_provider.dart](file://lib/data/database/database_provider.dart)
 - [repository_providers.dart](file://lib/data/repositories/repository_providers.dart)
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Added comprehensive coverage of playback controller unit tests (624 lines) demonstrating advanced testing techniques with fake player handles
+- Added video player handle unit tests (426 lines) showing platform abstraction testing patterns
+- Added widget tests for library screen (321 lines) with fake repository implementations
+- Added widget tests for playback controls (396 lines) covering UI interactions and state management
+- Added widget tests for video item cards (162 lines) validating display logic and user interactions
+- Enhanced testing patterns section with new examples from playback and widget test suites
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -33,11 +46,11 @@
 This document explains the testing strategy for MyTube, a Flutter application focused on local Android video library management and playback. The codebase uses a layered architecture with domain logic, Drift-backed data access, platform bridges for Android Media Store and SAF, Riverpod state management, and a video player abstraction.
 
 The testing approach follows a clear pyramid:
-- Unit tests validate domain logic, database operations, source adapters, platform bridge implementations, and playback controllers.
-- Widget tests validate UI components, navigation behavior, and state-driven rendering.
+- Unit tests validate domain logic, database operations, source adapters, platform bridge implementations, playback controllers, and video player handles.
+- Widget tests validate UI components, navigation behavior, state-driven rendering, and user interactions.
 - Integration testing is intentionally deferred until a device test harness is available; manual device checks cover scenarios that cannot be automated with in-memory databases and fake platform bridges.
 
-The project’s package manifest declares `flutter_test` as a development dependency, along with Drift tooling and the video player platform interface used by tests. The README is minimal and does not define additional testing conventions, so this document derives its guidance directly from the existing test files and production providers.
+The project's package manifest declares `flutter_test` as a development dependency, along with Drift tooling and the video player platform interface used by tests. The README is minimal and does not define additional testing conventions, so this document derives its guidance directly from the existing test files and production providers.
 
 **Section sources**
 - [pubspec.yaml:19-25](file://pubspec.yaml#L19-L25)
@@ -47,7 +60,7 @@ The project’s package manifest declares `flutter_test` as a development depend
 ## Project Structure
 The test directory is organized by scope rather than by feature:
 - `test/unit/`: Pure Dart unit tests grouped under `database`, `domain`, `platform`, `playback`, and `sources`.
-- `test/widget/`: Flutter widget tests for app shell, theme, scaffold navigation, and shared state widgets.
+- `test/widget/`: Flutter widget tests for app shell, theme, scaffold navigation, shared state widgets, library screen, playback controls, and video item cards.
 - There is no `test/integration/` directory yet; integration testing is deferred per project documentation.
 
 ```mermaid
@@ -63,21 +76,30 @@ Widget --> Shell["app_shell_test.dart"]
 Widget --> Theme["app_theme_test.dart"]
 Widget --> Scaffold["main_scaffold_test.dart"]
 Widget --> StateWidgets["state_widgets_test.dart"]
+Widget --> Library["library_screen_test.dart"]
+Widget --> Controls["playback_controls_test.dart"]
+Widget --> Cards["video_item_card_test.dart"]
 ```
 
 **Diagram sources**
 - [app_database_test.dart:1-37](file://test/unit/database/app_database_test.dart#L1-L37)
 - [main_scaffold_test.dart:1-123](file://test/widget/main_scaffold_test.dart#L1-L123)
 - [state_widgets_test.dart:1-289](file://test/widget/state_widgets_test.dart#L1-L289)
+- [library_screen_test.dart:1-321](file://test/widget/library_screen_test.dart#L1-L321)
+- [playback_controls_test.dart:1-396](file://test/widget/playback_controls_test.dart#L1-L396)
+- [video_item_card_test.dart:1-162](file://test/widget/video_item_card_test.dart#L1-L162)
 
 **Section sources**
 - [app_database_test.dart:1-37](file://test/unit/database/app_database_test.dart#L1-L37)
 - [main_scaffold_test.dart:1-123](file://test/widget/main_scaffold_test.dart#L1-L123)
 - [state_widgets_test.dart:1-289](file://test/widget/state_widgets_test.dart#L1-L289)
+- [library_screen_test.dart:1-321](file://test/widget/library_screen_test.dart#L1-L321)
+- [playback_controls_test.dart:1-396](file://test/widget/playback_controls_test.dart#L1-L396)
+- [video_item_card_test.dart:1-162](file://test/widget/video_item_card_test.dart#L1-L162)
 - [device_testing_p3.md:101-107](file://docs/device_testing_p3.md#L101-L107)
 
 ## Core Components
-MyTube’s test suite covers several core areas:
+MyTube's test suite covers several core areas with comprehensive coverage:
 
 | Area | Purpose | Representative Tests |
 |---|---|---|
@@ -86,6 +108,10 @@ MyTube’s test suite covers several core areas:
 | Platform Bridges | Validate MethodChannel communication, permission status mapping, and error handling for Android integrations. | `media_store_bridge_impl_test.dart`, `saf_bridge_impl_test.dart` |
 | Source Adapters | Validate local media listing, deduplication, permission handling, availability checks, and playback resolution. | `local_media_adapter_test.dart` |
 | Playback Controller | Validate engine lifecycle, state transitions, command idempotency, stale load handling, and Riverpod provider disposal. | `app_playback_controller_test.dart`, `video_player_handle_test.dart` |
+| Video Player Handle | Test platform abstraction layer, scheme routing, snapshot mapping, and event handling. | `video_player_handle_test.dart` |
+| Library Screen | Validate empty states, video list rendering, error handling, and search functionality. | `library_screen_test.dart` |
+| Playback Controls | Test UI interactions, transport controls, seeking, volume/speed adjustments, and state-driven rendering. | `playback_controls_test.dart` |
+| Video Item Cards | Validate title display, duration formatting, favorite icons, and tap interactions. | `video_item_card_test.dart` |
 | Widgets | Validate navigation destinations, default tab behavior, IndexedStack behavior, and shared UI state widgets. | `main_scaffold_test.dart`, `state_widgets_test.dart`, `app_shell_test.dart`, `app_theme_test.dart` |
 
 Key patterns observed:
@@ -93,6 +119,7 @@ Key patterns observed:
 - Constructor injection isolates dependencies such as platform bridges and repositories.
 - Riverpod overrides are used to inject in-memory databases and fake player handles.
 - `TestDefaultBinaryMessengerBinding` mocks platform channels without requiring a real device.
+- Fake repositories implement full interfaces for widget testing scenarios.
 
 **Section sources**
 - [app_database_test.dart:1-37](file://test/unit/database/app_database_test.dart#L1-L37)
@@ -100,7 +127,11 @@ Key patterns observed:
 - [availability_check_service_test.dart:1-469](file://test/unit/domain/availability_check_service_test.dart#L1-L469)
 - [media_store_bridge_impl_test.dart:1-251](file://test/unit/platform/media_store_bridge_impl_test.dart#L1-L251)
 - [local_media_adapter_test.dart:1-426](file://test/unit/sources/local_media_adapter_test.dart#L1-L426)
-- [app_playback_controller_test.dart:1-568](file://test/unit/playback/app_playback_controller_test.dart#L1-L568)
+- [app_playback_controller_test.dart:1-624](file://test/unit/playback/app_playback_controller_test.dart#L1-L624)
+- [video_player_handle_test.dart:1-426](file://test/unit/playback/video_player_handle_test.dart#L1-L426)
+- [library_screen_test.dart:1-321](file://test/widget/library_screen_test.dart#L1-L321)
+- [playback_controls_test.dart:1-396](file://test/widget/playback_controls_test.dart#L1-L396)
+- [video_item_card_test.dart:1-162](file://test/widget/video_item_card_test.dart#L1-L162)
 - [main_scaffold_test.dart:1-123](file://test/widget/main_scaffold_test.dart#L1-L123)
 - [state_widgets_test.dart:1-289](file://test/widget/state_widgets_test.dart#L1-L289)
 
@@ -138,7 +169,10 @@ This diagram shows how unit tests exercise domain services, repositories, platfo
 **Diagram sources**
 - [availability_check_service_test.dart:1-469](file://test/unit/domain/availability_check_service_test.dart#L1-L469)
 - [media_store_bridge_impl_test.dart:1-251](file://test/unit/platform/media_store_bridge_impl_test.dart#L1-L251)
-- [app_playback_controller_test.dart:1-568](file://test/unit/playback/app_playback_controller_test.dart#L1-L568)
+- [app_playback_controller_test.dart:1-624](file://test/unit/playback/app_playback_controller_test.dart#L1-L624)
+- [video_player_handle_test.dart:1-426](file://test/unit/playback/video_player_handle_test.dart#L1-L426)
+- [library_screen_test.dart:1-321](file://test/widget/library_screen_test.dart#L1-L321)
+- [playback_controls_test.dart:1-396](file://test/widget/playback_controls_test.dart#L1-L396)
 - [main_scaffold_test.dart:1-123](file://test/widget/main_scaffold_test.dart#L1-L123)
 
 ## Detailed Component Analysis
@@ -314,11 +348,58 @@ AppPlaybackController --> FakePlayerHandle : "uses via handleFactory"
 
 **Diagram sources**
 - [app_playback_controller_test.dart:13-96](file://test/unit/playback/app_playback_controller_test.dart#L13-L96)
-- [app_playback_controller_test.dart:129-568](file://test/unit/playback/app_playback_controller_test.dart#L129-L568)
+- [app_playback_controller_test.dart:129-624](file://test/unit/playback/app_playback_controller_test.dart#L129-L624)
 
 **Section sources**
 - [app_playback_controller_test.dart:13-96](file://test/unit/playback/app_playback_controller_test.dart#L13-L96)
-- [app_playback_controller_test.dart:129-568](file://test/unit/playback/app_playback_controller_test.dart#L129-L568)
+- [app_playback_controller_test.dart:129-624](file://test/unit/playback/app_playback_controller_test.dart#L129-L624)
+
+#### Video Player Handle Testing
+Video player handle tests demonstrate platform abstraction testing patterns:
+- A manual `FakeVideoPlayerPlatform` implements `VideoPlayerPlatform` without external mocking libraries.
+- Tests verify scheme routing for content://, https://, and file:// URIs.
+- Snapshot mapping validates initialization, buffering, playing state, and completion events.
+- Command forwarding and lifecycle management are thoroughly tested.
+- Event stream emission and disposal behavior are validated.
+
+```mermaid
+classDiagram
+class FakeVideoPlayerPlatform {
++Map~int, DataSource~ created
++int[] disposed
++Map~int, StreamController~VideoEvent~~ events
++createWithOptions(options) int?
++dispose(playerId) void
++videoEventsFor(playerId) Stream
++play(playerId) void
++pause(playerId) void
++seekTo(playerId, position) void
++setVolume(playerId, volume) void
++setPlaybackSpeed(playerId, speed) void
++emit(playerId, event) void
++emitError(playerId, error) void
+}
+class VideoPlayerHandle {
++snapshot
++changes
++initialize() Future
++play() Future
++pause() Future
++seekTo(position) Future
++setVolume(volume) Future
++setSpeed(speed) Future
++dispose() Future
+}
+VideoPlayerHandle --> FakeVideoPlayerPlatform : "uses via VideoPlayerPlatform.instance"
+```
+
+**Diagram sources**
+- [video_player_handle_test.dart:15-89](file://test/unit/playback/video_player_handle_test.dart#L15-L89)
+- [video_player_handle_test.dart:98-426](file://test/unit/playback/video_player_handle_test.dart#L98-L426)
+
+**Section sources**
+- [video_player_handle_test.dart:15-89](file://test/unit/playback/video_player_handle_test.dart#L15-L89)
+- [video_player_handle_test.dart:98-426](file://test/unit/playback/video_player_handle_test.dart#L98-L426)
 
 ### Widget Testing Patterns
 
@@ -386,6 +467,124 @@ ShowError --> End(["Test Complete"])
 - [state_widgets_test.dart:106-140](file://test/widget/state_widgets_test.dart#L106-L140)
 - [state_widgets_test.dart:142-289](file://test/widget/state_widgets_test.dart#L142-L289)
 
+#### Library Screen Testing
+Library screen tests demonstrate comprehensive UI testing patterns:
+- Empty state rendering with appropriate messaging and icons.
+- Video list display with proper card count verification.
+- Error state handling with error component rendering.
+- Search button presence validation.
+- Fake repository implementations provide controlled data scenarios.
+
+```mermaid
+flowchart TD
+Start(["LibraryScreen Test"]) --> SetupContainer["Create ProviderContainer with Overrides"]
+SetupContainer --> PumpWidget["pumpWidget(MaterialApp(home: LibraryScreen))"]
+PumpWidget --> WaitForSettle["pumpAndSettle()"]
+WaitForSettle --> AssertState{"Check Repository State"}
+AssertState --> EmptyState["Empty: Verify 'Library Empty' text"]
+AssertState --> ListState["Has Items: Verify VideoItemCard count"]
+AssertState --> ErrorState["Error: Verify ErrorState component"]
+EmptyState --> AssertUI["Assert UI Elements"]
+ListState --> AssertUI
+ErrorState --> AssertUI
+AssertUI --> End(["Test Complete"])
+```
+
+**Diagram sources**
+- [library_screen_test.dart:14-33](file://test/widget/library_screen_test.dart#L14-L33)
+- [library_screen_test.dart:35-75](file://test/widget/library_screen_test.dart#L35-L75)
+- [library_screen_test.dart:77-94](file://test/widget/library_screen_test.dart#L77-L94)
+- [library_screen_test.dart:96-113](file://test/widget/library_screen_test.dart#L96-L113)
+
+**Section sources**
+- [library_screen_test.dart:14-33](file://test/widget/library_screen_test.dart#L14-L33)
+- [library_screen_test.dart:35-75](file://test/widget/library_screen_test.dart#L35-L75)
+- [library_screen_test.dart:77-94](file://test/widget/library_screen_test.dart#L77-L94)
+- [library_screen_test.dart:96-113](file://test/widget/library_screen_test.dart#L96-L113)
+
+#### Playback Controls Testing
+Playback controls tests validate comprehensive UI interaction patterns:
+- Idle state disables transport controls and seeking.
+- Playing state shows position, duration, and pause button.
+- Error state displays user-safe messages and disables controls.
+- Play/pause button interactions work correctly.
+- Slider dragging updates position labels and triggers seeks.
+- Skip buttons respect canSeek constraints and apply clamping.
+- Volume and speed controls update both UI and underlying state.
+
+```mermaid
+sequenceDiagram
+participant Tester as "Widget Tester"
+participant Controls as "PlaybackControls"
+participant Controller as "PlaybackController"
+participant Handle as "FakePlayerHandle"
+Tester->>Controls : pumpWidget with fixture
+Tester->>Controls : Tap play button
+Controls->>Controller : play(source)
+Controller->>Handle : initialize()
+Handle-->>Controller : emitChange()
+Controller-->>Controls : update state
+Controls-->>Tester : render updated UI
+Tester->>Controls : Drag slider
+Controls->>Controller : seekTo(position)
+Controller->>Handle : seekTo(position)
+Handle-->>Controller : emitChange()
+```
+
+**Diagram sources**
+- [playback_controls_test.dart:121-146](file://test/widget/playback_controls_test.dart#L121-L146)
+- [playback_controls_test.dart:148-171](file://test/widget/playback_controls_test.dart#L148-L171)
+- [playback_controls_test.dart:183-241](file://test/widget/playback_controls_test.dart#L183-L241)
+- [playback_controls_test.dart:243-396](file://test/widget/playback_controls_test.dart#L243-L396)
+
+**Section sources**
+- [playback_controls_test.dart:121-146](file://test/widget/playback_controls_test.dart#L121-L146)
+- [playback_controls_test.dart:148-171](file://test/widget/playback_controls_test.dart#L148-L171)
+- [playback_controls_test.dart:183-241](file://test/widget/playback_controls_test.dart#L183-L241)
+- [playback_controls_test.dart:243-396](file://test/widget/playback_controls_test.dart#L243-L396)
+
+#### Video Item Card Testing
+Video item card tests validate display and interaction patterns:
+- Title display verification.
+- Duration formatting for short videos (m:ss).
+- Duration formatting for long videos (h:mm:ss).
+- Conditional duration display when null.
+- Favorite icon visibility based on boolean state.
+- Tap callback invocation verification.
+
+```mermaid
+flowchart TD
+Start(["VideoItemCard Test"]) --> CreateItem["Create VideoItemSummary"]
+CreateItem --> PumpWidget["pumpWidget(MaterialApp + Scaffold + VideoItemCard)"]
+PumpWidget --> AssertDisplay["Assert Display Properties"]
+AssertDisplay --> TitleCheck{"Check Title"}
+AssertDisplay --> DurationCheck{"Check Duration Format"}
+AssertDisplay --> IconCheck{"Check Favorite Icon"}
+AssertDisplay --> InteractionCheck{"Check Tap Callback"}
+TitleCheck --> End(["Test Complete"])
+DurationCheck --> End
+IconCheck --> End
+InteractionCheck --> End
+```
+
+**Diagram sources**
+- [video_item_card_test.dart:7-27](file://test/widget/video_item_card_test.dart#L7-L27)
+- [video_item_card_test.dart:29-48](file://test/widget/video_item_card_test.dart#L29-L48)
+- [video_item_card_test.dart:50-71](file://test/widget/video_item_card_test.dart#L50-L71)
+- [video_item_card_test.dart:73-92](file://test/widget/video_item_card_test.dart#L73-L92)
+- [video_item_card_test.dart:94-113](file://test/widget/video_item_card_test.dart#L94-L113)
+- [video_item_card_test.dart:115-136](file://test/widget/video_item_card_test.dart#L115-L136)
+- [video_item_card_test.dart:138-160](file://test/widget/video_item_card_test.dart#L138-L160)
+
+**Section sources**
+- [video_item_card_test.dart:7-27](file://test/widget/video_item_card_test.dart#L7-L27)
+- [video_item_card_test.dart:29-48](file://test/widget/video_item_card_test.dart#L29-L48)
+- [video_item_card_test.dart:50-71](file://test/widget/video_item_card_test.dart#L50-L71)
+- [video_item_card_test.dart:73-92](file://test/widget/video_item_card_test.dart#L73-L92)
+- [video_item_card_test.dart:94-113](file://test/widget/video_item_card_test.dart#L94-L113)
+- [video_item_card_test.dart:115-136](file://test/widget/video_item_card_test.dart#L115-L136)
+- [video_item_card_test.dart:138-160](file://test/widget/video_item_card_test.dart#L138-L160)
+
 ## Dependency Analysis
 Riverpod providers play a central role in testability:
 - `databaseProvider` creates and disposes `AppDatabase`.
@@ -417,6 +616,8 @@ TestOverrides --> RepositoryProvider
 - Widget tests use minimal wrappers like `MaterialApp(home: Scaffold(body: child))` to reduce test surface area.
 - Platform channel mocks avoid launching real Android processes during unit tests.
 - Playback controller tests use event queue pumping and gates to control asynchronous timing without relying on real timers.
+- Fake repositories in widget tests provide lightweight data sources without database overhead.
+- Video player handle tests use a simple fake platform implementation instead of complex mocking frameworks.
 
 [No sources needed since this section provides general guidance]
 
@@ -432,17 +633,21 @@ TestOverrides --> RepositoryProvider
 | Player handle not released | Engine resources leak | Ensure `FakePlayerHandle.dispose` closes streams and increment disposal counters. |
 | Sensitive data in error messages | User-facing logs contain URLs or tokens | Assert that generic messages replace raw engine details. |
 | Integration tests missing | CI only runs unit and widget tests | Follow the project decision to defer `test/integration/` until a device harness exists. |
+| Widget test setup complexity | Tedious ProviderContainer configuration | Use fixture helpers like `_fixture()` to encapsulate common setup patterns. |
+| Fake repository boilerplate | Repetitive interface implementations | Create focused fake classes for specific test scenarios (empty, data, error). |
 
 **Section sources**
 - [media_store_bridge_impl_test.dart:18-21](file://test/unit/platform/media_store_bridge_impl_test.dart#L18-L21)
 - [app_database_test.dart:8-14](file://test/unit/database/app_database_test.dart#L8-L14)
-- [app_playback_controller_test.dart:543-565](file://test/unit/playback/app_playback_controller_test.dart#L543-L565)
+- [app_playback_controller_test.dart:543-624](file://test/unit/playback/app_playback_controller_test.dart#L543-L624)
+- [playback_controls_test.dart:121-146](file://test/widget/playback_controls_test.dart#L121-L146)
+- [library_screen_test.dart:121-321](file://test/widget/library_screen_test.dart#L121-L321)
 - [device_testing_p3.md:101-107](file://docs/device_testing_p3.md#L101-L107)
 
 ## Conclusion
-MyTube’s testing strategy is well-structured around a clear pyramid:
-- Unit tests isolate domain logic, database operations, platform bridges, source adapters, and playback controllers.
-- Widget tests validate navigation, rendering, and shared state behavior.
+MyTube's testing strategy is well-structured around a clear pyramid:
+- Unit tests isolate domain logic, database operations, platform bridges, source adapters, playback controllers, and video player handles.
+- Widget tests validate navigation, rendering, shared state behavior, library screen interactions, playback controls, and video item cards.
 - Integration testing is deferred until a device harness is established, with manual device checks covering platform-only scenarios.
 
 The codebase demonstrates strong testing practices:
@@ -450,7 +655,9 @@ The codebase demonstrates strong testing practices:
 - Constructor injection for testable design.
 - Riverpod provider overrides for database and player wiring.
 - Platform channel mocking for Android integrations.
-- Explicit assertions for both results and side effects like database mutations.
+- Explicit assertions for both return values and observable side effects.
+- Comprehensive UI interaction testing with realistic user flows.
+- Fixture patterns for reducing widget test setup complexity.
 
 New tests should follow these patterns:
 - Place unit tests under `test/unit/<area>/`.
@@ -459,6 +666,9 @@ New tests should follow these patterns:
 - Wrap platform channel tests with proper setup and teardown.
 - Prefer in-memory databases and fake bridges over real platform dependencies.
 - Assert both return values and observable side effects.
+- Create focused fake repositories for widget testing scenarios.
+- Use fixture helpers to reduce widget test setup boilerplate.
+- Test both positive and negative user interaction flows.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -468,11 +678,15 @@ New tests should follow these patterns:
 - Test files mirror production structure where applicable, e.g., `local_media_adapter_test.dart` for `LocalMediaAdapter`.
 - Group names describe the component under test, e.g., `AvailabilityCheckService (P3-06)`.
 - Individual tests use descriptive names indicating scenario and expectation.
+- Widget test groups include feature identifiers like `(P5-01)` for library screen tests.
+- Playback controls tests include feature identifiers like `(P4-05)` for UI testing.
 
 **Section sources**
 - [availability_check_service_test.dart:142-143](file://test/unit/domain/availability_check_service_test.dart#L142-L143)
 - [local_media_adapter_test.dart:103-104](file://test/unit/sources/local_media_adapter_test.dart#L103-L104)
 - [media_store_bridge_impl_test.dart:23-24](file://test/unit/platform/media_store_bridge_impl_test.dart#L23-L24)
+- [library_screen_test.dart:14-15](file://test/widget/library_screen_test.dart#L14-L15)
+- [playback_controls_test.dart:183-184](file://test/widget/playback_controls_test.dart#L183-L184)
 
 ### Assertion Patterns
 - Use `expect(result.isOk, isTrue)` and `expect(result.isErr, isTrue)` for `Result` types.
@@ -480,18 +694,23 @@ New tests should follow these patterns:
 - Assert database state after service calls to verify side effects.
 - Assert widget visibility, tap callbacks, and finder counts in widget tests.
 - Assert call counts, lists, and state fields in playback controller tests.
+- Use fixture helpers to encapsulate common widget test setup patterns.
+- Verify both UI state and underlying controller behavior in widget tests.
 
 **Section sources**
 - [availability_check_service_test.dart:170-467](file://test/unit/domain/availability_check_service_test.dart#L170-L467)
 - [local_media_adapter_test.dart:114-426](file://test/unit/sources/local_media_adapter_test.dart#L114-L426)
 - [main_scaffold_test.dart:15-123](file://test/widget/main_scaffold_test.dart#L15-L123)
 - [state_widgets_test.dart:14-289](file://test/widget/state_widgets_test.dart#L14-L289)
+- [playback_controls_test.dart:183-396](file://test/widget/playback_controls_test.dart#L183-L396)
+- [video_item_card_test.dart:7-160](file://test/widget/video_item_card_test.dart#L7-L160)
 
 ### Continuous Integration Guidance
 - Run `flutter test` to execute both unit and widget tests.
-- Coverage expectations should prioritize unit tests for domain, database, platform bridges, and playback logic.
-- Widget tests should cover critical navigation and state rendering paths.
-- Integration tests should be added once a device harness is available, following the project’s deferred integration plan.
+- Coverage expectations should prioritize unit tests for domain, database, platform bridges, playback logic, and video player handling.
+- Widget tests should cover critical navigation, state rendering, library screen interactions, playback controls, and video item display.
+- Integration tests should be added once a device harness is available, following the project's deferred integration plan.
+- Focus on testing complex user flows that involve multiple components working together.
 
 **Section sources**
 - [pubspec.yaml:19-25](file://pubspec.yaml#L19-L25)

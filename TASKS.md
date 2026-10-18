@@ -144,10 +144,24 @@ blockers.
 
 ## Phase 4 --- Direct URLs and player
 
--   [ ] **P4-01** Implement one-at-a-time URL entry and scheme
-    validation. --- Todo
--   [ ] **P4-02** Implement safe metadata probing with
-    timeouts/fallbacks. --- Todo
+-   [x] **P4-01** Implement one-at-a-time URL entry and scheme
+    validation. --- Done (`AddUrlDialog` enters one URL at a time; offline
+    `validateDirectUrl` accepts only `http`/`https` with a host and returns
+    `InvalidUrlError` otherwise, echoing no raw input; plain `http` kept for
+    local-network streams per the DECISIONS SEC-006 exception; re-adding an
+    identical URI refreshes in place rather than duplicating (URL-001);
+    `direct_url_validation_test.dart` + `add_url_dialog_test.dart`)
+-   [x] **P4-02** Implement safe metadata probing with
+    timeouts/fallbacks. --- Done (`IoUrlMetadataProber` HEAD probe with a
+    ranged-GET (`bytes=0-0`) fallback on 405/501, socket destroyed so the body
+    is never downloaded, every step bounded by `defaultProbeTimeout`; typed
+    status mapping (404→NotFound, 410/401/403→ExpiredSource, 415/non-video
+    content-type→UnsupportedFormat as definitive rejects; 408/429/5xx/socket/
+    timeout as transient); `DirectUrlService.addUrl` rejects definitively with
+    no write and falls back to an `offline`/`unknown` metadata-less entry on
+    transient failure so the link is not lost (URL-003); signed query/fragment
+    stripped from diagnostics (URL-006); `io_url_metadata_prober_test.dart` +
+    `direct_url_service_test.dart`)
 -   [x] **P4-03** Define app-owned playback service/controller
     interface. --- Done (`PlaybackController` refined with `setVolume` and
     `dispose`; engine-neutral `PlayerHandle` boundary with `PlayerSnapshot`
@@ -175,13 +189,50 @@ blockers.
     popup with 0.5x–2.0x presets; all wired to playbackControllerProvider;
     canSeek gating respected; value clamping handled by controller; 13 widget
     tests; analyzer clean for playback_controls.dart)
--   [ ] **P4-06** Implement Fit default plus Fill/Crop and Stretch. ---
-    Todo
--   [ ] **P4-07** Handle buffering, unsupported formats, expired URLs,
-    errors, and retry. --- Todo
--   [ ] **P4-08** Redact signed URL parameters from logs. --- Todo
--   [ ] **P4-09** Test range-supported and incompatible direct URL
-    sources. --- Todo
+-   [x] **P4-06** Implement Fit default plus Fill/Crop and Stretch. ---
+    Done (`VideoDisplayMode` enum maps Fit→`BoxFit.contain`, Fill/Crop→`cover`,
+    Stretch→`fill` with Fit as the default and a `cycle`/`fromName` fallback;
+    app-wide `VideoDisplayModeNotifier`/`videoDisplayModeProvider` (mirrors
+    `ThemeModeNotifier`) keeps the choice across sources; `VideoSurface` wraps
+    the engine `buildVideo()` in a `FittedBox` over a black backdrop so
+    letterbox/crop read correctly (PLAY-007) and a `_DisplayModeMenu` toggle in
+    `PlaybackControls` writes the notifier; `video_display_mode_test.dart` +
+    `video_surface_test.dart` + the display-mode case in
+    `playback_controls_test.dart` pass; on-device visual check deferred to
+    `docs/device_testing_p4.md` §P4-06)
+-   [x] **P4-07** Handle buffering, unsupported formats, expired URLs,
+    errors, and retry. --- Done (`AppPlaybackController` reports a `buffering`
+    status while loading, converts engine load/play failures into fixed
+    user-safe messages (raw engine text never surfaces), rejects unsupported
+    schemes with a non-retryable error, and `retry()` re-attempts the retained
+    last source; `canRetry` gates the Retry affordance so it is offered only
+    for recoverable errors (AVAIL-002); `PlaybackControls` renders the error
+    text and `playback_retry_button`; expired/private signed URLs map to
+    `ExpiredSourceError`→`expiredLink` at the prober/adapter level and a
+    retryable load error at play time; retry/buffering/error cases in
+    `app_playback_controller_test.dart` + `playback_controls_test.dart` pass;
+    fixed a `testWidgets` fake-async deadlock on the error/retry widget tests
+    (a broadcast `StreamController.close()` future never completes under
+    `FakeAsync`, so those teardown paths now run via `tester.runAsync`);
+    device-only buffering/expired/retry checks deferred to
+    `docs/device_testing_p4.md` §P4-07)
+-   [x] **P4-08** Redact signed URL parameters from logs. --- Done
+    (`DiagnosticRedactor` strips signed-URL query/fragment and credential
+    assignments (`token`/`secret`/`Bearer …`) from any diagnostic string before
+    it reaches a sink, `PrivacySafeLogger` redacts on every call, and
+    `IoUrlMetadataProber` builds messages from scheme/host/path only so a signed
+    query is dropped at the source; `direct_url_signed_url_redaction_test.dart`
+    proves a 403-on-signed-URL reads as `ExpiredSourceError` with no `X-Amz-*`
+    leak and that a raw signed URL embedded in a message is scrubbed to
+    `?[redacted]` (URL-006))
+-   [x] **P4-09** Test range-supported and incompatible direct URL
+    sources. --- Done (automated half: `IoUrlMetadataProber` reports `acceptsRange`
+    from `Accept-Ranges`, `DirectUrlAdapter` keeps a no-range server `available`
+    (degraded seek, not failure) and maps HTML/PDF/non-video to
+    `UnsupportedFormatError`→`unsupported` while 5xx stays transient→`unknown`;
+    `direct_url_range_support_test.dart` covers range vs no-range vs
+    HTML/PDF/5xx; real codec decode and hardware range-seek verification
+    deferred to `docs/device_testing_p4.md` §P4-09)
 
 ## Phase 5 --- Library and Saved
 

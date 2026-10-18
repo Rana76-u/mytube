@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/sources/source_adapter.dart';
 
 /// A single playable-source scheme classification (P4-04).
@@ -106,6 +107,16 @@ abstract interface class PlayerHandle {
 
   /// Releases all engine resources. Idempotent.
   Future<void> dispose();
+
+  /// A widget that paints the current video frame at its intrinsic size, or
+  /// null when there is nothing to render yet.
+  ///
+  /// This is the only place a concrete engine surface reaches the widget tree.
+  /// It returns a plain framework [Widget] — no `video_player` type crosses
+  /// this boundary — and the caller (the render surface) applies the app-owned
+  /// display-mode scaling (P4-06). Implementations return null before the
+  /// engine is initialized.
+  Widget? buildVideo();
 }
 
 /// Creates a [PlayerHandle] for a resolved [PlayableSource].

@@ -7,7 +7,17 @@
 - [uncaught_app_error.dart](file://lib/app/uncaught_app_error.dart)
 - [theme_mode_notifier.dart](file://lib/app/theme/theme_mode_notifier.dart)
 - [playback_provider.dart](file://lib/playback/playback_provider.dart)
+- [app_playback_controller.dart](file://lib/playback/app_playback_controller.dart)
+- [database_provider.dart](file://lib/data/database/database_provider.dart)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated playback controller section to reflect the new `playbackControllerProvider` implementation
+- Enhanced dependency injection patterns documentation with concrete examples
+- Added detailed explanation of reactive UI updates through Riverpod providers
+- Expanded provider architecture overview with actual implementation details
+- Updated performance considerations based on the new provider structure
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -21,7 +31,7 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains how MyTube uses Riverpod for state management and dependency injection. It covers the provider container setup, the separation between UI state and business logic state, and how providers interact with domain services and repositories. It also provides guidance on organizing providers per feature, handling errors within providers, and optimizing reactive updates. Examples include patterns for video lists, playback state, and user preferences.
+This document explains how MyTube uses Riverpod for state management and dependency injection. It covers the provider container setup, the separation between UI state and business logic state, and how providers interact with domain services and repositories. The architecture centers around a single ProviderContainer that manages app-wide dependencies and reactive state updates. Examples include patterns for video lists, playback state through `playbackControllerProvider`, and user preferences.
 
 ## Project Structure
 MyTube organizes code by layers and features:
@@ -44,6 +54,7 @@ A_errors["uncaught_app_error.dart"]
 end
 subgraph "Playback"
 P_ctrl["playback_provider.dart"]
+P_impl["app_playback_controller.dart"]
 end
 subgraph "Domain"
 D_services["domain/services/*"]
@@ -52,6 +63,7 @@ end
 subgraph "Data"
 D_repo_impl["data/repositories/*"]
 D_db["data/database/*"]
+D_db_prov["database_provider.dart"]
 end
 subgraph "Features"
 F_discover["features/discover/*"]
@@ -73,6 +85,7 @@ F_settings --> A_theme
 D_services --> D_repos
 D_repos --> D_repo_impl
 D_repo_impl --> D_db
+D_db_prov --> D_db
 ```
 
 **Diagram sources**
@@ -81,16 +94,19 @@ D_repo_impl --> D_db
 - [theme_mode_notifier.dart:14-41](file://lib/app/theme/theme_mode_notifier.dart#L14-L41)
 - [uncaught_app_error.dart:11-34](file://lib/app/uncaught_app_error.dart#L11-L34)
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [app_playback_controller.dart:8-27](file://lib/playback/app_playback_controller.dart#L8-L27)
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
 
 **Section sources**
 - [main.dart:8-32](file://lib/main.dart#L8-L32)
 - [personal_video_hub_app.dart:10-60](file://lib/app/personal_video_hub_app.dart#L10-L60)
 
 ## Core Components
-- ProviderContainer and ProviderScope: The app bootstraps a single ProviderContainer and wraps the widget tree with ProviderScope (or UncontrolledProviderScope when an external container is provided). This ensures one dependency graph for the entire app lifecycle.
-- Global error state: An uncaught error notifier exposes a user-facing message that the root UI can display and dismiss.
-- Theme mode state: A Notifier holds the current ThemeMode; a read-only Provider exposes it to widgets.
-- Playback controller: A Provider owns a long-lived PlaybackController instance and injects a PlayerHandleFactory for testability.
+- **ProviderContainer and ProviderScope**: The app bootstraps a single ProviderContainer and wraps the widget tree with ProviderScope (or UncontrolledProviderScope when an external container is provided). This ensures one dependency graph for the entire app lifecycle.
+- **Global error state**: An uncaught error notifier exposes a user-facing message that the root UI can display and dismiss.
+- **Theme mode state**: A Notifier holds the current ThemeMode; a read-only Provider exposes it to widgets.
+- **Playback controller**: A Provider owns a long-lived AppPlaybackController instance and injects a PlayerHandleFactory for testability.
+- **Database provider**: Lazy initialization of the application database with proper disposal.
 
 Key responsibilities:
 - main.dart wires error hooks, creates the container, installs error reporting, and starts the app.
@@ -98,6 +114,7 @@ Key responsibilities:
 - uncaught_app_error.dart manages uncaught error state.
 - theme_mode_notifier.dart manages theme mode state.
 - playback_provider.dart owns the playback controller and its dependencies.
+- database_provider.dart manages database lifecycle and provides lazy initialization.
 
 **Section sources**
 - [main.dart:12-32](file://lib/main.dart#L12-L32)
@@ -105,10 +122,11 @@ Key responsibilities:
 - [uncaught_app_error.dart:11-34](file://lib/app/uncaught_app_error.dart#L11-L34)
 - [theme_mode_notifier.dart:14-41](file://lib/app/theme/theme_mode_notifier.dart#L14-L41)
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
 
 ## Architecture Overview
 The app follows a layered architecture with Riverpod as the DI and state layer:
-- UI layer (widgets) watches Providers for reactive state.
+- UI layer (widgets) watches Providers for reactive state updates.
 - Feature layer contains feature-specific Providers and UI.
 - Domain layer defines services and repository interfaces.
 - Data layer implements repositories and persists data.
@@ -117,6 +135,7 @@ Riverpod decouples UI from implementation details:
 - Widgets depend on abstractions (domain services, repositories).
 - Providers resolve concrete implementations and manage lifetimes.
 - Error and theme states are centralized at the app level.
+- Playback controller provides reactive state updates through ValueNotifier.
 
 ```mermaid
 graph LR
@@ -127,9 +146,11 @@ Data --> DB["Database / Storage"]
 subgraph "Global State"
 Errors["Uncaught Error Provider"]
 Theme["Theme Mode Provider"]
+Playback["Playback Controller Provider"]
 end
 Features --> Errors
 Features --> Theme
+Features --> Playback
 ```
 
 [No sources needed since this diagram shows conceptual workflow, not actual code structure]
@@ -221,9 +242,13 @@ themeModeProvider --> themeModeNotifierProvider : "reads"
 - [theme_mode_notifier.dart:14-41](file://lib/app/theme/theme_mode_notifier.dart#L14-L41)
 
 ### Playback Controller Provider
-- playbackControllerProvider owns a long-lived PlaybackController instance.
+**Updated** The playback controller now uses a dedicated Provider that manages the AppPlaybackController lifecycle and dependency injection.
+
+- playbackControllerProvider owns a long-lived AppPlaybackController instance.
 - It injects a PlayerHandleFactory via another Provider to allow test overrides.
 - The controller is disposed automatically when the provider is disposed.
+- The AppPlaybackController extends ValueNotifier<PlaybackState> for reactive UI updates.
+- Engine-specific details are abstracted behind PlayerHandleFactory interface.
 
 ```mermaid
 classDiagram
@@ -231,35 +256,71 @@ class playbackControllerProvider {
 <<Provider>>
 }
 class AppPlaybackController {
-+dispose() void
++state : ValueListenable<PlaybackState>
++play(source) Future<void>
++pause() Future<void>
++resume() Future<void>
++dispose() Future<void>
 }
 class PlayerHandleFactory {
 +create() PlayerHandle
 }
+class PlayerHandle {
++initialize() Future<void>
++play() Future<void>
++snapshot : PlayerSnapshot
++changes : Stream<void>
+}
 playbackControllerProvider --> AppPlaybackController : "creates"
 playbackControllerProvider --> PlayerHandleFactory : "injects"
+AppPlaybackController --> PlayerHandle : "uses"
 ```
 
 **Diagram sources**
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [app_playback_controller.dart:8-27](file://lib/playback/app_playback_controller.dart#L8-L27)
 
 **Section sources**
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [app_playback_controller.dart:8-27](file://lib/playback/app_playback_controller.dart#L8-L27)
+
+### Database Provider
+- databaseProvider provides lazy initialization of the AppDatabase.
+- Proper disposal is handled through ref.onDispose.
+- Can be overridden in tests with in-memory database instances.
+
+```mermaid
+classDiagram
+class databaseProvider {
+<<Provider>>
+}
+class AppDatabase {
++close() Future<void>
+}
+databaseProvider --> AppDatabase : "creates & disposes"
+```
+
+**Diagram sources**
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
+
+**Section sources**
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
 
 ### Example Patterns for Video Lists, Playback State, and User Preferences
 Note: These are recommended patterns aligned with existing code. They illustrate how to organize providers without duplicating specific implementations.
 
-- Video list provider (feature-scoped)
+- **Video list provider (feature-scoped)**
   - Use a family/provider that depends on a domain service/repository to fetch videos.
   - Return AsyncValue<List<Video>> and expose a refresh method via a NotifierProvider if needed.
   - Keep UI-only filters/sorting in a separate UI state provider to avoid recomputing network calls.
 
-- Playback state provider (app-scoped)
-  - Mirror the pattern in playback_provider.dart: own a long-lived controller and expose state through a Provider.
-  - Expose commands (play, pause, seek) via a NotifierProvider and let UI call them.
+- **Playback state provider (app-scoped)**
+  - Mirror the pattern in playback_provider.dart: own a long-lived AppPlaybackController and expose state through a Provider.
+  - Expose commands (play, pause, seek) via the controller methods and let UI call them.
   - Inject engine handles via a factory Provider for testability.
+  - The controller extends ValueNotifier<PlaybackState> for reactive UI updates.
 
-- User preferences provider (feature-scoped)
+- **User preferences provider (feature-scoped)**
   - Use a NotifierProvider to hold typed preferences (e.g., theme, autoplay).
   - Persist changes asynchronously and surface loading/error states using AsyncValue or explicit fields.
   - Provide a read-only Provider for consumers that only observe preferences.
@@ -270,6 +331,7 @@ Note: These are recommended patterns aligned with existing code. They illustrate
 - UI state (e.g., selected tab, search query, pagination cursor) should live in small, feature-local providers close to the UI.
 - Business logic state (e.g., playback controller, fetched collections, user preferences) should live in domain/data-layer providers.
 - Prefer read-only Providers for derived values (e.g., filtered lists) computed from base state.
+- Use ValueNotifier-based controllers like AppPlaybackController for reactive state updates that UI components can watch.
 
 [No sources needed since this section provides general guidance]
 
@@ -279,6 +341,7 @@ Riverpod providers form a directed dependency graph:
 - personal_video_hub_app.dart sets up ProviderScope and consumes global providers.
 - uncaught_app_error.dart and theme_mode_notifier.dart provide global state.
 - playback_provider.dart owns playback controller and injects engine handles.
+- database_provider.dart provides database access with proper lifecycle management.
 
 ```mermaid
 graph TD
@@ -288,6 +351,10 @@ A --> T["theme_mode_notifier.dart"]
 A --> F["feature providers"]
 F --> P["playback_provider.dart"]
 P --> H["player handle factory"]
+P --> C["app_playback_controller.dart"]
+C --> PH["player handle"]
+A --> D["database_provider.dart"]
+D --> DB["AppDatabase"]
 ```
 
 **Diagram sources**
@@ -296,11 +363,14 @@ P --> H["player handle factory"]
 - [uncaught_app_error.dart:11-34](file://lib/app/uncaught_app_error.dart#L11-L34)
 - [theme_mode_notifier.dart:14-41](file://lib/app/theme/theme_mode_notifier.dart#L14-L41)
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [app_playback_controller.dart:8-27](file://lib/playback/app_playback_controller.dart#L8-L27)
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
 
 **Section sources**
 - [main.dart:12-32](file://lib/main.dart#L12-L32)
 - [personal_video_hub_app.dart:10-60](file://lib/app/personal_video_hub_app.dart#L10-L60)
 - [playback_provider.dart:7-27](file://lib/playback/playback_provider.dart#L7-L27)
+- [database_provider.dart:4-17](file://lib/data/database/database_provider.dart#L4-L17)
 
 ## Performance Considerations
 - Prefer Provider over NotifierProvider when state is immutable and only observed.
@@ -309,24 +379,33 @@ P --> H["player handle factory"]
 - Debounce or throttle expensive computations; cache results in providers where appropriate.
 - Avoid rebuilding heavy assets by separating UI-only state from data-heavy state.
 - For async data, use AsyncValue and invalidate only when necessary to prevent unnecessary refetches.
+- **Reactive updates**: Controllers extending ValueNotifier (like AppPlaybackController) provide efficient reactive updates that only rebuild widgets watching the specific state.
+- **Provider lifetime**: Long-lived providers like playbackControllerProvider maintain state across widget rebuilds, reducing memory allocations.
+- **Lazy initialization**: Database and other heavy resources should use lazy initialization patterns to improve startup performance.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
-- Uncaught errors not displayed
+- **Uncaught errors not displayed**
   - Ensure error hooks are installed before runApp and that the root UI watches the uncaught error provider.
   - Verify that dismiss() clears the banner and that the notifier is accessible from the root context.
 
-- Theme not updating
+- **Theme not updating**
   - Confirm that themeModeProvider is watched in the MaterialApp configuration.
   - When changing mode programmatically, use themeModeNotifierProvider and call setMode().
 
-- Playback controller not disposing
+- **Playback controller not disposing**
   - Ensure the controller is created inside a Provider and disposed via ref.onDispose.
+  - Verify that the ProviderContainer is properly disposed in tests.
 
-- Tests failing due to missing providers
+- **Tests failing due to missing providers**
   - Override providers in tests using overrideWith or create a dedicated ProviderContainer for tests.
+  - Use UncontrolledProviderScope with a test container for widget tests.
+
+- **Reactive UI not updating**
+  - Ensure widgets are using ConsumerWidget or ConsumerWidget with ref.watch for reactive updates.
+  - Verify that the controller's ValueNotifier is being watched correctly.
 
 **Section sources**
 - [main.dart:23-28](file://lib/main.dart#L23-L28)
@@ -334,6 +413,7 @@ Common issues and resolutions:
 - [uncaught_app_error.dart:19-28](file://lib/app/uncaught_app_error.dart#L19-L28)
 - [theme_mode_notifier.dart:25-27](file://lib/app/theme/theme_mode_notifier.dart#L25-L27)
 - [playback_provider.dart:21-26](file://lib/playback/playback_provider.dart#L21-L26)
+- [app_playback_controller.dart:23-27](file://lib/playback/app_playback_controller.dart#L23-L27)
 
 ## Conclusion
-MyTube’s Riverpod setup centers around a single ProviderContainer, global providers for cross-cutting concerns (errors, theme), and feature-scoped providers for domain logic. The approach cleanly separates UI state from business logic, supports testable dependencies through factory providers, and provides clear extension points for adding new features while maintaining performance and maintainability.
+MyTube's Riverpod setup centers around a single ProviderContainer, global providers for cross-cutting concerns (errors, theme), and feature-scoped providers for domain logic. The introduction of playbackControllerProvider demonstrates the reactive UI update pattern through ValueNotifier-based controllers. The approach cleanly separates UI state from business logic, supports testable dependencies through factory providers, and provides clear extension points for adding new features while maintaining performance and maintainability. The architecture emphasizes proper resource management, dependency injection, and reactive state updates throughout the application.

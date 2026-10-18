@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/sources/source_adapter.dart';
@@ -38,6 +39,10 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
   PlayerHandle? _handle;
   StreamSubscription<void>? _subscription;
 
+  /// The most recently requested source, retained so [retry] can re-attempt it
+  /// after a transient failure (P4-07, AVAIL-002).
+  PlayableSource? _lastSource;
+
   /// Monotonic load id; only the newest generation may touch the state.
   int _generation = 0;
   bool _disposed = false;
@@ -60,12 +65,17 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       return;
     }
 
+    // Retain the request so a later [retry] re-attempts exactly this source.
+    _lastSource = source;
+
     // Reject unsupported schemes with a precise message before touching the
-    // engine (URL-005: not every URL is a playable video stream).
+    // engine (URL-005: not every URL is a playable video stream). Retrying a
+    // scheme the engine can never open is pointless, so this error is not
+    // marked retryable.
     if (playbackKindFor(source.uri) == PlaybackKind.unsupported) {
       _generation++;
       await _teardownHandle();
-      value = _errorState(_unsupportedSourceMessage);
+      value = _errorState(_unsupportedSourceMessage, canRetry: false);
       return;
     }
 
@@ -329,6 +339,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       speed: value.speed,
       volume: _volume,
       canSeek: value.canSeek,
+      canRetry: value.canRetry,
       error: value.error,
     );
     final handle = _handle;
@@ -336,6 +347,19 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       await _runCommand(() => handle.setVolume(_volume));
     }
   }
+
+  @override
+  Future<void> retry() async {
+    final source = _lastSource;
+    if (_disposed || source == null) {
+      // Nothing was ever loaded — there is no source to re-attempt.
+      return;
+    }
+    await play(source);
+  }
+
+  @override
+  Widget? buildVideo() => _handle?.buildVideo();
 
   @override
   Future<void> stop() async {
@@ -373,6 +397,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
     String message, {
     Duration position = Duration.zero,
     Duration duration = Duration.zero,
+    bool? canRetry,
   }) => PlaybackState(
     status: PlaybackStatus.error,
     position: position,
@@ -380,6 +405,9 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
     speed: _speed,
     volume: _volume,
     canSeek: false,
+    // Retryable unless stated otherwise (unsupported schemes) and only when a
+    // source exists to re-attempt (P4-07).
+    canRetry: canRetry ?? _lastSource != null,
     error: message,
   );
 

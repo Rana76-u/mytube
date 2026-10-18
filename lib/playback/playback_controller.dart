@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/sources/source_adapter.dart';
 
 /// App-owned playback controller interface (ARCHITECTURE §3 Playback,
@@ -53,6 +54,19 @@ abstract interface class PlaybackController {
   /// out-of-range values are clamped (PLAY-005).
   Future<void> setVolume(double volume);
 
+  /// Re-attempts playback of the most recent source after an error
+  /// (P4-07, AVAIL-002, PLAY-009).
+  ///
+  /// No-op when no source has been played yet.  The UI only offers this when
+  /// [PlaybackState.canRetry] is true, but calling it unconditionally is safe.
+  Future<void> retry();
+
+  /// A widget that paints the current video, or null when nothing is loaded.
+  ///
+  /// Lets the render surface (P4-06) display video without importing the
+  /// player package; the engine seam stays confined to `lib/playback`.
+  Widget? buildVideo();
+
   /// Stops playback and releases the underlying player resource.
   ///
   /// Unlike [dispose], the controller stays usable — a later [play] loads a
@@ -82,6 +96,7 @@ class PlaybackState {
     this.speed = 1.0,
     this.volume = 1.0,
     this.canSeek = false,
+    this.canRetry = false,
     this.error,
   });
 
@@ -100,6 +115,11 @@ class PlaybackState {
   /// Whether the loaded source supports seeking.  False while idle and after
   /// errors; the seek slider and skip buttons disable themselves with it.
   final bool canSeek;
+
+  /// True when the current error can meaningfully be retried — i.e. a source
+  /// has been loaded so [PlaybackController.retry] has something to re-attempt
+  /// (P4-07, AVAIL-002). Drives the visibility of the Retry affordance.
+  final bool canRetry;
 
   /// Non-null when [status] is [PlaybackStatus.error].
   /// Must be a user-safe message — no tokens, no signed-URL parameters.
@@ -120,11 +140,20 @@ class PlaybackState {
           other.speed == speed &&
           other.volume == volume &&
           other.canSeek == canSeek &&
+          other.canRetry == canRetry &&
           other.error == error;
 
   @override
-  int get hashCode =>
-      Object.hash(status, position, duration, speed, volume, canSeek, error);
+  int get hashCode => Object.hash(
+    status,
+    position,
+    duration,
+    speed,
+    volume,
+    canSeek,
+    canRetry,
+    error,
+  );
 }
 
 /// Lifecycle of the playback controller.

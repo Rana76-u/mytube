@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: MyTube Flutter Video Hub
+title: MyTube Flutter Video Library App
 scope:
     - README.md
     - ARCHITECTURE.md

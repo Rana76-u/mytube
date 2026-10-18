@@ -1,1 +1,0 @@
-Flutter application that indexes local and remote video sources into a Drift-backed library, exposes them through platform bridges, and plays them via an app-owned playback service.

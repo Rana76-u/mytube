@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/sources/source_adapter.dart';
 import 'package:video_player/video_player.dart';
@@ -102,6 +103,14 @@ class VideoPlayerHandle implements PlayerHandle {
     await _controller.dispose();
     await _changes.close();
   }
+
+  /// Renders the engine's texture through the package [VideoPlayer] widget —
+  /// the single point where a `video_player` type reaches the widget tree.
+  /// Returns null until the media is initialized so the surface can show a
+  /// placeholder instead of an empty/black frame (P4-06).
+  @override
+  Widget? buildVideo() =>
+      _controller.value.isInitialized ? VideoPlayer(_controller) : null;
 }
 
 /// Default [PlayerHandleFactory]: the real `video_player` engine.

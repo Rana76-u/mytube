@@ -1,0 +1,1 @@
+Flutter test suite for the MyTube app covering domain services, Drift database/migrations, platform bridges, playback logic, and widget rendering via flutter_test.

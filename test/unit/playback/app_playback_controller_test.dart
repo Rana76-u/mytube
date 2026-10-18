@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'package:flutter/widgets.dart' show Widget, SizedBox;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
@@ -85,6 +86,16 @@ class FakePlayerHandle implements PlayerHandle {
 
   @override
   Future<void> setSpeed(double speed) async => speeds.add(speed);
+
+  /// Sentinel render widget so [AppPlaybackController.buildVideo] can be
+  /// asserted to delegate to the engine handle (P4-06).
+  @override
+  Widget? buildVideo() =>
+      showVideo ? const SizedBox(width: 160, height: 90) : null;
+
+  /// Whether this handle reports a render surface; defaults to false so tests
+  /// that only exercise state do not need a widget.
+  bool showVideo = false;
 
   @override
   Future<void> dispose() async {
@@ -574,6 +585,78 @@ void main() {
 
       await controller.seekTo(const Duration(seconds: 5)); // idle → ignored
       expect(handle.seeks, isEmpty);
+    });
+  });
+
+  group('AppPlaybackController.retry and buildVideo (P4-06, P4-07)', () {
+    test('retry re-attempts the last source after an error', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()
+            ..initializeError = created.isEmpty ? StateError('blip') : null
+            ..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      // First load fails → error state, retryable because a source was kept.
+      await controller.play(_source());
+      expect(controller.state.value.status, PlaybackStatus.error);
+      expect(controller.state.value.canRetry, isTrue);
+
+      await controller.retry();
+
+      // A fresh engine was built for the same source and began playing.
+      expect(created, hasLength(2));
+      expect(controller.state.value.status, PlaybackStatus.playing);
+    });
+
+    test('retry is a no-op before any source has played', () async {
+      var factoryCalls = 0;
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          factoryCalls++;
+          return FakePlayerHandle();
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.retry();
+
+      expect(factoryCalls, 0);
+      expect(controller.state.value.status, PlaybackStatus.idle);
+    });
+
+    test('an unsupported-scheme error is not retryable', () async {
+      final controller = AppPlaybackController(
+        handleFactory: (source) => FakePlayerHandle(),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source(uri: 'rtsp://example.com/live'));
+
+      expect(controller.state.value.status, PlaybackStatus.error);
+      expect(controller.state.value.canRetry, isFalse);
+    });
+
+    test('buildVideo delegates to the engine handle', () async {
+      final handle = FakePlayerHandle()..showVideo = true;
+      final controller = AppPlaybackController(
+        handleFactory: (source) => handle,
+      );
+      addTearDown(controller.dispose);
+
+      // No source loaded yet → nothing to render.
+      expect(controller.buildVideo(), isNull);
+
+      await controller.play(_source());
+      expect(controller.buildVideo(), isA<SizedBox>());
+
+      await controller.stop();
+      expect(controller.buildVideo(), isNull);
     });
   });
 

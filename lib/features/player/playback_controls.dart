@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/features/player/video_display_mode.dart';
+import 'package:mytube/features/player/video_display_mode_notifier.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/playback_provider.dart';
 
@@ -81,7 +83,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (state.error case final message?)
+        if (state.error case final message?) ...[
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, bottom: 4),
             child: Text(
@@ -90,6 +92,17 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
               style: TextStyle(color: colorScheme.error),
             ),
           ),
+          // AVAIL-002, PLAY-009: offer retry only for errors that can recover
+          // (a transient load/play failure with a source retained); the
+          // controller ignores retry when there is nothing to re-attempt.
+          if (state.canRetry)
+            TextButton.icon(
+              key: const Key('playback_retry_button'),
+              onPressed: () => controller.retry(),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+        ],
         Row(
           children: [
             Text(_formatClock(shownPosition)),
@@ -185,6 +198,10 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
                 child: Text(_formatSpeed(state.speed)),
               ),
             ),
+            // PLAY-005/PLAY-006: display-mode selector (Fit / Fill-Crop /
+            // Stretch). Held in the app-wide notifier so it survives across
+            // sources and drives `VideoSurface`.
+            _DisplayModeMenu(),
           ],
         ),
       ],
@@ -219,4 +236,43 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
   static String _formatSpeed(double speed) => speed == speed.roundToDouble()
       ? '${speed.toStringAsFixed(0)}×'
       : '$speed×';
+}
+
+/// Display-mode selector (P4-06, PLAY-005/PLAY-006).
+///
+/// Shows the active [VideoDisplayMode] label and lets the user pick Fit,
+/// Fill/Crop, or Stretch through the app-wide [videoDisplayModeNotifierProvider]
+/// so the choice persists across sources and drives `VideoSurface`.
+class _DisplayModeMenu extends ConsumerWidget {
+  const _DisplayModeMenu();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(videoDisplayModeProvider);
+    return PopupMenuButton<VideoDisplayMode>(
+      key: const Key('playback_display_mode_menu'),
+      tooltip: 'Display mode',
+      initialValue: mode,
+      onSelected: (selected) =>
+          ref.read(videoDisplayModeNotifierProvider.notifier).setMode(selected),
+      itemBuilder: (context) => [
+        for (final option in VideoDisplayMode.values)
+          PopupMenuItem<VideoDisplayMode>(
+            value: option,
+            child: Text(option.label),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.fit_screen),
+            const SizedBox(width: 4),
+            Text(mode.label),
+          ],
+        ),
+      ),
+    );
+  }
 }

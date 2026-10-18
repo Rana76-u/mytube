@@ -1,5 +1,0 @@
-Tests are split into two top-level directories mirroring production layers:
-- `test/unit/` — pure Dart / integration-style tests using `flutter_test`. Sub-folders follow the source tree: `database/` exercises Drift schemas, migrations, and repositories against an in-memory `AppDatabase.inMemory()`; `domain/` tests business services with fakes for `VideoSourceAdapter`, `SafBridge`, and `MediaStoreBridge`; `platform/`, `playback/`, `sources/` target their respective adapters.
-- `test/widget/` — UI tests that `pumpWidget` full app trees (`PersonalVideoHubApp`, `MainScaffold`) and assert on `find.byType` / `find.text`.
-
-Dependency direction is one-way: tests import production code under `package:mytube/*` but never the reverse. Cross-cutting helpers (fakes, DB seed helpers like `_insertLocation`) live inline at the top of each test file rather than a shared test library. Database-backed tests consistently use `setUp`/`tearDown` to open/close an in-memory DB and dispose repositories.

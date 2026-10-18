@@ -12,6 +12,15 @@
 - [app_playback_controller_test.dart](file://test/unit/playback/app_playback_controller_test.dart)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated AppPlaybackController section to reflect the complete 422-line implementation
+- Enhanced state machine documentation with detailed lifecycle flows
+- Added comprehensive error handling and recovery mechanisms
+- Documented buffering management and generation counter system
+- Expanded resource cleanup and memory optimization strategies
+- Updated diagrams to reflect the complete implementation architecture
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -83,7 +92,7 @@ APC --> SA
 - `PlaybackController`: The public API for playback. It exposes an immutable `PlaybackState` and commands such as `play`, `pause`, `resume`, `seekTo`, `skipForward`, `skipBackward`, `setSpeed`, `setVolume`, `stop`, and `dispose`. Failures never throw; they surface as `PlaybackStatus.error` with user-safe messages.
 - `PlaybackState`: An immutable snapshot including status, position, duration, speed, volume, seekability, and optional error message. Equality and hash are implemented so widgets rebuild efficiently on value changes.
 - `AppPlaybackController`: The app-owned implementation. It owns the state machine, carries user preferences across sources, validates schemes, creates and disposes player handles, subscribes to engine change events, and maps engine snapshots to `PlaybackState`.
-- `PlayerHandle` and `PlayerSnapshot`: Engine abstraction. `PlayerHandle` encapsulates initialization, playback control, and disposal; `PlayerSnapshot` is the engine’s current state view.
+- `PlayerHandle` and `PlayerSnapshot`: Engine abstraction. `PlayerHandle` encapsulates initialization, playback control, and disposal; `PlayerSnapshot` is the engine's current state view.
 - `VideoPlayerHandle`: Concrete implementation wrapping `video_player`. It routes content/file/network URIs to appropriate constructors and translates engine callbacks into `PlayerSnapshot`.
 - Riverpod Providers: `playerHandleFactoryProvider` supplies the handle factory, and `playbackControllerProvider` creates one `AppPlaybackController` for the app lifetime, disposing it when the container shuts down.
 
@@ -213,17 +222,13 @@ This design ensures predictable widget rebuilds and clear state transitions.
 - [playback_controller.dart:15-67](file://lib/playback/playback_controller.dart#L15-L67)
 - [playback_controller.dart:77-150](file://lib/playback/playback_controller.dart#L77-L150)
 
-### AppPlaybackController: State Machine, Source Switching, and Cleanup
-`AppPlaybackController` extends `ValueNotifier<PlaybackState>` and implements `PlaybackController`. Key responsibilities include:
+### AppPlaybackController: Complete State Machine Implementation
+`AppPlaybackController` extends `ValueNotifier<PlaybackState>` and implements `PlaybackController`. The complete 422-line implementation includes:
 
-- Validating source schemes before touching the engine.
-- Tearing down previous sources before loading new ones.
-- Transitioning from idle to buffering to playing.
-- Carrying user preferences (speed, volume) across sources.
-- Discarding stale load completions via a generation counter.
-- Mapping engine snapshots to `PlaybackState`.
-- Converting engine failures into user-safe error states.
-- Managing subscriptions and disposing handles safely.
+#### Core State Management
+- **Generation Counter System**: Monotonic load ID (`_generation`) ensures only the newest generation may touch the state, preventing stale completions from overwriting newer state.
+- **User Preference Persistence**: Carries `_volume` and `_speed` across sources, applying them to fresh handles automatically.
+- **State Validation**: Validates source schemes before touching the engine, rejecting unsupported schemes with user-safe messages.
 
 #### Play Lifecycle Flow
 ```mermaid
@@ -252,12 +257,12 @@ ReduceSnapshot --> End(["Return"])
 **Diagram sources**
 - [app_playback_controller.dart:57-135](file://lib/playback/app_playback_controller.dart#L57-L135)
 
-#### Error Handling and Recovery
-- Unsupported schemes produce a fixed, user-safe message before any engine call.
-- Factory creation errors and initialization errors map to a generic load failure message.
-- Command errors (play, pause, seek, speed, volume) are wrapped by `_runCommand`, which sets an error state instead of throwing.
-- Engine error text is never surfaced verbatim; the controller replaces it with a user-safe message.
-- Disposal failures are swallowed to avoid surfacing teardown diagnostics as playback errors.
+#### Error Handling and Recovery Mechanisms
+- **Unsupported Scheme Detection**: Rejects unsupported schemes early with fixed, user-safe messages before any engine call.
+- **Factory and Initialization Errors**: Map to generic load failure messages, never surfacing raw engine errors.
+- **Command Error Wrapping**: All engine commands wrapped in `_runCommand` which converts failures to error states instead of throwing.
+- **Engine Error Sanitization**: Raw engine error text is never surfaced verbatim; replaced with user-safe messages.
+- **Disposal Safety**: Disposal failures are swallowed to avoid surfacing teardown diagnostics as playback errors.
 
 ```mermaid
 flowchart TD
@@ -275,11 +280,11 @@ Success --> Return
 - [app_playback_controller.dart:386-400](file://lib/playback/app_playback_controller.dart#L386-L400)
 
 #### Resource Cleanup and Memory Optimization
-- `_teardownHandle` cancels the engine change subscription, clears the active handle, resets seekability, and disposes the handle.
-- `_disposeQuietly` catches disposal exceptions so teardown does not crash the app or pollute logs.
-- Generation counter prevents stale loads from overwriting newer state.
-- Preferences are stored in the controller and applied to fresh handles, avoiding repeated expensive setup.
-- The controller itself is long-lived and disposed by Riverpod, preventing frequent recreation.
+- **Handle Teardown**: `_teardownHandle` cancels engine change subscriptions, clears active handles, resets seekability, and disposes handles safely.
+- **Quiet Disposal**: `_disposeQuietly` catches disposal exceptions so teardown doesn't crash the app or pollute logs.
+- **Generation Counter Protection**: Prevents stale loads from overwriting newer state, avoiding redundant renders.
+- **Preference Caching**: Speed and volume cached in controller and applied once per source, minimizing repeated engine calls.
+- **Long-lived Controller**: Riverpod creates one controller for app lifetime, reducing allocation churn.
 
 ```mermaid
 sequenceDiagram
@@ -302,6 +307,13 @@ APC-->>UI : state updated
 **Diagram sources**
 - [app_playback_controller.dart:402-420](file://lib/playback/app_playback_controller.dart#L402-L420)
 - [app_playback_controller.dart:57-135](file://lib/playback/app_playback_controller.dart#L57-L135)
+
+#### Command Implementation Details
+- **Pause/Resume Logic**: Idempotent operations with proper state gating - pause is no-op when already paused/idle/finished/errored.
+- **Seek Operations**: Respects source capabilities, clamping values to valid ranges.
+- **Skip Functions**: Forward/backward skipping with proper boundary checking.
+- **Speed/Volume Control**: Immediate state updates with engine synchronization.
+- **Stop Functionality**: Releases engine resources and returns to idle state.
 
 **Section sources**
 - [app_playback_controller.dart:23-48](file://lib/playback/app_playback_controller.dart#L23-L48)
@@ -364,7 +376,7 @@ PlayerHandle <|.. VideoPlayerHandle
 
 **Section sources**
 - [player_handle.dart:36-114](file://lib/playback/player_handle.dart#L36-L114)
-- [video_player_handle.dart:1-109](file://lib/playback/video_player_handle.dart#L1-109)
+- [video_player_handle.dart:1-109](file://lib/playback/video_player_handle.dart#L1-L109)
 
 ### Riverpod Integration and Usage Patterns
 The Riverpod layer provides:
@@ -430,7 +442,7 @@ Tests verify:
 The playback layer has clear boundaries:
 
 - UI depends on `PlaybackController` and `PlaybackState`.
-- `AppPlaybackController` depends on `PlayerHandleFactory`, `PlayableSource`, and Flutter’s `ValueNotifier`.
+- `AppPlaybackController` depends on `PlayerHandleFactory`, `PlayableSource`, and Flutter's `ValueNotifier`.
 - `VideoPlayerHandle` depends on `video_player` and `PlayableSource`.
 - Riverpod providers depend on both the controller and the handle factory.
 
@@ -459,24 +471,23 @@ PHF --> VPH["video_player_handle.dart"]
 - [source_adapter.dart:119-137](file://lib/sources/source_adapter.dart#L119-L137)
 
 ## Performance Considerations
-- Immutable state: `PlaybackState` equality avoids unnecessary widget rebuilds.
-- Single long-lived controller: Riverpod creates one controller for the app lifetime, reducing allocation churn.
-- Generation counter: Prevents stale async work from updating state, avoiding redundant renders.
-- Subscription management: Cancelling the engine change stream and disposing handles prevents memory leaks.
-- Quiet disposal: Swallowing disposal exceptions avoids noisy logs and crashes during teardown.
-- Preference caching: Speed and volume are cached in the controller and applied once per source, minimizing repeated engine calls.
-
-[No sources needed since this section provides general guidance]
+- **Immutable State**: `PlaybackState` equality avoids unnecessary widget rebuilds.
+- **Single Long-lived Controller**: Riverpod creates one controller for the app lifetime, reducing allocation churn.
+- **Generation Counter**: Prevents stale async work from updating state, avoiding redundant renders.
+- **Subscription Management**: Cancelling the engine change stream and disposing handles prevents memory leaks.
+- **Quiet Disposal**: Swallowing disposal exceptions avoids noisy logs and crashes during teardown.
+- **Preference Caching**: Speed and volume are cached in the controller and applied once per source, minimizing repeated engine calls.
+- **Efficient State Reduction**: Pure `_reduce` function maps engine snapshots to `PlaybackState` efficiently.
 
 ## Troubleshooting Guide
 Common issues and their handling:
 
-- Unsupported source scheme: The controller detects unsupported schemes and sets a user-safe error state without calling the engine.
-- Load failures: Engine initialization errors are mapped to a generic load failure message.
-- Playback failures: Errors from play, pause, seek, speed, or volume are converted to a fixed error state.
-- Stale loads: If a newer `play` call occurs, older loads are discarded and their handles disposed.
-- Disposal errors: Engine disposal failures are caught and ignored to keep teardown safe.
-- Seeking disabled: When `canSeek` is false, seek commands are ignored; UI disables seek affordances accordingly.
+- **Unsupported Source Scheme**: The controller detects unsupported schemes and sets a user-safe error state without calling the engine.
+- **Load Failures**: Engine initialization errors are mapped to a generic load failure message.
+- **Playback Failures**: Errors from play, pause, seek, speed, or volume are converted to a fixed error state.
+- **Stale Loads**: If a newer `play` call occurs, older loads are discarded and their handles disposed.
+- **Disposal Errors**: Engine disposal failures are caught and ignored to keep teardown safe.
+- **Seeking Disabled**: When `canSeek` is false, seek commands are ignored; UI disables seek affordances accordingly.
 
 Recommended debugging steps:
 
@@ -493,6 +504,4 @@ Recommended debugging steps:
 - [playback_controls.dart:64-67](file://lib/features/player/playback_controls.dart#L64-L67)
 
 ## Conclusion
-`AppPlaybackController` is the central coordinator for playback in the application. It implements `PlaybackController`, owns the state machine, manages lifecycle and resources, and maps engine snapshots to a stable, immutable `PlaybackState`. The `PlayerHandle` abstraction isolates engine specifics, with `VideoPlayerHandle` wrapping `video_player`. Riverpod provides a single long-lived controller and allows tests to inject fake handles. The design supports safe source switching, preference carryover, robust error handling, and clean resource cleanup, making it suitable for complex applications with multiple playback scenarios.
-
-[No sources needed since this section summarizes without analyzing specific files]
+`AppPlaybackController` is the central coordinator for playback in the application. The complete 422-line implementation provides a robust state machine with comprehensive error handling, buffering management, and generation counters for rapid play() calls safety. It implements `PlaybackController`, owns the state machine, manages lifecycle and resources, and maps engine snapshots to a stable, immutable `PlaybackState`. The `PlayerHandle` abstraction isolates engine specifics, with `VideoPlayerHandle` wrapping `video_player`. Riverpod provides a single long-lived controller and allows tests to inject fake handles. The design supports safe source switching, preference carryover, robust error handling, and clean resource cleanup, making it suitable for complex applications with multiple playback scenarios.
