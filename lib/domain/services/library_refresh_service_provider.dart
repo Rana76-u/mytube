@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/scan_merge_service_provider.dart';
+import 'package:mytube/platform/platform_providers.dart';
 import 'package:mytube/sources/source_registry.dart';
 
 /// Riverpod provider for [LibraryRefreshNotifier].
@@ -35,6 +36,7 @@ class LibraryRefreshNotifier extends Notifier<RefreshState> {
       adapters: adapters,
       mergeService: mergeService,
       preferences: const LibraryRefreshPreferences(),
+      mediaStore: ref.watch(mediaStoreBridgeProvider),
     );
 
     _subscription = _service.refreshState.listen((s) => state = s);
@@ -59,4 +61,14 @@ class LibraryRefreshNotifier extends Notifier<RefreshState> {
 
   /// Cancels any in-progress refresh.
   void cancel() => _service.cancel();
+
+  /// Opens the system folder picker and persists the chosen folder's read
+  /// grant so the next [refresh] scans it (LOCAL-003, P3-02).
+  ///
+  /// Returns the folder URI, `null` when the user cancelled, or an [Err]
+  /// when the picker/persistence failed. Kept on this notifier so feature
+  /// widgets go through a service seam instead of touching the platform
+  /// bridge directly.
+  Future<Result<String?>> pickFolder() =>
+      ref.read(safBridgeProvider).openFolderPicker();
 }

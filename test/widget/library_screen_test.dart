@@ -7,8 +7,15 @@ import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/library_refresh_service.dart';
+import 'package:mytube/domain/services/library_refresh_service_provider.dart';
+import 'package:mytube/domain/services/playback_source_resolver.dart';
+import 'package:mytube/domain/services/playback_source_resolver_provider.dart';
+import 'package:mytube/domain/services/scan_merge_service.dart';
 import 'package:mytube/features/library/library_screen.dart';
 import 'package:mytube/features/library/video_item_card.dart';
+import 'package:mytube/features/player/video_player_screen.dart';
+import 'package:mytube/sources/source_adapter.dart';
 
 void main() {
   group('LibraryScreen (P5-01)', () {
@@ -541,7 +548,172 @@ void main() {
       expect(find.text('workout'), findsOneWidget);
       addTearDown(container.dispose);
     });
+
+    // ── Manual scan + player navigation (P3-05 UI / PLAY-001) ────
+
+    testWidgets(
+      'the scan button runs a manual refresh and reports the result',
+      (tester) async {
+        final refresh = _FakeRefreshNotifier(addedOnRefresh: 3);
+        final container = ProviderContainer(
+          overrides: [
+            videoRepositoryProvider.overrideWith(
+              (ref) => _FakeRepository(items: _sampleItems),
+            ),
+            libraryRefreshServiceProvider.overrideWith(() => refresh),
+          ],
+        );
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const MaterialApp(home: LibraryScreen()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const ValueKey('library_scan_button')));
+        await tester.pumpAndSettle();
+
+        expect(refresh.refreshCalls, 1);
+        expect(
+          find.text('Scan complete — 3 new videos added.'),
+          findsOneWidget,
+        );
+        addTearDown(container.dispose);
+      },
+    );
+
+    testWidgets('a denied scan surfaces the permission message', (
+      tester,
+    ) async {
+      final refresh = _FakeRefreshNotifier(
+        errorOnRefresh: const PermissionDeniedError(
+          diagnosticMessage: 'test: gate denied',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          videoRepositoryProvider.overrideWith(
+            (ref) => _FakeRepository(items: _sampleItems),
+          ),
+          libraryRefreshServiceProvider.overrideWith(() => refresh),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: LibraryScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('library_scan_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Permission was denied'), findsOneWidget);
+      addTearDown(container.dispose);
+    });
+
+    testWidgets('the empty state offers a Scan device action', (tester) async {
+      final refresh = _FakeRefreshNotifier(addedOnRefresh: 0);
+      final container = ProviderContainer(
+        overrides: [
+          videoRepositoryProvider.overrideWith((ref) => _FakeEmptyRepository()),
+          libraryRefreshServiceProvider.overrideWith(() => refresh),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: LibraryScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Library Empty'), findsOneWidget);
+      await tester.tap(find.text('Scan device'));
+      await tester.pumpAndSettle();
+
+      expect(refresh.refreshCalls, 1);
+      expect(find.text('Scan complete — no new videos found.'), findsOneWidget);
+      addTearDown(container.dispose);
+    });
+
+    testWidgets('tapping a video card opens the player screen', (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          videoRepositoryProvider.overrideWith(
+            (ref) => _FakeRepository(items: _sampleItems),
+          ),
+          libraryRefreshServiceProvider.overrideWith(
+            () => _FakeRefreshNotifier(addedOnRefresh: 0),
+          ),
+          // The pushed player screen resolves lazily after the tap; keep the
+          // route itself deterministic by standing the resolver off.
+          playbackSourceResolverProvider.overrideWithValue(_SilentResolver()),
+        ],
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: LibraryScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Video 1'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(VideoPlayerScreen), findsOneWidget);
+      addTearDown(container.dispose);
+    });
   });
+}
+
+/// Fake Riverpod-facing refresh notifier: records `refresh()` calls and
+/// returns a scripted outcome, so scan UI behaviour is testable without
+/// adapters, databases, or the native permission bridge.
+class _FakeRefreshNotifier extends LibraryRefreshNotifier {
+  _FakeRefreshNotifier({this.addedOnRefresh = 0, this.errorOnRefresh});
+
+  final int addedOnRefresh;
+  final AppError? errorOnRefresh;
+  int refreshCalls = 0;
+
+  @override
+  RefreshState build() => const RefreshIdle();
+
+  @override
+  Future<Result<LibraryRefreshResult>> refresh({
+    RefreshTrigger trigger = RefreshTrigger.manual,
+  }) async {
+    refreshCalls++;
+    if (errorOnRefresh case final error?) {
+      return Result.err(error);
+    }
+    return Result.ok(
+      LibraryRefreshResult(
+        adapterResults: {
+          ProviderType.localMediaStore: ScanMergeResult(
+            added: addedOnRefresh,
+            updated: 0,
+            markedMissing: 0,
+          ),
+        },
+        completedAt: DateTime.now(),
+      ),
+    );
+  }
+}
+
+/// Resolver fake that fails fast — the navigation test only asserts the
+/// player route opens; playback itself is covered in the player tests.
+class _SilentResolver implements PlaybackSourceResolver {
+  @override
+  Future<Result<PlayableSource>> resolveForItem(VideoItemSummary item) async =>
+      Result.err(
+        const NotFoundError(diagnosticMessage: 'test: navigation only'),
+      );
 }
 
 /// Shared sample library used by the title-search widget tests.
@@ -679,6 +851,11 @@ class _FakeEmptyRepository implements VideoRepository {
   ) async => throw UnimplementedError();
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => throw UnimplementedError();
+
+  @override
   Future<Result<String>> insertVideoItem(VideoItemInsert item) async =>
       throw UnimplementedError();
 
@@ -693,6 +870,18 @@ class _FakeEmptyRepository implements VideoRepository {
     AvailabilityState availability,
     DateTime lastCheckedAt,
   ) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async => throw UnimplementedError();
 
   @override
   Future<Result<void>> updateSourceLocationMetadata(
@@ -942,6 +1131,11 @@ class _FakeRepository implements VideoRepository {
   ) async => throw UnimplementedError();
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => throw UnimplementedError();
+
+  @override
   Future<Result<String>> insertVideoItem(VideoItemInsert item) async =>
       throw UnimplementedError();
 
@@ -956,6 +1150,18 @@ class _FakeRepository implements VideoRepository {
     AvailabilityState availability,
     DateTime lastCheckedAt,
   ) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async => throw UnimplementedError();
 
   @override
   Future<Result<void>> updateSourceLocationMetadata(
@@ -1097,6 +1303,11 @@ class _FakeErrorRepository implements VideoRepository {
   ) async => throw UnimplementedError();
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => throw UnimplementedError();
+
+  @override
   Future<Result<String>> insertVideoItem(VideoItemInsert item) async =>
       throw UnimplementedError();
 
@@ -1111,6 +1322,18 @@ class _FakeErrorRepository implements VideoRepository {
     AvailabilityState availability,
     DateTime lastCheckedAt,
   ) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async => throw UnimplementedError();
 
   @override
   Future<Result<void>> updateSourceLocationMetadata(

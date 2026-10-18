@@ -25,6 +25,7 @@ class EmptyState extends StatelessWidget {
     this.icon,
     this.message,
     this.action,
+    this.secondaryAction,
   });
 
   /// Short headline, e.g. "No videos yet".
@@ -39,6 +40,10 @@ class EmptyState extends StatelessWidget {
 
   /// Optional primary call-to-action.
   final EmptyStateAction? action;
+
+  /// Optional secondary call-to-action rendered below [action] as an
+  /// outlined button (e.g. "Add URL" next to "Scan device").
+  final EmptyStateAction? secondaryAction;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +80,10 @@ class EmptyState extends StatelessWidget {
             if (action case final cta?) ...[
               const SizedBox(height: 24),
               FilledButton(onPressed: cta.onPressed, child: Text(cta.label)),
+            ],
+            if (secondaryAction case final cta?) ...[
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: cta.onPressed, child: Text(cta.label)),
             ],
           ],
         ),

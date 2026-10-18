@@ -7,10 +7,15 @@ import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/direct_url_service.dart';
+import 'package:mytube/domain/services/library_refresh_service.dart';
+import 'package:mytube/domain/services/library_refresh_service_provider.dart';
+import 'package:mytube/domain/services/thumbnail_service_provider.dart';
 import 'package:mytube/features/library/add_url_dialog.dart';
 import 'package:mytube/features/library/library_filter_sheet.dart';
+import 'package:mytube/features/library/manage_sources_sheet.dart';
 import 'package:mytube/features/library/manage_tags_sheet.dart';
 import 'package:mytube/features/library/video_item_card.dart';
+import 'package:mytube/features/player/video_player_screen.dart';
 
 /// Library tab — searchable, filterable video collection (LIB-001–LIB-009).
 ///
@@ -96,8 +101,80 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     ref.invalidate(_libraryItemsProvider);
   }
 
+  /// Opens the source-management sheet for [item] (P7-06/P7-07, DUP-005,
+  /// AVAIL-002). Refreshes the library and the item's thumbnail on close —
+  /// a reconnected source can change both.
+  Future<void> _openManageSources(VideoItemSummary item) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ManageSourcesSheet(video: item),
+    );
+    if (!mounted) return;
+    ref.invalidate(_libraryItemsProvider);
+    ref.invalidate(videoThumbnailProvider(item.id.value));
+  }
+
+  /// Runs a manual library scan (LOCAL-001/LOCAL-008, P3-05).
+  ///
+  /// The service-side permission gate may raise the MediaStore dialog before
+  /// scanning. On completion the whole query family is invalidated so every
+  /// active list/search/filter view picks the new rows up, and a snackbar
+  /// reports what changed.
+  Future<void> _scanDevice() async {
+    final result = await ref
+        .read(libraryRefreshServiceProvider.notifier)
+        .refresh();
+    if (!mounted) return;
+    ref.invalidate(_libraryItemsProvider);
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_scanMessageFor(result))));
+  }
+
+  /// User-safe scan outcome. Permission denial points at the retry path;
+  /// nothing here echoes raw diagnostics (AGENTS privacy rules).
+  String _scanMessageFor(Result<LibraryRefreshResult> result) {
+    return switch (result) {
+      Ok(:final value) when value.totalAdded > 0 =>
+        'Scan complete — ${value.totalAdded} new video'
+            '${value.totalAdded == 1 ? '' : 's'} added.',
+      Ok() => 'Scan complete — no new videos found.',
+      Err(:final error) => error.userMessage,
+    };
+  }
+
+  /// Opens the system folder picker and rescans so the newly granted folder
+  /// is indexed immediately (LOCAL-003, P3-02).
+  Future<void> _chooseFolder() async {
+    final picked = await ref
+        .read(libraryRefreshServiceProvider.notifier)
+        .pickFolder();
+    if (!mounted) return;
+    switch (picked) {
+      case Ok(value: final folderUri):
+        if (folderUri == null) return; // User cancelled the picker.
+        await _scanDevice();
+      case Err(:final error):
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.userMessage)));
+    }
+  }
+
+  /// Opens the dedicated player for [item] (PLAY-001). The player screen
+  /// resolves the item's source and starts playback itself.
+  void _openPlayer(VideoItemSummary item) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => VideoPlayerScreen(item: item)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final refreshState = ref.watch(libraryRefreshServiceProvider);
+    final isScanning = refreshState is RefreshInProgress;
     return Scaffold(
       appBar: AppBar(
         title: _isSearchOpen
@@ -120,6 +197,35 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             : null,
         actions: [
           if (!_isSearchOpen) ...[
+            // Manual device scan (LOCAL-001/LOCAL-008, P3-05). Shows a
+            // spinner while a scan is in flight so the tap target stays
+            // visible but cannot start overlapping runs.
+            IconButton(
+              key: const ValueKey('library_scan_button'),
+              tooltip: 'Scan device',
+              icon: isScanning
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+              onPressed: isScanning ? null : _scanDevice,
+            ),
+            // Secondary scan actions — SAF folder picking (LOCAL-003).
+            PopupMenuButton<String>(
+              key: const ValueKey('library_more_menu'),
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) {
+                if (value == 'choose_folder') _chooseFolder();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'choose_folder',
+                  child: Text('Choose folders…'),
+                ),
+              ],
+            ),
             // Sort menu (P5-04, LIB-005).
             PopupMenuButton<LibrarySort>(
               key: const ValueKey('library_sort_menu'),
@@ -211,6 +317,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                   'Scan your device or add a direct URL to get started.',
               icon: Icons.video_library_outlined,
               action: EmptyStateAction(
+                label: 'Scan device',
+                // Re-entrancy is guarded inside LibraryRefreshService — a
+                // second call while scanning returns an "already in progress"
+                // error, so the action itself stays enabled.
+                onPressed: _scanDevice,
+              ),
+              // The scan action is primary, but URL entry stays reachable from
+              // the empty state too so first-run guidance covers both paths.
+              secondaryAction: EmptyStateAction(
                 label: 'Add URL',
                 onPressed: _openAddUrlDialog,
               ),
@@ -264,13 +379,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           item: item,
           onToggleFavourite: () => _toggleFavourite(item),
           onManageTags: () => _openManageTags(item),
-          onTap: () {
-            // TODO: Navigate to player screen (P4-05 already has controls,
-            // but player screen integration is pending)
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Tap: ${item.title}')));
-          },
+          onManageSources: () => _openManageSources(item),
+          // Card tap opens the dedicated player screen (PLAY-001).
+          onTap: () => _openPlayer(item),
         );
       },
     );

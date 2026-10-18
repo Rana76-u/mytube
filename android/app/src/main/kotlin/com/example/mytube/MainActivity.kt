@@ -12,5 +12,8 @@ class MainActivity : FlutterActivity() {
         SaffBridgePlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
+        ThumbnailPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
     }
 }

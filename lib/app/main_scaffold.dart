@@ -60,18 +60,26 @@ class _MainScaffoldState extends State<MainScaffold> {
     ),
   ];
 
-  static const List<Widget> _screens = [
-    DiscoverScreen(),
-    ReelsScreen(),
-    LibraryScreen(),
-    SavedScreen(),
-    SettingsScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          // Discover offers a shortcut into Reels, so hand it a callback that
+          // flips the host to the Reels tab (NAV-003).
+          DiscoverScreen(
+            onOpenReels: () =>
+                setState(() => _currentIndex = MainScaffold.tabReels),
+          ),
+          // Reels autoplays only while it is the visible tab (PLAY-002), so it
+          // needs to know when the host switched to it.
+          ReelsScreen(active: _currentIndex == MainScaffold.tabReels),
+          const LibraryScreen(),
+          const SavedScreen(),
+          const SettingsScreen(),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {

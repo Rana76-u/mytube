@@ -23,6 +23,7 @@ part 'app_database.g.dart';
 ///   v2 — [VideoItems] + [SourceLocations] (P2-02)
 ///   v3 — [Tags] + [VideoTags] + [Collections] + [CollectionItems] (P2-03)
 ///   v4 — [AppPreferences] + indexes (P2-05 / P2-07)
+///   v5 — [SourceLocations.thumbnailUri] (P7-02)
 @DriftDatabase(
   tables: [
     VideoItems,
@@ -39,7 +40,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -68,6 +69,10 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await m.createTable(appPreferences);
         await _createIndexes();
+      }
+      // v4 → v5: provider thumbnail reference on source locations (P7-02)
+      if (from < 5) {
+        await m.addColumn(sourceLocations, sourceLocations.thumbnailUri);
       }
     },
   );

@@ -11,10 +11,17 @@ class SourceLocationsDao extends DatabaseAccessor<AppDatabase>
     with _$SourceLocationsDaoMixin {
   SourceLocationsDao(super.db);
 
-  /// Returns all source locations for [videoItemId].
-  Future<List<SourceLocation>> locationsForItem(String videoItemId) => (select(
-    sourceLocations,
-  )..where((t) => t.videoItemId.equals(videoItemId))).get();
+  /// Returns all source locations for [videoItemId], preferring the primary
+  /// location first, then earliest-attached (stable order for the resolver
+  /// and the manage-sources sheet; P7-05/P7-06).
+  Future<List<SourceLocation>> locationsForItem(String videoItemId) =>
+      (select(sourceLocations)
+            ..where((t) => t.videoItemId.equals(videoItemId))
+            ..orderBy([
+              (t) => OrderingTerm.desc(t.isPrimary),
+              (t) => OrderingTerm.asc(t.createdAt),
+            ]))
+          .get();
 
   /// Returns the source location with [id], or `null`.
   Future<SourceLocation?> getById(String id) => (select(
@@ -75,5 +82,61 @@ class SourceLocationsDao extends DatabaseAccessor<AppDatabase>
         updatedAt: Value(now),
       ),
     );
+  }
+
+  /// Makes [locationId] the sole primary location of [videoItemId] (P7-06).
+  ///
+  /// Runs as a transaction so the item is never left with zero or two
+  /// primaries. Only locations belonging to [videoItemId] are touched: when
+  /// [locationId] is not one of this item's locations the whole operation is a
+  /// no-op and the current primary is left intact — this guards against
+  /// clearing an item's selection via a stale or foreign id.
+  Future<void> setPrimary({
+    required String videoItemId,
+    required String locationId,
+  }) => transaction(() async {
+    final target =
+        await (select(sourceLocations)..where(
+              (t) =>
+                  t.id.equals(locationId) & t.videoItemId.equals(videoItemId),
+            ))
+            .getSingleOrNull();
+    if (target == null) return; // Foreign/unknown id: never strip the primary.
+    await (update(sourceLocations)..where(
+          (t) => t.videoItemId.equals(videoItemId) & t.isPrimary.equals(true),
+        ))
+        .write(const SourceLocationsCompanion(isPrimary: Value(false)));
+    await (update(sourceLocations)..where((t) => t.id.equals(locationId)))
+        .write(const SourceLocationsCompanion(isPrimary: Value(true)));
+  });
+
+  /// Returns source locations whose byte size equals [sizeBytes] and whose
+  /// parent item's duration equals [durationMs] (P7-04, DUP-003).
+  ///
+  /// This is the pre-filter for conservative multi-signal duplicate
+  /// matching: both signals must be known and equal before a candidate is
+  /// even considered; the caller still applies [DuplicateMatcher] to the
+  /// returned signals and must never merge on filename alone (DUP-002).
+  Future<List<({SourceLocation location, VideoItem item})>>
+  candidatesBySignals({required int sizeBytes, required int durationMs}) async {
+    final query = select(sourceLocations).join([
+      innerJoin(
+        videoItems,
+        videoItems.id.equalsExp(sourceLocations.videoItemId),
+      ),
+    ]);
+    query.where(
+      sourceLocations.sizeBytes.equals(sizeBytes) &
+          videoItems.durationMs.equals(durationMs),
+    );
+    final rows = await query.get();
+    return rows
+        .map(
+          (row) => (
+            location: row.readTable(sourceLocations),
+            item: row.readTable(videoItems),
+          ),
+        )
+        .toList();
   }
 }

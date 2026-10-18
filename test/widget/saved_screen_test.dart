@@ -476,6 +476,11 @@ class _FakeSavedRepository implements VideoRepository {
   ) async => throw UnimplementedError();
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => throw UnimplementedError();
+
+  @override
   Future<Result<String>> insertVideoItem(VideoItemInsert item) async =>
       throw UnimplementedError();
 
@@ -490,6 +495,18 @@ class _FakeSavedRepository implements VideoRepository {
     AvailabilityState availability,
     DateTime lastCheckedAt,
   ) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async => throw UnimplementedError();
 
   @override
   Future<Result<void>> updateSourceLocationMetadata(

@@ -94,6 +94,9 @@ class VideoPlayerHandle implements PlayerHandle {
   Future<void> setSpeed(double speed) => _controller.setPlaybackSpeed(speed);
 
   @override
+  Future<void> setLooping(bool looping) => _controller.setLooping(looping);
+
+  @override
   Future<void> dispose() async {
     if (_disposed) {
       return;

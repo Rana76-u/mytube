@@ -71,6 +71,11 @@ class _RecordingRepository implements VideoRepository {
   ) async => Result.ok(locationsToReturn);
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => Result.ok(locationsToReturn);
+
+  @override
   Future<Result<List<VideoItemSummary>>> searchItems(String query) async =>
       getAllItems();
 
@@ -203,6 +208,18 @@ class _RecordingRepository implements VideoRepository {
     AvailabilityState availability,
     DateTime lastCheckedAt,
   ) async => throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async => throw UnimplementedError();
 }
 
 /// Host that opens [AddUrlDialog] and captures what it pops with.
@@ -433,7 +450,9 @@ void main() {
     testWidgets('the empty-state action opens the dialog', (tester) async {
       await pumpLibrary(tester);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Add URL'));
+      // "Scan device" is now the primary FilledButton; the URL entry moved to
+      // the secondary OutlinedButton so first-run guidance covers both paths.
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Add URL'));
       await tester.pumpAndSettle();
 
       expect(find.text('Add video URL'), findsOneWidget);

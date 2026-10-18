@@ -6,6 +6,7 @@ import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/library/video_item_card.dart';
+import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/add_videos_sheet.dart';
 import 'package:mytube/features/saved/saved_providers.dart';
 import 'package:mytube/features/saved/text_prompt.dart';
@@ -179,7 +180,12 @@ class _CollectionScreenState extends ConsumerState<CollectionScreen> {
               final item = items[index];
               return VideoItemCard(
                 item: item,
-                onTap: () {},
+                // Card tap opens the player, like every other card surface.
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => VideoPlayerScreen(item: item),
+                  ),
+                ),
                 trailing: IconButton(
                   key: ValueKey('collection_remove_${item.id.value}'),
                   icon: const Icon(Icons.remove_circle_outline),

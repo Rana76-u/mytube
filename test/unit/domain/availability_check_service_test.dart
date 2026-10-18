@@ -63,8 +63,14 @@ class FakeLocalMediaAdapter implements VideoSourceAdapter {
 }
 
 class FakeSafBridge implements SafBridge {
+  /// Value returned by [openFolderPicker]; null simulates the user cancelling.
+  String? pickedFolderUri;
+
+  /// Value returned by [checkFolderAccess].
+  bool folderAccessGranted = true;
+
   @override
-  Future<Result<String?>> openFolderPicker() async => const Ok(null);
+  Future<Result<String?>> openFolderPicker() async => Ok(pickedFolderUri);
 
   @override
   Future<Result<List<String>>> getPersistedFolderUris() async => const Ok([]);
@@ -77,10 +83,15 @@ class FakeSafBridge implements SafBridge {
       const Ok([]);
 
   @override
-  Future<Result<bool>> checkFolderAccess(String uri) async => const Ok(true);
+  Future<Result<bool>> checkFolderAccess(String uri) async =>
+      Ok(folderAccessGranted);
 }
 
 class FakeMediaStoreBridge implements MediaStoreBridge {
+  /// Value returned by [requestPermission].
+  MediaStorePermissionStatus permissionStatus =
+      MediaStorePermissionStatus.granted;
+
   @override
   Future<Result<List<MediaStoreVideo>>> queryVideos() async => const Ok([]);
 
@@ -90,7 +101,7 @@ class FakeMediaStoreBridge implements MediaStoreBridge {
 
   @override
   Future<MediaStorePermissionStatus> requestPermission() async =>
-      MediaStorePermissionStatus.granted;
+      permissionStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +474,313 @@ void main() {
       final allItems = await repo.getAllItems();
       final item = (allItems as Ok<List<VideoItemSummary>>).value.first;
       expect(item.isFavourite, isTrue);
+    });
+  });
+
+  // ── Per-location retry / reconnect (P7-07, AVAIL-002) ───────────────────
+  group('AvailabilityCheckService retry actions (P7-07)', () {
+    late db_lib.AppDatabase db;
+    late DriftVideoRepository repo;
+    late FakeLocalMediaAdapter fakeAdapter;
+    late FakeSafBridge fakeSaf;
+    late FakeMediaStoreBridge fakeMs;
+    late AvailabilityCheckService service;
+
+    setUp(() {
+      db = db_lib.AppDatabase.inMemory();
+      repo = DriftVideoRepository(db);
+      fakeAdapter = FakeLocalMediaAdapter();
+      fakeSaf = FakeSafBridge();
+      fakeMs = FakeMediaStoreBridge();
+      service = AvailabilityCheckService(
+        localAdapter: fakeAdapter,
+        safBridge: fakeSaf,
+        mediaStoreBridge: fakeMs,
+        repository: repo,
+      );
+    });
+
+    tearDown(() async {
+      await repo.dispose();
+      await db.close();
+    });
+
+    Future<SourceLocation> loadLocation(
+      ProviderType type,
+      String locationId,
+    ) async {
+      final result = await repo.getSourceLocationsByProvider(type);
+      final locs = (result as Ok<List<SourceLocation>>).value;
+      return locs.firstWhere((l) => l.id == locationId);
+    }
+
+    Future<String?> storedState(String locationId) async {
+      final row = await (db.select(
+        db.sourceLocations,
+      )..where((t) => t.id.equals(locationId))).getSingle();
+      return row.availability;
+    }
+
+    test('recheckLocation persists the fresh state and returns it', () async {
+      await _insertLocation(
+        db,
+        itemId: 'i1',
+        locationId: 'loc-1',
+        sourceId: 'content://media/1',
+        providerType: ProviderType.localMediaStore,
+        availability: AvailabilityState.missing,
+      );
+      fakeAdapter.overrides['content://media/1'] = const Ok(
+        AvailabilityState.available,
+      );
+
+      final location = await loadLocation(
+        ProviderType.localMediaStore,
+        'loc-1',
+      );
+      final result = await service.recheckLocation(location);
+
+      expect(result, isA<Ok<AvailabilityState>>());
+      expect(
+        (result as Ok<AvailabilityState>).value,
+        AvailabilityState.available,
+      );
+      expect(await storedState('loc-1'), 'available');
+    });
+
+    test(
+      'recheckLocation surfaces an adapter failure as Err (unlike bulk)',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://media/1',
+          providerType: ProviderType.localMediaStore,
+          availability: AvailabilityState.missing,
+        );
+        fakeAdapter.overrides['content://media/1'] = Err(
+          const UnexpectedError(diagnosticMessage: 'boom'),
+        );
+
+        final location = await loadLocation(
+          ProviderType.localMediaStore,
+          'loc-1',
+        );
+        final result = await service.recheckLocation(location);
+
+        expect(result, isA<Err<AvailabilityState>>());
+        // Row is retained with its original state (AVAIL-001).
+        expect(await storedState('loc-1'), 'missing');
+      },
+    );
+
+    test(
+      'recheckLocation returns Err when no adapter serves the provider',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'https://example.com/a.mp4',
+          providerType: ProviderType.directUrl,
+          availability: AvailabilityState.missing,
+        );
+
+        final location = await loadLocation(ProviderType.directUrl, 'loc-1');
+        final result = await service.recheckLocation(location);
+
+        expect(result, isA<Err<AvailabilityState>>());
+      },
+    );
+
+    test(
+      'requestMediaStoreAccessAndRecheck rechecks once permission is granted',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://media/1',
+          providerType: ProviderType.localMediaStore,
+          availability: AvailabilityState.permissionRevoked,
+        );
+        fakeMs.permissionStatus = MediaStorePermissionStatus.granted;
+        fakeAdapter.overrides['content://media/1'] = const Ok(
+          AvailabilityState.available,
+        );
+
+        final location = await loadLocation(
+          ProviderType.localMediaStore,
+          'loc-1',
+        );
+        final result = await service.requestMediaStoreAccessAndRecheck(
+          location,
+        );
+
+        expect(
+          (result as Ok<AvailabilityState>).value,
+          AvailabilityState.available,
+        );
+        expect(await storedState('loc-1'), 'available');
+      },
+    );
+
+    test(
+      'requestMediaStoreAccessAndRecheck errors and keeps row when permission '
+      'is still denied',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://media/1',
+          providerType: ProviderType.localMediaStore,
+          availability: AvailabilityState.permissionRevoked,
+        );
+        fakeMs.permissionStatus = MediaStorePermissionStatus.denied;
+
+        final location = await loadLocation(
+          ProviderType.localMediaStore,
+          'loc-1',
+        );
+        final result = await service.requestMediaStoreAccessAndRecheck(
+          location,
+        );
+
+        expect(result, isA<Err<AvailabilityState>>());
+        expect(
+          (result as Err<AvailabilityState>).error,
+          isA<PermissionDeniedError>(),
+        );
+        expect(await storedState('loc-1'), 'permissionRevoked');
+      },
+    );
+
+    test(
+      'requestMediaStoreAccessAndRecheck rejects non-MediaStore locations',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://folder/1',
+          providerType: ProviderType.selectedFolder,
+          availability: AvailabilityState.permissionRevoked,
+        );
+
+        final location = await loadLocation(
+          ProviderType.selectedFolder,
+          'loc-1',
+        );
+        final result = await service.requestMediaStoreAccessAndRecheck(
+          location,
+        );
+
+        expect(result, isA<Err<AvailabilityState>>());
+      },
+    );
+
+    test(
+      'reconnectFolderAndRecheck rechecks once the folder is live again',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://folder/1',
+          providerType: ProviderType.selectedFolder,
+          availability: AvailabilityState.permissionRevoked,
+        );
+        fakeSaf.pickedFolderUri = 'content://folder/root';
+        fakeSaf.folderAccessGranted = true;
+        fakeAdapter.overrides['content://folder/1'] = const Ok(
+          AvailabilityState.available,
+        );
+
+        final location = await loadLocation(
+          ProviderType.selectedFolder,
+          'loc-1',
+        );
+        final result = await service.reconnectFolderAndRecheck(location);
+
+        expect(
+          (result as Ok<AvailabilityState>).value,
+          AvailabilityState.available,
+        );
+        expect(await storedState('loc-1'), 'available');
+      },
+    );
+
+    test('reconnectFolderAndRecheck leaves state untouched when the user '
+        'cancels the picker', () async {
+      await _insertLocation(
+        db,
+        itemId: 'i1',
+        locationId: 'loc-1',
+        sourceId: 'content://folder/1',
+        providerType: ProviderType.selectedFolder,
+        availability: AvailabilityState.permissionRevoked,
+      );
+      fakeSaf.pickedFolderUri = null; // cancellation
+
+      final location = await loadLocation(ProviderType.selectedFolder, 'loc-1');
+      final result = await service.reconnectFolderAndRecheck(location);
+
+      expect(result, isA<Ok<AvailabilityState>>());
+      expect(
+        (result as Ok<AvailabilityState>).value,
+        AvailabilityState.permissionRevoked,
+      );
+      expect(await storedState('loc-1'), 'permissionRevoked');
+    });
+
+    test(
+      'reconnectFolderAndRecheck errors when access is still revoked',
+      () async {
+        await _insertLocation(
+          db,
+          itemId: 'i1',
+          locationId: 'loc-1',
+          sourceId: 'content://folder/1',
+          providerType: ProviderType.selectedFolder,
+          availability: AvailabilityState.permissionRevoked,
+        );
+        fakeSaf.pickedFolderUri = 'content://folder/root';
+        fakeSaf.folderAccessGranted = false;
+
+        final location = await loadLocation(
+          ProviderType.selectedFolder,
+          'loc-1',
+        );
+        final result = await service.reconnectFolderAndRecheck(location);
+
+        expect(result, isA<Err<AvailabilityState>>());
+        expect(
+          (result as Err<AvailabilityState>).error,
+          isA<PermissionDeniedError>(),
+        );
+        expect(await storedState('loc-1'), 'permissionRevoked');
+      },
+    );
+
+    test('reconnectFolderAndRecheck rejects non-folder locations', () async {
+      await _insertLocation(
+        db,
+        itemId: 'i1',
+        locationId: 'loc-1',
+        sourceId: 'content://media/1',
+        providerType: ProviderType.localMediaStore,
+        availability: AvailabilityState.permissionRevoked,
+      );
+
+      final location = await loadLocation(
+        ProviderType.localMediaStore,
+        'loc-1',
+      );
+      final result = await service.reconnectFolderAndRecheck(location);
+
+      expect(result, isA<Err<AvailabilityState>>());
     });
   });
 }

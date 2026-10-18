@@ -59,16 +59,16 @@ void main() {
 
     // ── Schema version ──────────────────────────────────────────────────────
 
-    test('schema version is 3', () async {
-      // The overall schema version is 4 (P2-05 added AppPreferences),
-      // but this group documents the P2-02/P2-03 tables rather than the
-      // version number itself.  The authoritative version test lives in
-      // migrations_test.dart.
+    test('schema version is 5', () async {
+      // The overall schema version is 5 (P7-04/P7-02 added the
+      // source_locations.thumbnail_uri column); earlier groups documented
+      // their own tables rather than the version number itself. The
+      // authoritative version tests live in migrations_test.dart.
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(4));
+      expect(version, equals(5));
     });
 
     // ── VideoItems ───────────────────────────────────────────────────────────

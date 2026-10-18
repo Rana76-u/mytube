@@ -4,6 +4,7 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/scan_merge_service.dart';
+import 'package:mytube/platform/media_store_bridge.dart';
 import 'package:mytube/sources/source_adapter.dart';
 
 // ---------------------------------------------------------------------------
@@ -162,20 +163,24 @@ class RefreshFailed extends RefreshState {
 /// ### Known limitation
 /// [_lastRefreshedAt] is in-memory only — throttle resets on app process
 /// restart (foreground-only per LOCAL-008, no WorkManager).
-// TODO(P3-05): persist _lastRefreshedAt via AppPreferences for
-// cross-restart throttling.
 class LibraryRefreshService {
   LibraryRefreshService({
     required List<VideoSourceAdapter> adapters,
     required ScanMergeService mergeService,
     required LibraryRefreshPreferences preferences,
+    MediaStoreBridge? mediaStore,
   }) : _adapters = adapters, // ignore: prefer_initializing_formals
        _mergeService = mergeService, // ignore: prefer_initializing_formals
-       _preferences = preferences; // ignore: prefer_initializing_formals
+       _preferences = preferences, // ignore: prefer_initializing_formals
+       // Optional seam: when absent (e.g. tests exercising merge-only paths)
+       // the MediaStore permission gate is skipped.
+       // ignore: prefer_initializing_formals
+       _mediaStore = mediaStore;
 
   final List<VideoSourceAdapter> _adapters;
   final ScanMergeService _mergeService;
   final LibraryRefreshPreferences _preferences;
+  final MediaStoreBridge? _mediaStore;
 
   final StreamController<RefreshState> _stateController =
       StreamController<RefreshState>.broadcast();
@@ -234,6 +239,14 @@ class LibraryRefreshService {
         ),
       );
     }
+
+    // Guard: MediaStore permission. Without it the local scan silently
+    // returns zero videos, so request access before scanning (LOCAL-001,
+    // AGENTS "request permissions just in time"). A granted or partially
+    // granted result lets the scan proceed; denial aborts with no state
+    // change so the UI can retry after the user grants access.
+    final permissionError = await _ensureMediaStoreAccess();
+    if (permissionError != null) return Err(permissionError);
 
     final startedAt = DateTime.now();
     _activeCancellationToken = CancellationToken();
@@ -346,6 +359,31 @@ class LibraryRefreshService {
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  /// Checks — and if necessary requests — the MediaStore read permission.
+  ///
+  /// Returns `null` when the scan may proceed (granted / partially granted,
+  /// or when no bridge seam was supplied) and a [PermissionDeniedError] when
+  /// access was refused. The permission request itself may show the system
+  /// dialog; permanently-denied states resolve immediately without one.
+  Future<AppError?> _ensureMediaStoreAccess() async {
+    final bridge = _mediaStore;
+    if (bridge == null) return null;
+
+    var status = await bridge.checkPermission();
+    if (status != MediaStorePermissionStatus.granted &&
+        status != MediaStorePermissionStatus.partiallyGranted) {
+      status = await bridge.requestPermission();
+    }
+    if (status == MediaStorePermissionStatus.granted ||
+        status == MediaStorePermissionStatus.partiallyGranted) {
+      return null;
+    }
+    return const PermissionDeniedError(
+      diagnosticMessage:
+          'LibraryRefreshService.refresh aborted — MediaStore access not granted',
+    );
+  }
 
   void _emit(RefreshState state) {
     _currentState = state;

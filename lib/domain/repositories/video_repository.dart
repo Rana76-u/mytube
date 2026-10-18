@@ -110,6 +110,18 @@ abstract interface class VideoRepository {
     ProviderType providerType,
   );
 
+  /// Returns every [SourceLocation] attached to the video item [id], in a
+  /// stable order (the primary location first, then earliest attached).
+  /// An empty list means the item has no known source (it should not normally
+  /// be playable).
+  ///
+  /// Used to resolve a durable source identity for immediate playback (Reels,
+  /// player) without inflating the whole item. A logical item may carry more
+  /// than one location (P7-05 duplicate sources); callers pick the primary one.
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  );
+
   // ── Insert primitives (P3-04) ─────────────────────────────────────────────
 
   /// Inserts (or upserts) a new video item row.  Returns [Ok] with the
@@ -139,6 +151,32 @@ abstract interface class VideoRepository {
     int? durationMs,
     AvailabilityState? availability,
     DateTime? lastCheckedAt,
+  });
+
+  // ── Source-location selection (P7-06, DUP-005) ────────────────────────────
+
+  /// Makes [locationId] the sole primary playback location of [videoItemId].
+  ///
+  /// Exactly one location per item is primary; the previous primary is
+  /// cleared in the same transaction. A [locationId] that does not belong to
+  /// [videoItemId] is a no-op.
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  });
+
+  // ── Duplicate matching (P7-04, DUP-003) ───────────────────────────────────
+
+  /// Returns existing source locations (with their parent item's signals)
+  /// whose size equals [sizeBytes] AND whose item duration equals
+  /// [durationMs].
+  ///
+  /// Both signals must be known and equal before a candidate is returned —
+  /// this is the conservative pre-filter for multi-signal duplicate
+  /// matching. Filename alone never qualifies (DUP-002).
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
   });
 
   // ── Collections (P5-07, LIB-002 / NAV-004) ────────────────────────────────
@@ -468,6 +506,9 @@ class SourceLocation {
     this.displayName,
     required this.availability,
     this.lastCheckedAt,
+    this.sizeBytes,
+    this.thumbnailUri,
+    this.isPrimary = false,
   });
 
   /// Stable UUID for this source location row.
@@ -491,6 +532,53 @@ class SourceLocation {
 
   /// Wall-clock [DateTime] of the last availability check, or null.
   final DateTime? lastCheckedAt;
+
+  /// File size in bytes reported by the source, if known (P7-04 signal).
+  final int? sizeBytes;
+
+  /// Durable provider thumbnail reference (P7-02) — a content://, document://
+  /// or https:// URI for a *preview image*, never a playback identity.
+  final String? thumbnailUri;
+
+  /// Whether this is the preferred location for playback when the item has
+  /// several locations (P7-05/P7-06, DUP-005).
+  final bool isPrimary;
+}
+
+/// A stored source location plus the duplicate-matching signals carried by
+/// its parent video item (P7-04, DUP-003).
+///
+/// Returned by [VideoRepository.findDuplicateCandidates]. Kept flat and
+/// framework-free so [DuplicateMatcher] can compare it against a freshly
+/// scanned [SourceVideo] without leaking Drift row types.
+class DuplicateCandidate {
+  const DuplicateCandidate({
+    required this.locationId,
+    required this.videoItemId,
+    required this.providerType,
+    required this.sourceUri,
+    required this.availability,
+    this.displayName,
+    this.sizeBytes,
+    required this.itemTitle,
+    this.itemDurationMs,
+    this.itemWidthPx,
+    this.itemHeightPx,
+  });
+
+  final String locationId;
+  final String videoItemId;
+  final ProviderType providerType;
+  final String sourceUri;
+  final AvailabilityState availability;
+  final String? displayName;
+  final int? sizeBytes;
+
+  /// The logical item's user-facing title (may have been renamed).
+  final String itemTitle;
+  final int? itemDurationMs;
+  final int? itemWidthPx;
+  final int? itemHeightPx;
 }
 
 /// Input type for inserting a new video item row.
@@ -529,6 +617,8 @@ class SourceLocationInsert {
     this.sizeBytes,
     required this.availability,
     this.lastCheckedAt,
+    this.thumbnailUri,
+    this.isPrimary = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -544,6 +634,12 @@ class SourceLocationInsert {
   final int? sizeBytes;
   final AvailabilityState availability;
   final int? lastCheckedAt;
+
+  /// Durable provider thumbnail reference (P7-02); never a signed URL.
+  final String? thumbnailUri;
+
+  /// Whether this location should be the item's primary playback source.
+  final bool isPrimary;
   final int createdAt;
   final int updatedAt;
 }

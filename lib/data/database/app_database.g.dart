@@ -733,6 +733,17 @@ class $SourceLocationsTable extends SourceLocations
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _thumbnailUriMeta = const VerificationMeta(
+    'thumbnailUri',
+  );
+  @override
+  late final GeneratedColumn<String> thumbnailUri = GeneratedColumn<String>(
+    'thumbnail_uri',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _availabilityMeta = const VerificationMeta(
     'availability',
   );
@@ -802,6 +813,7 @@ class $SourceLocationsTable extends SourceLocations
     displayName,
     mimeType,
     sizeBytes,
+    thumbnailUri,
     availability,
     lastCheckedAt,
     isPrimary,
@@ -874,6 +886,15 @@ class $SourceLocationsTable extends SourceLocations
       context.handle(
         _sizeBytesMeta,
         sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta),
+      );
+    }
+    if (data.containsKey('thumbnail_uri')) {
+      context.handle(
+        _thumbnailUriMeta,
+        thumbnailUri.isAcceptableOrUnknown(
+          data['thumbnail_uri']!,
+          _thumbnailUriMeta,
+        ),
       );
     }
     if (data.containsKey('availability')) {
@@ -953,6 +974,10 @@ class $SourceLocationsTable extends SourceLocations
         DriftSqlType.int,
         data['${effectivePrefix}size_bytes'],
       ),
+      thumbnailUri: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thumbnail_uri'],
+      ),
       availability: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}availability'],
@@ -1011,6 +1036,13 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
   /// File size in bytes, if known.
   final int? sizeBytes;
 
+  /// Durable provider thumbnail reference (P7-02): a content:// URI for
+  /// MediaStore rows, a document:// URI for SAF rows, or an https:// URL for
+  /// providers that expose a stable preview endpoint.  This is a *thumbnail*
+  /// reference only — never a playback identity — so storing it does not
+  /// violate the signed-URL durability rule (ARCHITECTURE §4).
+  final String? thumbnailUri;
+
   /// Serialised [AvailabilityState] enum name (e.g. `"available"`).
   final String availability;
 
@@ -1035,6 +1067,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
     this.displayName,
     this.mimeType,
     this.sizeBytes,
+    this.thumbnailUri,
     required this.availability,
     this.lastCheckedAt,
     required this.isPrimary,
@@ -1056,6 +1089,9 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
     }
     if (!nullToAbsent || sizeBytes != null) {
       map['size_bytes'] = Variable<int>(sizeBytes);
+    }
+    if (!nullToAbsent || thumbnailUri != null) {
+      map['thumbnail_uri'] = Variable<String>(thumbnailUri);
     }
     map['availability'] = Variable<String>(availability);
     if (!nullToAbsent || lastCheckedAt != null) {
@@ -1082,6 +1118,9 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
       sizeBytes: sizeBytes == null && nullToAbsent
           ? const Value.absent()
           : Value(sizeBytes),
+      thumbnailUri: thumbnailUri == null && nullToAbsent
+          ? const Value.absent()
+          : Value(thumbnailUri),
       availability: Value(availability),
       lastCheckedAt: lastCheckedAt == null && nullToAbsent
           ? const Value.absent()
@@ -1105,6 +1144,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
       displayName: serializer.fromJson<String?>(json['displayName']),
       mimeType: serializer.fromJson<String?>(json['mimeType']),
       sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
+      thumbnailUri: serializer.fromJson<String?>(json['thumbnailUri']),
       availability: serializer.fromJson<String>(json['availability']),
       lastCheckedAt: serializer.fromJson<int?>(json['lastCheckedAt']),
       isPrimary: serializer.fromJson<bool>(json['isPrimary']),
@@ -1123,6 +1163,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
       'displayName': serializer.toJson<String?>(displayName),
       'mimeType': serializer.toJson<String?>(mimeType),
       'sizeBytes': serializer.toJson<int?>(sizeBytes),
+      'thumbnailUri': serializer.toJson<String?>(thumbnailUri),
       'availability': serializer.toJson<String>(availability),
       'lastCheckedAt': serializer.toJson<int?>(lastCheckedAt),
       'isPrimary': serializer.toJson<bool>(isPrimary),
@@ -1139,6 +1180,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
     Value<String?> displayName = const Value.absent(),
     Value<String?> mimeType = const Value.absent(),
     Value<int?> sizeBytes = const Value.absent(),
+    Value<String?> thumbnailUri = const Value.absent(),
     String? availability,
     Value<int?> lastCheckedAt = const Value.absent(),
     bool? isPrimary,
@@ -1152,6 +1194,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
     displayName: displayName.present ? displayName.value : this.displayName,
     mimeType: mimeType.present ? mimeType.value : this.mimeType,
     sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
+    thumbnailUri: thumbnailUri.present ? thumbnailUri.value : this.thumbnailUri,
     availability: availability ?? this.availability,
     lastCheckedAt: lastCheckedAt.present
         ? lastCheckedAt.value
@@ -1175,6 +1218,9 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
           : this.displayName,
       mimeType: data.mimeType.present ? data.mimeType.value : this.mimeType,
       sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
+      thumbnailUri: data.thumbnailUri.present
+          ? data.thumbnailUri.value
+          : this.thumbnailUri,
       availability: data.availability.present
           ? data.availability.value
           : this.availability,
@@ -1197,6 +1243,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
           ..write('displayName: $displayName, ')
           ..write('mimeType: $mimeType, ')
           ..write('sizeBytes: $sizeBytes, ')
+          ..write('thumbnailUri: $thumbnailUri, ')
           ..write('availability: $availability, ')
           ..write('lastCheckedAt: $lastCheckedAt, ')
           ..write('isPrimary: $isPrimary, ')
@@ -1215,6 +1262,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
     displayName,
     mimeType,
     sizeBytes,
+    thumbnailUri,
     availability,
     lastCheckedAt,
     isPrimary,
@@ -1232,6 +1280,7 @@ class SourceLocation extends DataClass implements Insertable<SourceLocation> {
           other.displayName == this.displayName &&
           other.mimeType == this.mimeType &&
           other.sizeBytes == this.sizeBytes &&
+          other.thumbnailUri == this.thumbnailUri &&
           other.availability == this.availability &&
           other.lastCheckedAt == this.lastCheckedAt &&
           other.isPrimary == this.isPrimary &&
@@ -1247,6 +1296,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
   final Value<String?> displayName;
   final Value<String?> mimeType;
   final Value<int?> sizeBytes;
+  final Value<String?> thumbnailUri;
   final Value<String> availability;
   final Value<int?> lastCheckedAt;
   final Value<bool> isPrimary;
@@ -1261,6 +1311,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
     this.displayName = const Value.absent(),
     this.mimeType = const Value.absent(),
     this.sizeBytes = const Value.absent(),
+    this.thumbnailUri = const Value.absent(),
     this.availability = const Value.absent(),
     this.lastCheckedAt = const Value.absent(),
     this.isPrimary = const Value.absent(),
@@ -1276,6 +1327,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
     this.displayName = const Value.absent(),
     this.mimeType = const Value.absent(),
     this.sizeBytes = const Value.absent(),
+    this.thumbnailUri = const Value.absent(),
     this.availability = const Value.absent(),
     this.lastCheckedAt = const Value.absent(),
     this.isPrimary = const Value.absent(),
@@ -1296,6 +1348,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
     Expression<String>? displayName,
     Expression<String>? mimeType,
     Expression<int>? sizeBytes,
+    Expression<String>? thumbnailUri,
     Expression<String>? availability,
     Expression<int>? lastCheckedAt,
     Expression<bool>? isPrimary,
@@ -1311,6 +1364,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
       if (displayName != null) 'display_name': displayName,
       if (mimeType != null) 'mime_type': mimeType,
       if (sizeBytes != null) 'size_bytes': sizeBytes,
+      if (thumbnailUri != null) 'thumbnail_uri': thumbnailUri,
       if (availability != null) 'availability': availability,
       if (lastCheckedAt != null) 'last_checked_at': lastCheckedAt,
       if (isPrimary != null) 'is_primary': isPrimary,
@@ -1328,6 +1382,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
     Value<String?>? displayName,
     Value<String?>? mimeType,
     Value<int?>? sizeBytes,
+    Value<String?>? thumbnailUri,
     Value<String>? availability,
     Value<int?>? lastCheckedAt,
     Value<bool>? isPrimary,
@@ -1343,6 +1398,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
       displayName: displayName ?? this.displayName,
       mimeType: mimeType ?? this.mimeType,
       sizeBytes: sizeBytes ?? this.sizeBytes,
+      thumbnailUri: thumbnailUri ?? this.thumbnailUri,
       availability: availability ?? this.availability,
       lastCheckedAt: lastCheckedAt ?? this.lastCheckedAt,
       isPrimary: isPrimary ?? this.isPrimary,
@@ -1376,6 +1432,9 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
     if (sizeBytes.present) {
       map['size_bytes'] = Variable<int>(sizeBytes.value);
     }
+    if (thumbnailUri.present) {
+      map['thumbnail_uri'] = Variable<String>(thumbnailUri.value);
+    }
     if (availability.present) {
       map['availability'] = Variable<String>(availability.value);
     }
@@ -1407,6 +1466,7 @@ class SourceLocationsCompanion extends UpdateCompanion<SourceLocation> {
           ..write('displayName: $displayName, ')
           ..write('mimeType: $mimeType, ')
           ..write('sizeBytes: $sizeBytes, ')
+          ..write('thumbnailUri: $thumbnailUri, ')
           ..write('availability: $availability, ')
           ..write('lastCheckedAt: $lastCheckedAt, ')
           ..write('isPrimary: $isPrimary, ')
@@ -3529,6 +3589,7 @@ typedef $$SourceLocationsTableCreateCompanionBuilder =
       Value<String?> displayName,
       Value<String?> mimeType,
       Value<int?> sizeBytes,
+      Value<String?> thumbnailUri,
       Value<String> availability,
       Value<int?> lastCheckedAt,
       Value<bool> isPrimary,
@@ -3545,6 +3606,7 @@ typedef $$SourceLocationsTableUpdateCompanionBuilder =
       Value<String?> displayName,
       Value<String?> mimeType,
       Value<int?> sizeBytes,
+      Value<String?> thumbnailUri,
       Value<String> availability,
       Value<int?> lastCheckedAt,
       Value<bool> isPrimary,
@@ -3616,6 +3678,11 @@ class $$SourceLocationsTableFilterComposer
 
   ColumnFilters<int> get sizeBytes => $composableBuilder(
     column: $table.sizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3707,6 +3774,11 @@ class $$SourceLocationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get availability => $composableBuilder(
     column: $table.availability,
     builder: (column) => ColumnOrderings(column),
@@ -3786,6 +3858,11 @@ class $$SourceLocationsTableAnnotationComposer
 
   GeneratedColumn<int> get sizeBytes =>
       $composableBuilder(column: $table.sizeBytes, builder: (column) => column);
+
+  GeneratedColumn<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get availability => $composableBuilder(
     column: $table.availability,
@@ -3867,6 +3944,7 @@ class $$SourceLocationsTableTableManager
                 Value<String?> displayName = const Value.absent(),
                 Value<String?> mimeType = const Value.absent(),
                 Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> thumbnailUri = const Value.absent(),
                 Value<String> availability = const Value.absent(),
                 Value<int?> lastCheckedAt = const Value.absent(),
                 Value<bool> isPrimary = const Value.absent(),
@@ -3881,6 +3959,7 @@ class $$SourceLocationsTableTableManager
                 displayName: displayName,
                 mimeType: mimeType,
                 sizeBytes: sizeBytes,
+                thumbnailUri: thumbnailUri,
                 availability: availability,
                 lastCheckedAt: lastCheckedAt,
                 isPrimary: isPrimary,
@@ -3897,6 +3976,7 @@ class $$SourceLocationsTableTableManager
                 Value<String?> displayName = const Value.absent(),
                 Value<String?> mimeType = const Value.absent(),
                 Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> thumbnailUri = const Value.absent(),
                 Value<String> availability = const Value.absent(),
                 Value<int?> lastCheckedAt = const Value.absent(),
                 Value<bool> isPrimary = const Value.absent(),
@@ -3911,6 +3991,7 @@ class $$SourceLocationsTableTableManager
                 displayName: displayName,
                 mimeType: mimeType,
                 sizeBytes: sizeBytes,
+                thumbnailUri: thumbnailUri,
                 availability: availability,
                 lastCheckedAt: lastCheckedAt,
                 isPrimary: isPrimary,

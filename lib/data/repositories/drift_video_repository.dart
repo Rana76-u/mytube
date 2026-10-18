@@ -285,6 +285,24 @@ class DriftVideoRepository implements VideoRepository {
     }
   }
 
+  @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async {
+    try {
+      final rows = await _sourceLocationsDao.locationsForItem(id.value);
+      return Result.ok(rows.map(_toSourceLocation).toList());
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage:
+              'getSourceLocationsForVideo(${id.value}) failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
   // ── Insert primitives (P3-04) ─────────────────────────────────────────────
 
   @override
@@ -338,6 +356,10 @@ class DriftVideoRepository implements VideoRepository {
           sizeBytes: location.sizeBytes != null
               ? Value(location.sizeBytes)
               : const Value<int?>.absent(),
+          thumbnailUri: location.thumbnailUri != null
+              ? Value(location.thumbnailUri)
+              : const Value<String?>.absent(),
+          isPrimary: Value(location.isPrimary),
           availability: Value(location.availability.name),
           lastCheckedAt: location.lastCheckedAt != null
               ? Value(location.lastCheckedAt)
@@ -402,6 +424,75 @@ class DriftVideoRepository implements VideoRepository {
       return Result.err(
         UnexpectedError(
           diagnosticMessage: 'updateSourceLocationMetadata($id) failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  // ── Source-location selection (P7-06) ─────────────────────────────────────
+
+  @override
+  Future<Result<void>> setPrimarySourceLocation({
+    required String videoItemId,
+    required String locationId,
+  }) async {
+    try {
+      await _sourceLocationsDao.setPrimary(
+        videoItemId: videoItemId,
+        locationId: locationId,
+      );
+      return Result.ok(null);
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage:
+              'setPrimarySourceLocation($videoItemId, $locationId) failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  // ── Duplicate matching (P7-04) ────────────────────────────────────────────
+
+  @override
+  Future<Result<List<DuplicateCandidate>>> findDuplicateCandidates({
+    required int sizeBytes,
+    required int durationMs,
+  }) async {
+    try {
+      final rows = await _sourceLocationsDao.candidatesBySignals(
+        sizeBytes: sizeBytes,
+        durationMs: durationMs,
+      );
+      return Result.ok(
+        rows
+            .map(
+              (r) => DuplicateCandidate(
+                locationId: r.location.id,
+                videoItemId: r.location.videoItemId,
+                providerType: ProviderType.values.byName(
+                  r.location.providerType,
+                ),
+                sourceUri: r.location.sourceId,
+                availability: AvailabilityState.values.byName(
+                  r.location.availability,
+                ),
+                displayName: r.location.displayName,
+                sizeBytes: r.location.sizeBytes,
+                itemTitle: r.item.title,
+                itemDurationMs: r.item.durationMs,
+                itemWidthPx: r.item.widthPx,
+                itemHeightPx: r.item.heightPx,
+              ),
+            )
+            .toList(),
+      );
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'findDuplicateCandidates failed: $e',
           cause: e,
         ),
       );
@@ -617,5 +708,8 @@ class DriftVideoRepository implements VideoRepository {
         lastCheckedAt: row.lastCheckedAt != null
             ? DateTime.fromMillisecondsSinceEpoch(row.lastCheckedAt!)
             : null,
+        sizeBytes: row.sizeBytes,
+        thumbnailUri: row.thumbnailUri,
+        isPrimary: row.isPrimary,
       );
 }

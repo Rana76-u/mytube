@@ -54,6 +54,14 @@ abstract interface class PlaybackController {
   /// out-of-range values are clamped (PLAY-005).
   Future<void> setVolume(double volume);
 
+  /// Enables or disables seamless looping of the current and subsequent
+  /// sources (PLAY-003).
+  ///
+  /// Like speed/volume the preference carries across `play()` calls, so the
+  /// Reels surface can turn it on once and have every reel loop until the user
+  /// swipes away. Turning it off stops looping from the next engine command.
+  Future<void> setLooping(bool looping);
+
   /// Re-attempts playback of the most recent source after an error
   /// (P4-07, AVAIL-002, PLAY-009).
   ///

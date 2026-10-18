@@ -87,6 +87,11 @@ class FakePlayerHandle implements PlayerHandle {
   @override
   Future<void> setSpeed(double speed) async => speeds.add(speed);
 
+  final List<bool> loopingCalls = <bool>[];
+
+  @override
+  Future<void> setLooping(bool looping) async => loopingCalls.add(looping);
+
   /// Sentinel render widget so [AppPlaybackController.buildVideo] can be
   /// asserted to delegate to the engine handle (P4-06).
   @override
@@ -657,6 +662,70 @@ void main() {
 
       await controller.stop();
       expect(controller.buildVideo(), isNull);
+    });
+  });
+
+  group('AppPlaybackController looping (P6-02)', () {
+    test(
+      'setLooping is stored before an engine exists and applied on play',
+      () async {
+        final created = <FakePlayerHandle>[];
+        final controller = AppPlaybackController(
+          handleFactory: (source) {
+            final handle = FakePlayerHandle()..snapshot = playing;
+            created.add(handle);
+            return handle;
+          },
+        );
+        addTearDown(controller.dispose);
+
+        // No engine yet — the preference is only stored, nothing forwarded.
+        await controller.setLooping(true);
+        expect(created, isEmpty);
+
+        await controller.play(_source());
+        // The fresh engine is told to loop before it starts (PLAY-003).
+        expect(created.single.loopingCalls, [true]);
+      },
+    );
+
+    test('setLooping applies to the live engine immediately', () async {
+      final handle = FakePlayerHandle()..snapshot = playing;
+      final controller = AppPlaybackController(
+        handleFactory: (source) => handle,
+      );
+      addTearDown(controller.dispose);
+
+      // Default looping is off, so play() never touches the engine's loop.
+      await controller.play(_source());
+      expect(handle.loopingCalls, isEmpty);
+
+      await controller.setLooping(true);
+      expect(handle.loopingCalls, [true]);
+
+      await controller.setLooping(false);
+      expect(handle.loopingCalls, [true, false]);
+    });
+
+    test('looping carries across a subsequent play()', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+      await controller.setLooping(true);
+      await controller.play(_source(uri: 'https://example.com/next.mp4'));
+
+      // The session-wide loop re-applies to each new reel's engine.
+      expect(created, hasLength(2));
+      expect(created[0].loopingCalls, [true]);
+      expect(created[1].loopingCalls, [true]);
     });
   });
 

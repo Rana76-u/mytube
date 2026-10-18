@@ -43,6 +43,13 @@ class SourceLocations extends Table {
   /// File size in bytes, if known.
   IntColumn get sizeBytes => integer().nullable()();
 
+  /// Durable provider thumbnail reference (P7-02): a content:// URI for
+  /// MediaStore rows, a document:// URI for SAF rows, or an https:// URL for
+  /// providers that expose a stable preview endpoint.  This is a *thumbnail*
+  /// reference only — never a playback identity — so storing it does not
+  /// violate the signed-URL durability rule (ARCHITECTURE §4).
+  TextColumn get thumbnailUri => text().nullable()();
+
   /// Serialised [AvailabilityState] enum name (e.g. `"available"`).
   TextColumn get availability =>
       text().withDefault(const Constant('unknown'))();

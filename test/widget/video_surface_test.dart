@@ -46,6 +46,8 @@ class _FakeHandle implements PlayerHandle {
   Future<void> setVolume(double volume) async {}
   @override
   Future<void> setSpeed(double speed) async {}
+  @override
+  Future<void> setLooping(bool looping) async {}
 
   @override
   Widget? buildVideo() =>

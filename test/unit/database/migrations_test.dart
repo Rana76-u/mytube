@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/data/database/app_database.dart';
@@ -89,6 +90,14 @@ Future<AppDatabase> _openWithUpgradeFrom(int fromVersion) async {
           )
         ''');
       }
+      if (fromVersion >= 4) {
+        rawDb.execute('''
+          CREATE TABLE IF NOT EXISTS app_preferences (
+            key TEXT NOT NULL PRIMARY KEY,
+            value TEXT NOT NULL
+          )
+        ''');
+      }
       rawDb.execute('PRAGMA user_version = $fromVersion');
     },
   );
@@ -100,7 +109,7 @@ Future<AppDatabase> _openWithUpgradeFrom(int fromVersion) async {
 // ---------------------------------------------------------------------------
 
 void main() {
-  // ── onCreate (fresh install = v4) ─────────────────────────────────────────
+  // ── onCreate (fresh install = v5) ─────────────────────────────────────────
   group('Migration — onCreate', () {
     late AppDatabase db;
     setUp(() => db = AppDatabase.inMemory());
@@ -145,17 +154,17 @@ void main() {
       );
     });
 
-    test('schema version is 4 after onCreate', () async {
+    test('schema version is 5 after onCreate', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(4));
+      expect(v, equals(5));
     });
   });
 
-  // ── onUpgrade v2 → v4 ────────────────────────────────────────────────────
-  group('Migration — v2 → v4 upgrade', () {
+  // ── onUpgrade v2 → v5 ────────────────────────────────────────────────────
+  group('Migration — v2 → v5 upgrade', () {
     late AppDatabase db;
     setUp(() async => db = await _openWithUpgradeFrom(2));
     tearDown(() async => db.close());
@@ -187,17 +196,17 @@ void main() {
       expect(indexes, contains('idx_source_locations_video_item_id'));
     });
 
-    test('schema version is 4 after v2 upgrade', () async {
+    test('schema version is 5 after v2 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(4));
+      expect(v, equals(5));
     });
   });
 
-  // ── onUpgrade v3 → v4 ────────────────────────────────────────────────────
-  group('Migration — v3 → v4 upgrade', () {
+  // ── onUpgrade v3 → v5 ────────────────────────────────────────────────────
+  group('Migration — v3 → v5 upgrade', () {
     late AppDatabase db;
     setUp(() async => db = await _openWithUpgradeFrom(3));
     tearDown(() async => db.close());
@@ -224,12 +233,77 @@ void main() {
       );
     });
 
-    test('schema version is 4 after v3 upgrade', () async {
+    test('schema version is 5 after v3 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(4));
+      expect(v, equals(5));
+    });
+  });
+
+  // ── onUpgrade v4 → v5 (P7 — thumbnail_uri column) ────────────────────────
+  group('Migration — v4 → v5 upgrade', () {
+    late AppDatabase db;
+    setUp(() async => db = await _openWithUpgradeFrom(4));
+    tearDown(() async => db.close());
+
+    test('source_locations gains the thumbnail_uri column', () async {
+      final columns = await db
+          .customSelect('PRAGMA table_info(source_locations)')
+          .map((r) => r.read<String>('name'))
+          .get();
+      expect(columns, contains('thumbnail_uri'));
+    });
+
+    test('pre-existing rows survive with NULL thumbnail_uri', () async {
+      await db.customStatement(
+        '''
+            INSERT INTO video_items (id, title, is_favourite, watch_progress_ms,
+              created_at, updated_at)
+            VALUES ('old1', 'Old video', 0, 0, ?, ?)
+            ''',
+        [_now, _now],
+      );
+      await db.customStatement(
+        '''
+            INSERT INTO source_locations (id, video_item_id, provider_type,
+              source_id, availability, is_primary, created_at, updated_at)
+            VALUES ('oldsl1', 'old1', 'localMediaStore', '/sdcard/old.mp4',
+              'available', 0, ?, ?)
+            ''',
+        [_now, _now],
+      );
+
+      final row = await (db.select(
+        db.sourceLocations,
+      )..where((t) => t.id.equals('oldsl1'))).getSingle();
+      expect(row.videoItemId, equals('old1'));
+      expect(row.thumbnailUri, isNull);
+
+      // The new column is writable after the upgrade.
+      await (db.update(
+        db.sourceLocations,
+      )..where((t) => t.id.equals('oldsl1'))).write(
+        const SourceLocationsCompanion(
+          thumbnailUri: Value('content://media/external/images/media/9'),
+        ),
+      );
+      final updated = await (db.select(
+        db.sourceLocations,
+      )..where((t) => t.id.equals('oldsl1'))).getSingle();
+      expect(
+        updated.thumbnailUri,
+        equals('content://media/external/images/media/9'),
+      );
+    });
+
+    test('schema version is 5 after v4 upgrade', () async {
+      final v = await db
+          .customSelect('PRAGMA user_version')
+          .map((r) => r.read<int>('user_version'))
+          .getSingle();
+      expect(v, equals(5));
     });
   });
 

@@ -5,6 +5,7 @@ import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/library/video_item_card.dart';
+import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/saved_providers.dart';
 
 /// Full-screen list of favourited videos, reachable from the Saved tab
@@ -35,7 +36,12 @@ class FavoritesScreen extends ConsumerWidget {
               final item = items[index];
               return VideoItemCard(
                 item: item,
-                onTap: () {},
+                // Card tap opens the player, like every other card surface.
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => VideoPlayerScreen(item: item),
+                  ),
+                ),
                 onToggleFavourite: () => _removeFavourite(ref, item),
               );
             },

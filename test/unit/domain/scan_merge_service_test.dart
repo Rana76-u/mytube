@@ -21,12 +21,20 @@ SourceVideo _video({
   String? displayName,
   AvailabilityState availability = AvailabilityState.unknown,
   int? durationMs,
+  int? sizeBytes,
+  int? widthPx,
+  int? heightPx,
+  String? thumbnailUri,
 }) => SourceVideo(
   sourceId: sourceId,
   sourceType: ProviderType.localMediaStore,
   displayName: displayName ?? sourceId,
   availability: availability,
   durationMs: durationMs,
+  widthPx: widthPx,
+  heightPx: heightPx,
+  sizeBytes: sizeBytes,
+  thumbnailUri: thumbnailUri,
 );
 
 /// Inserts a [VideoItem] directly into [db].
@@ -35,12 +43,18 @@ Future<void> _insertVideoItem(
   String id, {
   String title = 'Original Title',
   bool isFavourite = false,
+  int? durationMs,
+  int? widthPx,
+  int? heightPx,
 }) => db
     .into(db.videoItems)
     .insert(
       db_lib.VideoItemsCompanion.insert(
         id: id,
         title: title,
+        durationMs: Value(durationMs),
+        widthPx: Value(widthPx),
+        heightPx: Value(heightPx),
         isFavourite: Value(isFavourite),
         createdAt: _now,
         updatedAt: _now,
@@ -55,6 +69,8 @@ Future<void> _insertSourceLocation(
   required String sourceId,
   required ProviderType providerType,
   String availability = 'unknown',
+  int? sizeBytes,
+  bool isPrimary = false,
 }) => db
     .into(db.sourceLocations)
     .insert(
@@ -63,7 +79,9 @@ Future<void> _insertSourceLocation(
         videoItemId: videoItemId,
         providerType: providerType.name,
         sourceId: sourceId,
+        sizeBytes: Value(sizeBytes),
         availability: Value(availability),
+        isPrimary: Value(isPrimary),
         createdAt: _now,
         updatedAt: _now,
       ),
@@ -626,6 +644,268 @@ void main() {
       expect(videoTags, hasLength(1));
       expect(videoTags.first.videoItemId, equals('v1'));
       expect(videoTags.first.tagId, equals('tag1'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tests — P7-04/P7-05/P7-08 conservative duplicate merging
+  // ---------------------------------------------------------------------------
+
+  group('ScanMergeService duplicate merge (P7-04/P7-05/P7-08)', () {
+    late db_lib.AppDatabase db;
+    late DriftVideoRepository repo;
+    late ScanMergeService service;
+
+    setUp(() {
+      db = db_lib.AppDatabase.inMemory();
+      repo = DriftVideoRepository(db);
+      service = ScanMergeService(repository: repo);
+    });
+
+    tearDown(() async {
+      await repo.dispose();
+      await db.close();
+    });
+
+    test('definite size+duration match attaches a second location to the '
+        'existing item instead of a new one (DUP-001/P7-05)', () async {
+      await _insertVideoItem(db, 'v1', durationMs: 60000);
+      await _insertSourceLocation(
+        db,
+        id: 'sl1',
+        videoItemId: 'v1',
+        sourceId: '/original.mp4',
+        providerType: ProviderType.localMediaStore,
+        sizeBytes: 1000,
+        isPrimary: true,
+      );
+
+      final result = await service.mergeResults(
+        providerType: ProviderType.localMediaStore,
+        scannedVideos: [
+          _video(sourceId: '/original.mp4'),
+          _video(
+            sourceId: '/copy.mp4',
+            displayName: 'copy',
+            sizeBytes: 1000,
+            durationMs: 60000,
+          ),
+        ],
+        cancellationToken: CancellationToken(),
+      );
+
+      expect(result, isA<Ok<ScanMergeResult>>());
+      final r = (result as Ok<ScanMergeResult>).value;
+      expect(r.added, 0);
+      expect(r.mergedIntoExisting, 1);
+
+      final items = await db.select(db.videoItems).get();
+      expect(items, hasLength(1));
+
+      final locs = await db.select(db.sourceLocations).get();
+      expect(locs, hasLength(2));
+      final copy = locs.firstWhere((l) => l.sourceId == '/copy.mp4');
+      expect(copy.videoItemId, 'v1');
+      // Attached copies are never primary — the user's pick stands (P7-06).
+      expect(copy.isPrimary, isFalse);
+    });
+
+    test(
+      'filename-only match NEVER merges automatically (P7-08, DUP-002)',
+      () async {
+        await _insertVideoItem(db, 'v1', title: 'same.mp4', durationMs: 60000);
+        await _insertSourceLocation(
+          db,
+          id: 'sl1',
+          videoItemId: 'v1',
+          sourceId: '/a/same.mp4',
+          providerType: ProviderType.localMediaStore,
+          sizeBytes: 1000,
+        );
+
+        final result = await service.mergeResults(
+          providerType: ProviderType.localMediaStore,
+          scannedVideos: [
+            _video(
+              sourceId: '/b/same.mp4',
+              displayName: 'same.mp4',
+              sizeBytes: 2222,
+              durationMs: 99999,
+            ),
+          ],
+          cancellationToken: CancellationToken(),
+        );
+
+        final r = (result as Ok<ScanMergeResult>).value;
+        expect(r.added, 1);
+        expect(r.mergedIntoExisting, 0);
+
+        final items = await db.select(db.videoItems).get();
+        expect(items, hasLength(2));
+      },
+    );
+
+    test(
+      'same name AND size but unknown duration stays separate (DUP-004)',
+      () async {
+        await _insertVideoItem(db, 'v1', durationMs: null);
+        await _insertSourceLocation(
+          db,
+          id: 'sl1',
+          videoItemId: 'v1',
+          sourceId: '/a.mp4',
+          providerType: ProviderType.localMediaStore,
+          sizeBytes: 1000,
+        );
+
+        final result = await service.mergeResults(
+          providerType: ProviderType.localMediaStore,
+          scannedVideos: [
+            _video(
+              sourceId: '/b.mp4',
+              displayName: 'a',
+              sizeBytes: 1000,
+              durationMs: null,
+            ),
+          ],
+          cancellationToken: CancellationToken(),
+        );
+
+        final r = (result as Ok<ScanMergeResult>).value;
+        expect(r.added, 1);
+        expect(r.mergedIntoExisting, 0);
+        final items = await db.select(db.videoItems).get();
+        expect(items, hasLength(2));
+      },
+    );
+
+    test(
+      'contradicting dimensions veto a size+duration match (DUP-003)',
+      () async {
+        await _insertVideoItem(
+          db,
+          'v1',
+          durationMs: 60000,
+          widthPx: 1920,
+          heightPx: 1080,
+        );
+        await _insertSourceLocation(
+          db,
+          id: 'sl1',
+          videoItemId: 'v1',
+          sourceId: '/1080p.mp4',
+          providerType: ProviderType.localMediaStore,
+          sizeBytes: 1000,
+        );
+
+        final result = await service.mergeResults(
+          providerType: ProviderType.localMediaStore,
+          scannedVideos: [
+            _video(
+              sourceId: '/720p.mp4',
+              sizeBytes: 1000,
+              durationMs: 60000,
+              widthPx: 1280,
+              heightPx: 720,
+            ),
+          ],
+          cancellationToken: CancellationToken(),
+        );
+
+        final r = (result as Ok<ScanMergeResult>).value;
+        expect(r.added, 1);
+        expect(r.mergedIntoExisting, 0);
+      },
+    );
+
+    test(
+      'two copies inside ONE scan share a single logical item (in-batch)',
+      () async {
+        final result = await service.mergeResults(
+          providerType: ProviderType.localMediaStore,
+          scannedVideos: [
+            _video(sourceId: '/x.mp4', sizeBytes: 2000, durationMs: 30000),
+            _video(sourceId: '/y.mp4', sizeBytes: 2000, durationMs: 30000),
+          ],
+          cancellationToken: CancellationToken(),
+        );
+
+        final r = (result as Ok<ScanMergeResult>).value;
+        expect(r.added, 1);
+        expect(r.mergedIntoExisting, 1);
+
+        final items = await db.select(db.videoItems).get();
+        expect(items, hasLength(1));
+        final locs = await db.select(db.sourceLocations).get();
+        expect(locs, hasLength(2));
+      },
+    );
+
+    test(
+      'scanned thumbnailUri is persisted with the new location (P7-02)',
+      () async {
+        final result = await service.mergeResults(
+          providerType: ProviderType.localMediaStore,
+          scannedVideos: [
+            _video(
+              sourceId: '/t.mp4',
+              thumbnailUri: 'content://media/thumbs/7',
+            ),
+          ],
+          cancellationToken: CancellationToken(),
+        );
+        expect((result as Ok<ScanMergeResult>).value.added, 1);
+
+        final loc = await (db.select(
+          db.sourceLocations,
+        )..where((t) => t.sourceId.equals('/t.mp4'))).getSingle();
+        expect(loc.thumbnailUri, 'content://media/thumbs/7');
+      },
+    );
+
+    test('merging into an existing item preserves user favourite and the '
+        'primary flag of the original location (LIB-008)', () async {
+      await db
+          .into(db.videoItems)
+          .insert(
+            db_lib.VideoItemsCompanion.insert(
+              id: 'v1',
+              title: 'Favourite video',
+              durationMs: const Value(60000),
+              isFavourite: const Value(true),
+              createdAt: _now,
+              updatedAt: _now,
+            ),
+          );
+      await _insertSourceLocation(
+        db,
+        id: 'sl1',
+        videoItemId: 'v1',
+        sourceId: '/original.mp4',
+        providerType: ProviderType.localMediaStore,
+        sizeBytes: 1000,
+        isPrimary: true,
+      );
+
+      await service.mergeResults(
+        providerType: ProviderType.localMediaStore,
+        scannedVideos: [
+          _video(sourceId: '/original.mp4'),
+          _video(
+            sourceId: '/sdcard/copy.mp4',
+            sizeBytes: 1000,
+            durationMs: 60000,
+          ),
+        ],
+        cancellationToken: CancellationToken(),
+      );
+
+      final item = await db.videoItemsDao.getItemById('v1');
+      expect(item?.isFavourite, isTrue);
+      final original = await (db.select(
+        db.sourceLocations,
+      )..where((t) => t.id.equals('sl1'))).getSingle();
+      expect(original.isPrimary, isTrue);
     });
   });
 }

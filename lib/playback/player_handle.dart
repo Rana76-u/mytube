@@ -105,6 +105,13 @@ abstract interface class PlayerHandle {
 
   Future<void> setSpeed(double speed);
 
+  /// Enables or disables seamless looping of the loaded media.
+  ///
+  /// The Reels surface turns this on so the current video repeats until the
+  /// user swipes away (PLAY-003). Engines that cannot loop treat this as a
+  /// no-op; the controller still carries the preference across sources.
+  Future<void> setLooping(bool looping);
+
   /// Releases all engine resources. Idempotent.
   Future<void> dispose();
 

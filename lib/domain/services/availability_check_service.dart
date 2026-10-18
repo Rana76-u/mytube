@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'package:mytube/core/result.dart';
+import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/platform/media_store_bridge.dart';
@@ -41,23 +42,26 @@ class AvailabilityCheckService {
     required SafBridge safBridge,
     required MediaStoreBridge mediaStoreBridge,
     required VideoRepository repository,
+    List<VideoSourceAdapter> adapters = const [],
   }) : _localAdapter = localAdapter, // ignore: prefer_initializing_formals
        // ignore: prefer_initializing_formals
        _safBridge = safBridge,
        // ignore: prefer_initializing_formals
        _mediaStoreBridge = mediaStoreBridge,
        // ignore: prefer_initializing_formals
-       _repository = repository;
+       _repository = repository,
+       // ignore: prefer_initializing_formals
+       _extraAdapters = adapters;
 
   final VideoSourceAdapter _localAdapter;
-
-  // ignore: unused_field  — held for future per-folder check methods (P3-06+)
   final SafBridge _safBridge;
-
-  // ignore: unused_field  — held for future per-folder check methods (P3-06+)
   final MediaStoreBridge _mediaStoreBridge;
-
   final VideoRepository _repository;
+
+  /// Adapters beyond the local one (e.g. the direct-URL adapter) used by the
+  /// per-location retry actions (P7-07/AVAIL-002). Deliberately NOT used by
+  /// [checkAvailability] bulk runs — see `directUrlAdapterProvider` for why.
+  final List<VideoSourceAdapter> _extraAdapters;
 
   // How often to check the cancellation token during the loop.
   static const _cancellationCheckInterval = 10;
@@ -165,6 +169,153 @@ class AvailabilityCheckService {
         becamePermissionRevoked: becamePermissionRevoked,
       ),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-location retry / reconnect actions (P7-07, AVAIL-002)
+  // -------------------------------------------------------------------------
+
+  /// Re-checks ONE [location] now and persists the resulting state.
+  ///
+  /// Used by retry affordances in the UI (AVAIL-002): the row is retained
+  /// regardless of outcome (AVAIL-001) — only its availability/status fields
+  /// change. Unlike the bulk [checkAvailability] run, an adapter failure is
+  /// surfaced as [Err] so the user sees the real reason instead of a silent
+  /// downgrade to `unknown`.
+  Future<Result<AvailabilityState>> recheckLocation(
+    SourceLocation location,
+  ) async {
+    final adapter = _adapterFor(location.providerType);
+    if (adapter == null) {
+      return Err(
+        UnexpectedError(
+          diagnosticMessage:
+              'No registered adapter for provider '
+              '${location.providerType.name}',
+        ),
+      );
+    }
+
+    final checkResult = await adapter.checkAvailability(location.sourceUri);
+    final AvailabilityState newState;
+    switch (checkResult) {
+      case Ok(:final value):
+        newState = value;
+      case Err(:final error):
+        return Err(error);
+    }
+
+    final updateResult = await _repository.updateSourceLocationAvailability(
+      location.id,
+      newState,
+      DateTime.now(),
+    );
+    switch (updateResult) {
+      case Err(:final error):
+        return Err(error);
+      case Ok<void>():
+        return Ok(newState);
+    }
+  }
+
+  /// Re-requests the MediaStore video permission and, on success, re-checks
+  /// [location] (AVAIL-002 "reconnect" for [AvailabilityState.permissionRevoked]
+  /// MediaStore rows).
+  ///
+  /// Returns [Err] with [PermissionDeniedError] when the grant is still
+  /// absent after the request — the row keeps its `permissionRevoked` status
+  /// and remains in the library (AVAIL-001).
+  Future<Result<AvailabilityState>> requestMediaStoreAccessAndRecheck(
+    SourceLocation location,
+  ) async {
+    if (location.providerType != ProviderType.localMediaStore) {
+      return Err(
+        UnexpectedError(
+          diagnosticMessage:
+              'MediaStore permission retry called for non-MediaStore '
+              'location ${location.id}',
+        ),
+      );
+    }
+
+    final status = await _mediaStoreBridge.requestPermission();
+    if (status != MediaStorePermissionStatus.granted &&
+        status != MediaStorePermissionStatus.partiallyGranted) {
+      return Err(
+        PermissionDeniedError(
+          diagnosticMessage:
+              'MediaStore permission still not granted after request '
+              '(status: ${status.name})',
+        ),
+      );
+    }
+
+    return recheckLocation(location);
+  }
+
+  /// Re-connects a revoked SAF folder by re-opening the system folder picker
+  /// and, once the persisted grant is live again, re-checks [location]
+  /// (AVAIL-002 "reconnect" for [ProviderType.selectedFolder] rows).
+  ///
+  /// Picking the SAME tree again re-establishes access to the child document
+  /// URIs already stored — durable identities are untouched. If the user
+  /// cancels the picker the location keeps its current state and [Ok] is
+  /// returned with the unchanged availability.
+  Future<Result<AvailabilityState>> reconnectFolderAndRecheck(
+    SourceLocation location,
+  ) async {
+    if (location.providerType != ProviderType.selectedFolder) {
+      return Err(
+        UnexpectedError(
+          diagnosticMessage:
+              'SAF folder reconnect called for non-folder '
+              'location ${location.id}',
+        ),
+      );
+    }
+
+    final pickResult = await _safBridge.openFolderPicker();
+    switch (pickResult) {
+      case Err(:final error):
+        return Err(error);
+      case Ok(:final value) when value != null:
+        final accessResult = await _safBridge.checkFolderAccess(value);
+        switch (accessResult) {
+          case Err(:final error):
+            return Err(error);
+          case Ok(value: final granted) when granted:
+            return recheckLocation(location);
+          case Ok():
+            return Err(
+              PermissionDeniedError(
+                diagnosticMessage:
+                    'Selected folder $value still not accessible after '
+                    'folder picker',
+              ),
+            );
+        }
+      case Ok():
+        // User cancelled the picker — leave the stored state as-is.
+        return Ok(location.availability);
+    }
+  }
+
+  /// Maps a provider type to the adapter that can re-check it (P7-07).
+  ///
+  /// Mirrors [DefaultPlaybackSourceResolver]'s rule: the local adapter serves
+  /// both MediaStore rows and SAF selected-folder rows.
+  VideoSourceAdapter? _adapterFor(ProviderType type) {
+    for (final adapter in <VideoSourceAdapter>[
+      _localAdapter,
+      ..._extraAdapters,
+    ]) {
+      if (adapter.sourceType == type) return adapter;
+      if (type == ProviderType.selectedFolder &&
+          adapter.sourceType == ProviderType.localMediaStore) {
+        return adapter;
+      }
+    }
+    return null;
   }
 }
 

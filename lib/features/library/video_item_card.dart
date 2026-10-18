@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/features/library/video_thumbnail.dart';
 
 /// Card widget for a single video item in the library list/grid (P5-01).
 ///
-/// Displays the video title, duration (if available), and favorite indicator.
+/// Displays the video thumbnail with fallback (P7-01/P7-03), title, duration
+/// (if available), and favorite indicator.
 /// When [onToggleFavourite]/[onManageTags] are supplied the favorite indicator
 /// becomes an interactive toggle and a tag-management button is added (P5-05,
-/// P5-06); otherwise the card degrades to the read-only display used by the
-/// grid tests. Thumbnails will be added in Phase 7 (P7-01).
+/// P5-06); [onManageSources] adds the source-management entry point (P7-06);
+/// otherwise the card degrades to the read-only display used by the
+/// grid tests.
 class VideoItemCard extends StatelessWidget {
   const VideoItemCard({
     super.key,
@@ -15,6 +18,7 @@ class VideoItemCard extends StatelessWidget {
     required this.onTap,
     this.onToggleFavourite,
     this.onManageTags,
+    this.onManageSources,
     this.trailing,
   });
 
@@ -22,6 +26,10 @@ class VideoItemCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onToggleFavourite;
   final VoidCallback? onManageTags;
+
+  /// Opens the per-item source management sheet (P7-06/P7-07, DUP-005,
+  /// AVAIL-002) when supplied.
+  final VoidCallback? onManageSources;
 
   /// Optional widget rendered at the far end of the card row (e.g. a remove
   /// button on the collection detail screen, P5-07).
@@ -40,20 +48,8 @@ class VideoItemCard extends StatelessWidget {
           padding: const EdgeInsets.all(12.0),
           child: Row(
             children: [
-              // Thumbnail placeholder (Phase 7 will add real thumbnails)
-              Container(
-                width: 80,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.play_circle_outline,
-                  color: colorScheme.onSurfaceVariant,
-                  size: 32,
-                ),
-              ),
+              // Real preview with placeholder fallback (P7-01/P7-03).
+              VideoThumbnail(item: item),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -123,6 +119,19 @@ class VideoItemCard extends StatelessWidget {
                             ),
                             tooltip: 'Manage tags',
                             onPressed: onManageTags,
+                          ),
+                        if (onManageSources != null)
+                          IconButton(
+                            key: ValueKey('sources_${item.id.value}'),
+                            icon: const Icon(Icons.link),
+                            color: colorScheme.onSurfaceVariant,
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 36,
+                              minHeight: 36,
+                            ),
+                            tooltip: 'Manage sources',
+                            onPressed: onManageSources,
                           ),
                       ],
                     ),

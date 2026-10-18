@@ -79,6 +79,9 @@ class FakePlayerHandle implements PlayerHandle {
   Future<void> setSpeed(double speed) async => speeds.add(speed);
 
   @override
+  Future<void> setLooping(bool looping) async {}
+
+  @override
   Widget? buildVideo() => const SizedBox(width: 160, height: 90);
 
   @override

@@ -7,6 +7,7 @@ import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/scan_merge_service.dart';
+import 'package:mytube/platform/media_store_bridge.dart';
 import 'package:mytube/sources/source_adapter.dart';
 import 'package:drift/drift.dart' show Value;
 
@@ -88,6 +89,39 @@ SourceVideo _video(
   sourceType: sourceType,
   displayName: sourceId,
 );
+
+// ---------------------------------------------------------------------------
+// Fake MediaStore bridge — permission-gate seam
+// ---------------------------------------------------------------------------
+
+class FakeMediaStoreBridge implements MediaStoreBridge {
+  FakeMediaStoreBridge({required this.checkStatus, this.requestStatus});
+
+  /// Status returned by [checkPermission].
+  MediaStorePermissionStatus checkStatus;
+
+  /// Status returned by [requestPermission]; defaults to [checkStatus].
+  MediaStorePermissionStatus? requestStatus;
+
+  int checkCalls = 0;
+  int requestCalls = 0;
+
+  @override
+  Future<MediaStorePermissionStatus> checkPermission() async {
+    checkCalls++;
+    return checkStatus;
+  }
+
+  @override
+  Future<MediaStorePermissionStatus> requestPermission() async {
+    requestCalls++;
+    return requestStatus ?? checkStatus;
+  }
+
+  @override
+  Future<Result<List<MediaStoreVideo>>> queryVideos() async =>
+      Result.ok(const []);
+}
 
 // ---------------------------------------------------------------------------
 // Tests — P3-05 LibraryRefreshService
@@ -509,6 +543,121 @@ void main() {
         final item = await db.videoItemsDao.getItemById('v1');
         expect(item?.isFavourite, isTrue);
         expect(item?.watchProgressMs, equals(30000));
+      },
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // MediaStore permission gate — scans must not silently index zero videos
+  // when read access is absent.
+  // ---------------------------------------------------------------------------
+  group('LibraryRefreshService permission gate', () {
+    late db_lib.AppDatabase db;
+    late DriftVideoRepository repo;
+    late ScanMergeService mergeService;
+
+    setUp(() {
+      db = db_lib.AppDatabase.inMemory();
+      repo = DriftVideoRepository(db);
+      mergeService = ScanMergeService(repository: repo);
+    });
+
+    tearDown(() async {
+      await repo.dispose();
+      await db.close();
+    });
+
+    test('denied check + granted request proceeds with the scan', () async {
+      final bridge = FakeMediaStoreBridge(
+        checkStatus: MediaStorePermissionStatus.denied,
+        requestStatus: MediaStorePermissionStatus.granted,
+      );
+      final adapter = FakeVideoSourceAdapter(
+        sourceType: ProviderType.localMediaStore,
+        videosToReturn: [_video('content://media/v1')],
+      );
+      final service = LibraryRefreshService(
+        adapters: [adapter],
+        mergeService: mergeService,
+        preferences: const LibraryRefreshPreferences(),
+        mediaStore: bridge,
+      );
+      addTearDown(service.dispose);
+
+      final result = await service.refresh(trigger: RefreshTrigger.manual);
+
+      expect(result, isA<Ok<LibraryRefreshResult>>());
+      expect((result as Ok<LibraryRefreshResult>).value.totalAdded, 1);
+      expect(bridge.checkCalls, 1);
+      expect(bridge.requestCalls, 1);
+      expect(adapter.listCalled, isTrue);
+    });
+
+    test('granted check skips the permission request entirely', () async {
+      final bridge = FakeMediaStoreBridge(
+        checkStatus: MediaStorePermissionStatus.granted,
+      );
+      final service = LibraryRefreshService(
+        adapters: [],
+        mergeService: mergeService,
+        preferences: const LibraryRefreshPreferences(),
+        mediaStore: bridge,
+      );
+      addTearDown(service.dispose);
+
+      final result = await service.refresh(trigger: RefreshTrigger.manual);
+
+      expect(result, isA<Ok<LibraryRefreshResult>>());
+      expect(bridge.checkCalls, 1);
+      expect(bridge.requestCalls, 0);
+    });
+
+    test('partiallyGranted is treated as enough access to scan', () async {
+      final bridge = FakeMediaStoreBridge(
+        checkStatus: MediaStorePermissionStatus.partiallyGranted,
+      );
+      final service = LibraryRefreshService(
+        adapters: [],
+        mergeService: mergeService,
+        preferences: const LibraryRefreshPreferences(),
+        mediaStore: bridge,
+      );
+      addTearDown(service.dispose);
+
+      final result = await service.refresh(trigger: RefreshTrigger.manual);
+
+      expect(result, isA<Ok<LibraryRefreshResult>>());
+      expect(bridge.requestCalls, 0);
+    });
+
+    test(
+      'persistent denial returns PermissionDeniedError without scanning',
+      () async {
+        final bridge = FakeMediaStoreBridge(
+          checkStatus: MediaStorePermissionStatus.denied,
+          requestStatus: MediaStorePermissionStatus.permanentlyDenied,
+        );
+        final adapter = FakeVideoSourceAdapter(
+          sourceType: ProviderType.localMediaStore,
+        );
+        final service = LibraryRefreshService(
+          adapters: [adapter],
+          mergeService: mergeService,
+          preferences: const LibraryRefreshPreferences(),
+          mediaStore: bridge,
+        );
+        addTearDown(service.dispose);
+
+        final result = await service.refresh(trigger: RefreshTrigger.manual);
+
+        expect(result, isA<Err<LibraryRefreshResult>>());
+        expect(
+          (result as Err<LibraryRefreshResult>).error,
+          isA<PermissionDeniedError>(),
+        );
+        // No scan ran and no spurious in-progress/failed states were emitted.
+        expect(adapter.listCalled, isFalse);
+        expect(service.currentState, isA<RefreshIdle>());
       },
     );
   });

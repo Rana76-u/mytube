@@ -51,6 +51,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
   /// User preferences carried across sources.
   double _volume = 1.0;
   double _speed = 1.0;
+  bool _looping = false;
 
   @override
   ValueListenable<PlaybackState> get state => this;
@@ -125,6 +126,10 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
         await handle.setSpeed(_speed);
       }
       await handle.setVolume(_volume);
+      // Applied before play so the first pass already loops (PLAY-003).
+      if (_looping) {
+        await handle.setLooping(true);
+      }
       await handle.play();
     } catch (error) {
       if (_isStale(generation)) {
@@ -345,6 +350,20 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
     final handle = _handle;
     if (handle != null) {
       await _runCommand(() => handle.setVolume(_volume));
+    }
+  }
+
+  @override
+  Future<void> setLooping(bool looping) async {
+    if (_disposed) {
+      return;
+    }
+    _looping = looping;
+    // Applied to the live engine immediately; [play] re-applies it to every
+    // later source so a single call loops the whole Reels session.
+    final handle = _handle;
+    if (handle != null) {
+      await _runCommand(() => handle.setLooping(looping));
     }
   }
 

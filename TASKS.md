@@ -141,6 +141,26 @@ blockers.
     33, 34+, SAF grant persistence, SAF revocation, missing-file handling,
     and throttle verification on CPH2719 / Android 16; `test/integration/`
     deferred until device harness is established)
+-   [x] **P3-05a (addendum)** Wire the manual-scan entry point and a
+    MediaStore permission gate. --- Done. The P3-05 service existed but no
+    feature surface ever invoked `LibraryRefreshService.refresh`, so the app
+    neither scanned local storage nor exposed a Scan action. `LibraryScreen`
+    now has a `library_scan_button` app-bar action (spinner while
+    `RefreshInProgress`, re-entrancy guarded by the service) plus a
+    `library_more_menu` "Choose folders…" SAF picker that triggers a rescan
+    after a grant, and the empty state's primary action is now "Scan device"
+    ("Add URL" moved to the secondary action). `LibraryRefreshService` gained
+    an optional `MediaStoreBridge` seam and an `_ensureMediaStoreAccess()`
+    gate that `checkPermission()`→`requestPermission()` before scanning and
+    aborts with `PermissionDeniedError` when access is not granted, so a scan
+    no longer silently indexes zero videos behind a missing grant; the
+    `LibraryRefreshNotifier` wires the bridge and exposes `pickFolder()`.
+    `EmptyState` gained an optional `secondaryAction`. 4 permission-gate unit
+    tests + 4 scan/navigation widget tests; `dart format` +
+    `flutter analyze lib test` clean; full suite +547 −14 (the same 14
+    pre-existing "Timer is still pending" shell/theme failures reproduce on
+    clean `main`). Device verification of the system permission dialog,
+    partial-access (API 34+) and the SAF folder picker is still required.
 
 ## Phase 4 --- Direct URLs and player
 
@@ -233,6 +253,33 @@ blockers.
     `direct_url_range_support_test.dart` covers range vs no-range vs
     HTML/PDF/5xx; real codec decode and hardware range-seek verification
     deferred to `docs/device_testing_p4.md` §P4-09)
+-   [x] **P4-09a (addendum)** Add a dedicated player screen and wire video
+    taps to it. --- Done. The playback engine, controller, `VideoSurface`, and
+    `PlaybackControls` all existed (P4-03–P4-07) but no feature surface opened
+    them: card taps in `LibraryScreen`, `DiscoverScreen`, `FavoritesScreen`,
+    and `CollectionScreen` were placeholders (a "Tap:" snackbar or a no-op),
+    so tapping a video — including a saved direct-URL video — never played it.
+    A new `VideoPlayerScreen` (`lib/features/player/video_player_screen.dart`)
+    is a `ConsumerStatefulWidget` that on entry resolves the tapped item via
+    `PlaybackSourceResolver`, plays the short-lived `PlayableSource` through
+    the app-owned `PlaybackController` (looping kept off for a one-shot
+    session), renders it with `VideoSurface` + `PlaybackControls`, resumes from
+    `WatchProgressService.resumePosition`, forwards live position ticks to
+    `reportPosition` (flushing on pause/error), and on dispose stops playback
+    and force-flushes the newest pending progress so a short watch persists.
+    The four feature screens now push it via
+    `MaterialPageRoute<void>(builder: (_) => VideoPlayerScreen(item: item))`.
+    3 `video_player_screen_test.dart` widget tests (resolve+play, failed
+    resolution shows the user-safe error and never plays, leaving the screen
+    stops playback and flushes progress) plus the Library navigation test;
+    `dart format` + `flutter analyze lib test` clean; full suite +547 −14 (the
+    same 14 pre-existing "Timer is still pending" shell/theme failures
+    reproduce on clean `main`; the async engine-teardown release is asserted
+    in the `AppPlaybackController` unit tests because
+    `StreamSubscription.cancel()` does not complete deterministically in the
+    `testWidgets` fake-async zone — same documented limitation as the Reels
+    cross-source swap tests). Real-device codec playback from this screen is
+    still unverified.
 
 ## Phase 5 --- Library and Saved
 
@@ -377,36 +424,214 @@ blockers.
 
 ## Phase 6 --- Reels and Discover
 
--   [ ] **P6-01** Implement vertical swipe-first Reels queue. --- Todo
--   [ ] **P6-02** Autoplay on Reels entry and loop until swipe. --- Todo
--   [ ] **P6-03** Add minimal overlay and on-demand controls. --- Todo
--   [ ] **P6-04** Cancel stale preloading/playback work on rapid swipes.
-    --- Todo
--   [ ] **P6-05** Implement testable rule-based recommendation scorer.
-    --- Todo
--   [ ] **P6-06** Balance randomness, unwatched status, source
-    preference, history, repetition reduction. --- Todo
+-   [ ] **P6-01** Implement vertical swipe-first Reels queue. --- Pending
+    review (PLAY-001, ARCHITECTURE §8): new `ReelsQueue` value type
+    (ordered reel list + clamped viewport index, identity-based equality,
+    `current`/`hasNext`/`hasPrevious`/`withIndex`) and a
+    `ReelsQueueController` (`AsyncNotifier`) that loads the queue once from
+    `queryItems` in most-recently-added order and mirrors swipe navigation via
+    `goTo`/`next`/`previous`; `reelsQueueProvider` exposes it. `ReelsScreen`
+    replaced the placeholder with a full-screen vertical `PageView` bound to
+    the queue (page-change → `goTo`, a `ref.listen` keeps the `PageView` and
+    the index in sync) and handles loading/empty/error states. Scope held to
+    the queue and swipe navigation — autoplay/loop (P6-02), the control
+    overlay (P6-03), stale-work cancellation (P6-04) and rule-based ordering
+    (P6-05/06) are later tasks; each reel shows a still title frame, not live
+    playback yet. 12 unit + 5 widget tests added and pass; `dart format` +
+    `dart analyze lib test` clean; full suite `+413 -14` — the same 14
+    pre-existing "Timer is still pending" shell failures reproduce on clean
+    `main`. Device verification of the vertical swipe experience is still
+    required before marking done.
+-   [ ] **P6-02** Autoplay on Reels entry and loop until swipe. --- Pending
+    review (PLAY-002/PLAY-003, ARCHITECTURE §8): `ReelsScreen` now takes an
+    `active` flag (driven by the selected bottom-nav index in `MainScaffold`)
+    and, while active, autoplays the current reel on entry and on every swipe
+    and loops it until the user swipes away. A per-play token discards a
+    resolution that loses the race to a newer swipe/dispose, and playback is
+    stopped + un-looped on `didUpdateWidget` (tab change) and `dispose` (using
+    a controller reference captured in `initState`, since `ref` is unsafe in
+    `dispose`). The current page paints a `VideoSurface` with the title/position
+    caption overlaid; the still caption is shown when the tab is inactive.
+    New `PlaybackSourceResolver` domain service (`DefaultPlaybackSourceResolver`
+    + `playbackSourceResolverProvider`) turns a `VideoItemSummary` into a
+    short-lived `PlayableSource` by reading the item's stored source locations
+    (new `VideoRepository.getSourceLocationsForVideo` → DAO `locationsForItem`),
+    preferring an `available` location and delegating to the matching
+    `VideoSourceAdapter` (`selectedFolder` routes to the local MediaStore
+    adapter); it never throws and never persists a signed URL. Looping is applied
+    at the engine level: `setLooping` added to `PlayerHandle`/
+    `VideoPlayerHandle`/`PlaybackController`/`AppPlaybackController`, where the
+    controller carries the flag across `play()` calls so a single call loops the
+    whole session. Stale-work cancellation for adjacent preloading remains
+    P6-04; the control overlay remains P6-03. 8 resolver unit + 3 looping
+    controller unit + 5 new ReelsScreen widget tests added; `dart format` +
+    `dart analyze lib test` clean; full suite `+429 -14` — the same 14
+    pre-existing "Timer is still pending" shell failures reproduce, no new
+    failures (net +16 passing). Note: the cross-source engine swap / stop is
+    covered by `AppPlaybackController` unit tests, not the widget tests, because
+    `StreamSubscription.cancel()` during engine teardown does not complete inside
+    the `testWidgets` fake-async zone. Device verification of autoplay/loop on
+    real media is still required before marking done.
+-   [ ] **P6-03** Add minimal overlay and on-demand controls. --- Pending
+    review (PLAY-004/PLAY-005): the current Reels page is wrapped in a tap
+    layer; tapping it reveals a dim scrim with the shared `PlaybackControls`
+    (play/pause, seek, ±10 s skip, volume, speed, display mode) and tapping
+    again — or after a 4 s auto-hide timer — dismisses it so the video stays
+    unobstructed. No new control widget was built; the player surface's existing
+    `PlaybackControls` is reused so behaviour stays consistent and the overlay
+    stays minimal. 3 `ReelsScreen` widget tests added (reveal/toggle-off,
+    auto-hide, inactive tab has no tap layer).
+-   [ ] **P6-04** Cancel stale preloading/playback work on rapid swipes. ---
+    Pending review (PLAY-008, ARCHITECTURE §8): added `ReelsSourcePreloader`, a
+    bounded (FIFO `maxCache`) helper that warms the source of the next reel
+    ahead of the swipe via `PlaybackSourceResolver` only (it never touches the
+    player), and `ReelsScreen` consumes a warm source for an instant start
+    instead of re-resolving. Every navigation calls `invalidate()`, bumping a
+    generation counter so a resolution that lands after the user swiped past is
+    discarded, and `clear()` runs on tab-leave/dispose. The window ahead is
+    deliberately one reel. 7 preloader unit tests (cache/take, dedup, in-flight
+    cancel, still-consumable-if-already-done, FIFO bound, clear, failed resolve
+    not cached) + 1 `ReelsScreen` widget test (next reel warmed without a second
+    handle) added.
+-   [ ] **P6-05** Implement testable rule-based recommendation scorer. ---
+    Pending review (DISC-001, ARCHITECTURE §8): `RecommendationScorer`
+    (`domain/services/recommendation_scorer.dart`) is a pure, framework-free
+    scorer over `RecommendationCandidate`s with a transparent
+    `RecommendationWeights` (unwatched, favourite, availability, preferred
+    source, decaying recency, decaying viewing-history, recently-shown penalty,
+    bounded randomization). `rank` sorts by score with a deterministic id
+    tie-break; randomization is injectable (`math.Random`) so it is
+    reproducible, and the clock is injectable so recency/history are testable.
+    12 scorer unit tests cover each factor, tie-break, empty input, seeded
+    reproducibility, near-tie reshuffling, and that jitter never overrides a
+    decisive gap.
+-   [ ] **P6-06** Balance randomness, unwatched status, source preference,
+    history, repetition reduction. --- Pending review (DISC-002/DISC-003):
+    `RecommendationsController` / `recommendationsProvider`
+    (`recommendation_scorer_provider.dart`) reads the library, turns each item
+    into a candidate, and applies the scorer; a bounded in-memory
+    recently-shown head plus a `reshuffle()` method deliver repetition reduction
+    within a session (invalidation would recreate the notifier and drop the
+    history, so refresh goes through `reshuffle`). Source availability /
+    preference default to available / non-preferred — the scorer already supports
+    both signals, and per-item location lookups (an N-query cost) are deferred to
+    the Discover surface (P6-07). 4 provider unit tests added (unwatched ranks
+    first, error propagation, reshuffle demotes the prior head, empty library).
+    `dart format` + `dart analyze lib test` clean; full suite `+457 -14` (net
+    +28 passing vs the P6-02 baseline, same 14 pre-existing "Timer is still
+    pending" shell/theme/main_scaffold failures — no new failures). Reels
+    ordering still uses most-recently-added; the scorer is not yet wired into the
+    Discover UI or the Reels queue (P6-07). Device verification of the Reels
+    tap-to-open controls and preload behaviour is still required.
 -   [ ] **P6-07** Add recently added videos and Reels shortcut to
-    Discover. --- Todo
+    Discover. --- Pending review (NAV-003, DISC-004): `DiscoverScreen` is now a
+    live `ConsumerStatefulWidget` with three blocks on one scroll surface — a
+    Reels shortcut (tapping it flips the host to the Reels tab via an
+    `onOpenReels` callback wired in `MainScaffold`; the shortcut hides when no
+    callback is supplied so the tab stays usable when hosted elsewhere), a
+    "Recently added" strip (a new `_recentlyAddedProvider` reading the
+    library's most-recently-added order), and a "Recommended for you" strip
+    backed by the P6-06 `recommendationsProvider`. Each section reuses
+    `VideoItemCard` and is bounded to a head of 8; the app-bar refresh button
+    reshuffles suggestions (through `RecommendationsController.reshuffle`, not
+    invalidation, so the session repetition history survives) and reloads
+    recently added. Empty/small-library states use `EmptyState`/inline text so a
+    new user sees guidance instead of a blank screen (DISC-004). This also
+    completes the availability signal P6-06 deferred here: `build` now reads each
+    item's source locations once and marks hard-unavailable states (missing /
+    expired / revoked / unsupported) so the scorer demotes them, while transient
+    states (offline/unknown) and items with no recorded location stay optimistic.
+    6 `DiscoverScreen` widget tests added (empty state, small library, shortcut
+    present+taps callback, shortcut hidden without callback, unavailable source
+    demoted in the suggestions, refresh reshuffles the head) plus 1 availability
+    unit test in the recommendations-provider suite.
 -   [ ] **P6-08** Test empty/small libraries, repeat sessions,
-    unavailable sources, rapid navigation. --- Todo
+    unavailable sources, rapid navigation. --- Pending review: scenario coverage
+    across the surfaces, all on fakes (no device). *Empty / small libraries* —
+    `DiscoverScreen` empty-state and small-library tests; the existing empty
+    Reels queue test stays green. *Repeat sessions* — the `reshuffle` unit test
+    (P6-06) plus a new Discover refresh widget test asserting a different head
+    leads the second pass (DISC-003). *Unavailable sources* — a provider unit
+    test and a Discover widget test both assert a missing-source item sinks below
+    an equal available one yet is still shown, never hidden (DISC-002). *Rapid
+    navigation* — a Reels widget test flings several reels back-to-back and
+    asserts the queue advances, exactly one surface paints, and no player stacks
+    up per skipped reel (the preloader unit tests already own the stale-cancel
+    detail). `dart format` + `dart analyze lib test` clean; full suite `+465 -14`
+    (net +8 passing vs the P6-06 baseline of +457, the same 14 pre-existing
+    "Timer is still pending" shell/theme/main_scaffold failures — no green test
+    regressed). Preferred-source weighting is still off pending a user source
+    preference; Discover item taps reuse the Library placeholder pending the
+    dedicated player screen; device verification of the shortcut navigation and
+    refresh reshuffle is still required.
 
 ## Phase 7 --- Thumbnails, duplicates, availability
 
--   [ ] **P7-01** Add local thumbnail generation where supported. ---
-    Todo
--   [ ] **P7-02** Use provider thumbnails/cached remote previews where
-    available. --- Todo
--   [ ] **P7-03** Add thumbnail fallback UI. --- Todo
--   [ ] **P7-04** Implement conservative multi-signal duplicate
-    matching. --- Todo
--   [ ] **P7-05** Support multiple source locations per logical item.
-    --- Todo
--   [ ] **P7-06** Allow source selection for duplicate groups. --- Todo
--   [ ] **P7-07** Implement availability statuses and retry/reconnect
-    actions. --- Todo
--   [ ] **P7-08** Test that filename-only matches do not merge
-    automatically. --- Todo
+-   [x] **P7-01** Add local thumbnail generation where supported. ---
+    Done
+    (`ThumbnailBridge` interface + `ThumbnailBridgeImpl` over the new
+    `com.example.mytube/thumbnails` MethodChannel; `ThumbnailPlugin.kt`
+    decodes `content://`/`file://`/`document://` previews via
+    `loadThumbnail` (API 29+) with a `MediaMetadataRetriever` frame fallback,
+    downscaled and JPEG-encoded; registered in `MainActivity.kt`. Routing
+    and soft-fail verified by `thumbnail_service_test.dart`. On-device
+    native decode not yet run in this environment — see manual-test notes.)
+-   [x] **P7-02** Use provider thumbnails/cached remote previews where
+    available. --- Done
+    (Schema v5 adds `source_locations.thumbnail_uri` (durable preview ref,
+    migration + row-preservation tested); persisted through scan/merge;
+    `RemoteThumbnailFetcher` interface + `HttpRemoteThumbnailFetcher` (dart:io
+    HttpClient) bound by timeout/size cap and image content-type, logging only a
+    redacted URL description. `ThumbnailService` routes http(s) refs to the
+    fetcher and local schemes to the bridge, never using a remote
+    `sourceUri` as a thumbnail. Routing covered by `thumbnail_service_test.dart`.)
+-   [x] **P7-03** Add thumbnail fallback UI. --- Done
+    (`VideoThumbnail` `ConsumerWidget` watches `videoThumbnailProvider`
+    (soft-fail `Uint8List?`) and renders the neutral placeholder for every
+    non-ready state; wired into `VideoItemCard`. Placeholder fallback and
+    provider-override verified in `video_item_card_test.dart`.)
+-   [x] **P7-04** Implement conservative multi-signal duplicate
+    matching. --- Done
+    (`DuplicateMatcher` domain service: dimension conflict vetoes, size+duration
+    match → definite, one strong + one weak signal → ambiguous, filename-only →
+    distinct; `findDuplicateCandidates(sizeBytes,durationMs)` pre-filter joins
+    location size to item duration. `ScanMergeService` merges only definite
+    matches (in-batch index + DB candidates) into a new location on the
+    existing item, never on filename alone. `duplicate_matcher_test.dart`,
+    `scan_merge_service_test.dart` duplicate group, and `drift_video_repository_test.dart`
+    candidate-filter tests all pass.)
+-   [x] **P7-05** Support multiple source locations per logical item.
+    --- Done
+    (Duplicate groups stay one item with several locations; DAO returns
+    locations primary-first; `DefaultPlaybackSourceResolver._pickPrimary`
+    prefers a primary+available location, then any available, then first.
+    Covered by `playback_source_resolver_test.dart` and the primary-ordering
+    test in `drift_video_repository_test.dart`.)
+-   [x] **P7-06** Allow source selection for duplicate groups. --- Done
+    (`setPrimarySourceLocation`/DAO `setPrimary` runs as a transaction that
+    keeps exactly one primary and is a true no-op for a foreign/stale id;
+    `ManageSourcesSheet` lists every location with provider + availability,
+    marks the primary and offers Set-primary. `VideoItemCard` exposes the
+    entry point; `library_screen` opens the sheet and invalidates the
+    thumbnail/list. Covered by repo + widget tests.)
+-   [x] **P7-07** Implement availability statuses and retry/reconnect
+    actions. --- Done
+    (`AvailabilityCheckService` gains `recheckLocation`,
+    `requestMediaStoreAccessAndRecheck`, and `reconnectFolderAndRecheck`
+    with an `adapters` seam so URL rows can be retried; unavailable rows are
+    always retained (AVAIL-001), only their state changes. `ManageSourcesSheet`
+    routes retry per state (grant / reconnect / recheck) and redacts signed
+    URLs. Covered by `availability_check_service_test.dart` and
+    `manage_sources_sheet_test.dart`.)
+-   [x] **P7-08** Test that filename-only matches do not merge
+    automatically. --- Done
+    (`duplicate_matcher_test.dart` filename-only → distinct; and
+    `scan_merge_service_test.dart` "filename-only never merges" +
+    "unknown-duration stays ambiguous" cases prove DUP-002/DUP-004.)
+    Verification: `dart format` clean, `flutter analyze` no issues,
+    `flutter test` = 536 passing / 14 failing, the 14 being the pre-existing
+    environment-only "Timer is still pending" widget failures in
+    `app_shell/app_theme/main_scaffold` (unchanged from the Phase-6 baseline).
 
 ## Phase 8 --- Cache
 

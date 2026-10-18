@@ -3,10 +3,11 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/core/result.dart';
-import 'package:mytube/data/database/app_database.dart';
+import 'package:mytube/data/database/app_database.dart' hide SourceLocation;
 import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/repositories/drift_video_repository.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
+import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:drift/drift.dart' show InsertMode, Value;
 
@@ -926,6 +927,208 @@ void main() {
     test('deleteItem on a missing id is a no-op Ok', () async {
       final r = await repo.deleteItem(VideoItemId('nope'));
       expect(r, isA<Ok<void>>());
+    });
+  });
+
+  // ── P7 source-location additions ──────────────────────────────────────────
+  group('DriftVideoRepository P7 (thumbnail / primary / duplicates)', () {
+    late AppDatabase db;
+    late DriftVideoRepository repo;
+
+    setUp(() {
+      db = AppDatabase.inMemory();
+      repo = _repo(db);
+    });
+    tearDown(() async {
+      await repo.dispose();
+      await db.close();
+    });
+
+    Future<void> insertSource(
+      String id,
+      String videoItemId, {
+      ProviderType provider = ProviderType.localMediaStore,
+      int? sizeBytes,
+      String? thumbnailUri,
+      bool isPrimary = false,
+      AvailabilityState availability = AvailabilityState.available,
+    }) => repo.insertSourceLocation(
+      SourceLocationInsert(
+        id: id,
+        videoItemId: videoItemId,
+        providerType: provider,
+        sourceUri: 'content://media/external/video/$id',
+        sizeBytes: sizeBytes,
+        thumbnailUri: thumbnailUri,
+        isPrimary: isPrimary,
+        availability: availability,
+        createdAt: _now,
+        updatedAt: _now,
+      ),
+    );
+
+    test('thumbnailUri round-trips through getSourceLocationsForVideo '
+        '(P7-02)', () async {
+      await _insertItem(db, 'v1');
+      await insertSource('sl1', 'v1', thumbnailUri: 'content://media/thumbs/1');
+
+      final result = await repo.getSourceLocationsForVideo(VideoItemId('v1'));
+      expect(result, isA<Ok<List<SourceLocation>>>());
+      final locs = (result as Ok<List<SourceLocation>>).value;
+      expect(locs, hasLength(1));
+      expect(locs.single.thumbnailUri, 'content://media/thumbs/1');
+    });
+
+    test('thumbnailUri defaults to null when not provided', () async {
+      await _insertItem(db, 'v1');
+      await insertSource('sl1', 'v1');
+
+      final locs =
+          (await repo.getSourceLocationsForVideo(VideoItemId('v1'))
+                  as Ok<List<SourceLocation>>)
+              .value;
+      expect(locs.single.thumbnailUri, isNull);
+    });
+
+    test(
+      'setPrimarySourceLocation moves the sole primary flag (P7-06)',
+      () async {
+        await _insertItem(db, 'v1');
+        await insertSource('sl-a', 'v1', isPrimary: true);
+        await insertSource('sl-b', 'v1');
+
+        final setResult = await repo.setPrimarySourceLocation(
+          videoItemId: 'v1',
+          locationId: 'sl-b',
+        );
+        expect(setResult, isA<Ok<void>>());
+
+        final locs =
+            (await repo.getSourceLocationsForVideo(VideoItemId('v1'))
+                    as Ok<List<SourceLocation>>)
+                .value;
+        final byId = {for (final l in locs) l.id: l};
+        expect(byId['sl-a']!.isPrimary, isFalse);
+        expect(byId['sl-b']!.isPrimary, isTrue);
+        // Exactly one primary remains.
+        expect(locs.where((l) => l.isPrimary), hasLength(1));
+      },
+    );
+
+    test('getSourceLocationsForVideo orders the primary location first '
+        '(P7-05)', () async {
+      await _insertItem(db, 'v1');
+      // sl-a created first but not primary; sl-b created later and primary.
+      await insertSource('sl-a', 'v1');
+      await insertSource('sl-b', 'v1', isPrimary: true);
+
+      final locs =
+          (await repo.getSourceLocationsForVideo(VideoItemId('v1'))
+                  as Ok<List<SourceLocation>>)
+              .value;
+      expect(locs.first.id, 'sl-b');
+      expect(locs.first.isPrimary, isTrue);
+    });
+
+    test(
+      'setPrimarySourceLocation with an id from another item is a no-op',
+      () async {
+        await _insertItem(db, 'v1');
+        await _insertItem(db, 'v2');
+        await insertSource('sl-1', 'v1', isPrimary: true);
+        await insertSource('sl-2', 'v2');
+
+        // sl-2 belongs to v2 — targeting it while naming v1 must touch nothing.
+        await repo.setPrimarySourceLocation(
+          videoItemId: 'v1',
+          locationId: 'sl-2',
+        );
+
+        final locs =
+            (await repo.getSourceLocationsForVideo(VideoItemId('v1'))
+                    as Ok<List<SourceLocation>>)
+                .value;
+        expect(locs.single.isPrimary, isTrue);
+      },
+    );
+
+    test('findDuplicateCandidates returns rows matching size AND duration '
+        '(DUP-003)', () async {
+      await _insertFullItem(db, 'match', durationMs: 60000);
+      await insertSource('sl-match', 'match', sizeBytes: 1000);
+
+      final result = await repo.findDuplicateCandidates(
+        sizeBytes: 1000,
+        durationMs: 60000,
+      );
+      expect(result, isA<Ok<List<DuplicateCandidate>>>());
+      final cands = (result as Ok<List<DuplicateCandidate>>).value;
+      expect(cands, hasLength(1));
+      expect(cands.single.locationId, 'sl-match');
+      expect(cands.single.videoItemId, 'match');
+      expect(cands.single.sizeBytes, 1000);
+      expect(cands.single.itemDurationMs, 60000);
+      expect(cands.single.itemTitle, 'Title');
+    });
+
+    test('findDuplicateCandidates excludes size mismatch', () async {
+      await _insertFullItem(db, 'v1', durationMs: 60000);
+      await insertSource('sl1', 'v1', sizeBytes: 2000);
+
+      final cands =
+          (await repo.findDuplicateCandidates(
+                    sizeBytes: 1000,
+                    durationMs: 60000,
+                  )
+                  as Ok<List<DuplicateCandidate>>)
+              .value;
+      expect(cands, isEmpty);
+    });
+
+    test('findDuplicateCandidates excludes duration mismatch', () async {
+      await _insertFullItem(db, 'v1', durationMs: 90000);
+      await insertSource('sl1', 'v1', sizeBytes: 1000);
+
+      final cands =
+          (await repo.findDuplicateCandidates(
+                    sizeBytes: 1000,
+                    durationMs: 60000,
+                  )
+                  as Ok<List<DuplicateCandidate>>)
+              .value;
+      expect(cands, isEmpty);
+    });
+
+    test(
+      'findDuplicateCandidates ignores rows with unknown duration (DUP-004)',
+      () async {
+        // durationMs null on the item → never a candidate even if size matches.
+        await _insertItem(db, 'v1');
+        await insertSource('sl1', 'v1', sizeBytes: 1000);
+
+        final cands =
+            (await repo.findDuplicateCandidates(
+                      sizeBytes: 1000,
+                      durationMs: 60000,
+                    )
+                    as Ok<List<DuplicateCandidate>>)
+                .value;
+        expect(cands, isEmpty);
+      },
+    );
+
+    test('findDuplicateCandidates ignores rows with unknown size', () async {
+      await _insertFullItem(db, 'v1', durationMs: 60000);
+      await insertSource('sl1', 'v1'); // sizeBytes null
+
+      final cands =
+          (await repo.findDuplicateCandidates(
+                    sizeBytes: 1000,
+                    durationMs: 60000,
+                  )
+                  as Ok<List<DuplicateCandidate>>)
+              .value;
+      expect(cands, isEmpty);
     });
   });
 
