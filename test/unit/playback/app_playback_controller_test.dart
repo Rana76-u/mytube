@@ -591,6 +591,43 @@ void main() {
       await controller.seekTo(const Duration(seconds: 5)); // idle → ignored
       expect(handle.seeks, isEmpty);
     });
+
+    test(
+      'a stale stop() from a popped screen does not disturb a newer play()',
+      () async {
+        // The controller is a single app-wide instance shared by Reels and the
+        // dedicated player. dispose() calls stop() without awaiting, so an
+        // in-flight stop can resume after a different screen already started a
+        // newer source. That late stop must not dispose the new handle nor
+        // stamp its live state back to idle (the intermittent "no video /
+        // nothing plays").
+        final created = <FakePlayerHandle>[];
+        final controller = AppPlaybackController(
+          handleFactory: (source) {
+            final handle = FakePlayerHandle()..snapshot = playing;
+            created.add(handle);
+            return handle;
+          },
+        );
+        addTearDown(controller.dispose);
+
+        await controller.play(_source(uri: 'https://example.com/a.mp4'));
+        // Fire-and-forget stop, mirroring a widget dispose(); it suspends
+        // mid-teardown before releasing the engine.
+        final stopping = controller.stop();
+
+        // A newer screen starts its own source while that stop is parked.
+        await controller.play(_source(uri: 'https://example.com/b.mp4'));
+        await stopping;
+
+        expect(created, hasLength(2));
+        // The just-started video survives: not idled, not disposed.
+        expect(controller.state.value.status, PlaybackStatus.playing);
+        expect(created[1].disposeCalls, 0);
+        // Only the older handle the stop() belonged to is released.
+        expect(created[0].disposeCalls, 1);
+      },
+    );
   });
 
   group('AppPlaybackController.retry and buildVideo (P4-06, P4-07)', () {
@@ -726,6 +763,235 @@ void main() {
       expect(created, hasLength(2));
       expect(created[0].loopingCalls, [true]);
       expect(created[1].loopingCalls, [true]);
+    });
+  });
+
+  group('AppPlaybackController.prewarm (P7-11)', () {
+    test(
+      'prewarm opens an engine without playing and never touches state',
+      () async {
+        final created = <FakePlayerHandle>[];
+        final controller = AppPlaybackController(
+          handleFactory: (source) {
+            final handle = FakePlayerHandle()..snapshot = playing;
+            created.add(handle);
+            return handle;
+          },
+        );
+        addTearDown(controller.dispose);
+
+        await controller.prewarm(_source());
+
+        // The spare engine is initialized but never started, and the visible
+        // state machine is untouched — a prewarm must never flash a status.
+        expect(created.single.initializeCalls, 1);
+        expect(created.single.playCalls, 0);
+        expect(controller.state.value.status, PlaybackStatus.idle);
+        expect(controller.buildVideo(), isNull); // not wired to the live slot
+      },
+    );
+
+    test('play() of a prewarmed source promotes the prepared engine', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+      addTearDown(controller.dispose);
+      final source = _source();
+
+      await controller.prewarm(source);
+      await controller.play(source);
+
+      // Zero-gap: the factory ran once, the engine opened once, and the
+      // promotion still applied the carried preferences and started playback.
+      expect(created, hasLength(1));
+      expect(created.single.initializeCalls, 1);
+      expect(created.single.playCalls, 1);
+      expect(created.single.volumes, [1.0]);
+      expect(controller.state.value.status, PlaybackStatus.playing);
+    });
+
+    test('play() of a different source keeps the prepared engine as the '
+        'reel-ahead spare', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source(uri: 'https://example.com/a.mp4'));
+      await controller.prewarm(_source(uri: 'https://example.com/b.mp4'));
+      // Playing c must not kill b's spare: b is the reel-ahead the host queue
+      // wants next, so it stays prepared until something supersedes it.
+      await controller.play(_source(uri: 'https://example.com/c.mp4'));
+
+      expect(created, hasLength(3));
+      expect(created[1].disposeCalls, 0); // the spare is kept
+      expect(created[1].playCalls, 0);
+      expect(created[2].playCalls, 1);
+      expect(controller.state.value.status, PlaybackStatus.playing);
+
+      // The bound of one spare holds: a newer prewarm supersedes and releases
+      // the stale one instead of stacking decoders.
+      await controller.prewarm(_source(uri: 'https://example.com/d.mp4'));
+      expect(created[1].disposeCalls, 1);
+      expect(created, hasLength(4));
+      expect(created[3].disposeCalls, 0);
+
+      // dropPrewarm releases the remaining spare without touching the live
+      // engine (e.g. the user left the Reels tab).
+      await controller.dropPrewarm();
+      expect(created[3].disposeCalls, 1);
+      expect(created[2].disposeCalls, 0);
+      expect(controller.state.value.status, PlaybackStatus.playing);
+    });
+
+    test(
+      'a prewarm whose open fails stays invisible and falls back on play',
+      () async {
+        final created = <FakePlayerHandle>[];
+        final controller = AppPlaybackController(
+          handleFactory: (source) {
+            final handle = FakePlayerHandle()
+              ..initializeError = created.isEmpty
+                  ? StateError('warm fail')
+                  : null
+              ..snapshot = playing;
+            created.add(handle);
+            return handle;
+          },
+        );
+        addTearDown(controller.dispose);
+        final source = _source();
+
+        await controller.prewarm(source);
+
+        // The failed spare was released quietly; nothing reached the state.
+        expect(created.single.disposeCalls, 1);
+        expect(controller.state.value.status, PlaybackStatus.idle);
+
+        await controller.play(source);
+
+        // play() took the normal load path and behaved like any other load.
+        expect(created, hasLength(2));
+        expect(controller.state.value.status, PlaybackStatus.playing);
+      },
+    );
+
+    test(
+      'joining an in-flight prewarm still opens the engine only once',
+      () async {
+        final gate = Completer<void>();
+        var factoryCalls = 0;
+        late FakePlayerHandle handle;
+        final controller = AppPlaybackController(
+          handleFactory: (source) {
+            factoryCalls++;
+            return handle = FakePlayerHandle(initializeGate: gate)
+              ..snapshot = playing;
+          },
+        );
+        addTearDown(controller.dispose);
+        final source = _source();
+
+        final warming = controller.prewarm(source);
+        await pumpEventQueue(); // the spare's open is now parked on the gate
+
+        // The swipe lands before the open finishes — play must join it rather
+        // than build a second engine for the same source.
+        final loading = controller.play(source);
+        await pumpEventQueue();
+        gate.complete();
+        await warming;
+        await loading;
+
+        expect(factoryCalls, 1);
+        expect(handle.initializeCalls, 1);
+        expect(handle.playCalls, 1);
+        expect(controller.state.value.status, PlaybackStatus.playing);
+      },
+    );
+
+    test(
+      'dropPrewarm releases the spare without disturbing live playback',
+      () async {
+        final live = FakePlayerHandle()..snapshot = playing;
+        final spare = FakePlayerHandle()..snapshot = playing;
+        var calls = 0;
+        final controller = AppPlaybackController(
+          handleFactory: (source) => (++calls == 1) ? live : spare,
+        );
+        addTearDown(controller.dispose);
+
+        await controller.play(_source(uri: 'https://example.com/a.mp4'));
+        await controller.prewarm(_source(uri: 'https://example.com/b.mp4'));
+        expect(spare.initializeCalls, 1);
+
+        await controller.dropPrewarm();
+
+        expect(spare.disposeCalls, 1);
+        expect(live.disposeCalls, 0);
+        expect(controller.state.value.status, PlaybackStatus.playing);
+      },
+    );
+
+    test('stop keeps the prewarmed spare for the queue that owns it', () async {
+      final live = FakePlayerHandle()..snapshot = playing;
+      final spare = FakePlayerHandle()..snapshot = playing;
+      var calls = 0;
+      final controller = AppPlaybackController(
+        handleFactory: (source) => (++calls == 1) ? live : spare,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source(uri: 'https://example.com/a.mp4'));
+      await controller.prewarm(_source(uri: 'https://example.com/b.mp4'));
+      await controller.stop();
+
+      // stop() releases only its own session; the queue's spare survives so
+      // a popped player screen never kills the Reels pre-warm (P7-11).
+      expect(live.disposeCalls, 1);
+      expect(spare.disposeCalls, 0);
+    });
+
+    test('dispose releases a prepared engine that was never played', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+
+      await controller.prewarm(_source());
+      await controller.dispose();
+
+      expect(created.single.disposeCalls, 1);
+    });
+
+    test('prewarm of an unsupported scheme is ignored', () async {
+      var factoryCalls = 0;
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          factoryCalls++;
+          return FakePlayerHandle();
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.prewarm(_source(uri: 'rtsp://example.com/live'));
+
+      expect(factoryCalls, 0);
+      expect(controller.state.value.status, PlaybackStatus.idle);
     });
   });
 

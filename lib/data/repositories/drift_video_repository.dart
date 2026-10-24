@@ -38,7 +38,7 @@ class DriftVideoRepository implements VideoRepository {
   Future<Result<List<VideoItemSummary>>> getAllItems() async {
     try {
       final rows = await _dao.getAllItems();
-      return Result.ok(rows.map(_toSummary).toList());
+      return Result.ok(await _summaries(rows));
     } catch (e) {
       return Result.err(
         UnexpectedError(diagnosticMessage: 'getAllItems failed: $e', cause: e),
@@ -55,7 +55,10 @@ class DriftVideoRepository implements VideoRepository {
           const NotFoundError(diagnosticMessage: 'Video item not found'),
         );
       }
-      return Result.ok(_toSummary(row));
+      final providers = await _sourceLocationsDao.primaryProviderTypesFor([
+        row.id,
+      ]);
+      return Result.ok(_toSummary(row, providers[row.id]));
     } catch (e) {
       return Result.err(
         UnexpectedError(
@@ -70,7 +73,7 @@ class DriftVideoRepository implements VideoRepository {
   Future<Result<List<VideoItemSummary>>> searchItems(String query) async {
     try {
       final rows = await _dao.searchByTitle(query);
-      return Result.ok(rows.map(_toSummary).toList());
+      return Result.ok(await _summaries(rows));
     } catch (e) {
       return Result.err(
         UnexpectedError(
@@ -85,7 +88,7 @@ class DriftVideoRepository implements VideoRepository {
   Future<Result<List<VideoItemSummary>>> queryItems(LibraryQuery query) async {
     try {
       final rows = await _dao.query(query);
-      return Result.ok(rows.map(_toSummary).toList());
+      return Result.ok(await _summaries(rows));
     } catch (e) {
       return Result.err(
         UnexpectedError(diagnosticMessage: 'queryItems failed: $e', cause: e),
@@ -514,6 +517,8 @@ class DriftVideoRepository implements VideoRepository {
                 description: r.description,
                 itemCount: r.itemCount,
                 createdAt: r.createdAt,
+                isPinned: r.isPinned,
+                pinnedAt: r.pinnedAt,
               ),
             )
             .toList(),
@@ -554,6 +559,8 @@ class DriftVideoRepository implements VideoRepository {
           description: row.description,
           itemCount: 0,
           createdAt: row.createdAt,
+          isPinned: row.isPinned,
+          pinnedAt: row.pinnedAt,
         ),
       );
     } catch (e) {
@@ -609,12 +616,30 @@ class DriftVideoRepository implements VideoRepository {
   }
 
   @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async {
+    try {
+      await _collectionsDao.setPinned(id: id, pinned: pinned);
+      return Result.ok(null);
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'setCollectionPinned($id, $pinned) failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
     String collectionId,
   ) async {
     try {
       final rows = await _collectionsDao.itemsFor(collectionId);
-      return Result.ok(rows.map(_toSummary).toList());
+      return Result.ok(await _summaries(rows));
     } catch (e) {
       return Result.err(
         UnexpectedError(
@@ -685,7 +710,29 @@ class DriftVideoRepository implements VideoRepository {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  static VideoItemSummary _toSummary(db_lib.VideoItem row) => VideoItemSummary(
+  /// Maps item rows to summaries, attaching each item's representative
+  /// provider (primary source location, else earliest-attached) with a single
+  /// batch query so cards can label their source without a per-item lookup.
+  Future<List<VideoItemSummary>> _summaries(List<db_lib.VideoItem> rows) async {
+    if (rows.isEmpty) return const [];
+    final providers = await _sourceLocationsDao.primaryProviderTypesFor(
+      rows.map((row) => row.id).toList(),
+    );
+    return rows.map((row) => _toSummary(row, providers[row.id])).toList();
+  }
+
+  static ProviderType? _providerFromName(String? name) {
+    if (name == null) return null;
+    for (final type in ProviderType.values) {
+      if (type.name == name) return type;
+    }
+    return null;
+  }
+
+  static VideoItemSummary _toSummary(
+    db_lib.VideoItem row, [
+    String? providerName,
+  ]) => VideoItemSummary(
     id: VideoItemId(row.id),
     title: row.title,
     durationMs: row.durationMs,
@@ -695,6 +742,7 @@ class DriftVideoRepository implements VideoRepository {
     watchProgressMs: row.watchProgressMs,
     lastPlayedAt: row.lastPlayedAt,
     createdAt: row.createdAt,
+    primaryProvider: _providerFromName(providerName),
   );
 
   static SourceLocation _toSourceLocation(db_lib.SourceLocation row) =>

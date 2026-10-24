@@ -14,6 +14,8 @@ typedef CollectionRow = ({
   String? description,
   int createdAt,
   int itemCount,
+  bool isPinned,
+  int? pinnedAt,
 });
 
 /// Data-access object for [Collections] and [CollectionItems] (P5-07).
@@ -29,7 +31,10 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
 
   static const _uuid = Uuid();
 
-  /// Returns every collection newest-first with its current item count.
+  /// Returns every collection with its current item count, ordered by the
+  /// Discover pinning policy (§19.3): pinned collections first (most-recently
+  /// pinned first), then unpinned collections newest-first, with a stable id
+  /// tie-break so the order is fully deterministic.
   Future<List<CollectionRow>> allWithCounts() async {
     final count = collectionItems.videoItemId.count();
     final query = selectOnly(collections)
@@ -40,12 +45,19 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
         ),
       ])
       ..groupBy([collections.id])
-      ..orderBy([OrderingTerm.desc(collections.createdAt)]);
+      ..orderBy([
+        OrderingTerm.desc(collections.isPinned),
+        OrderingTerm.desc(collections.pinnedAt),
+        OrderingTerm.desc(collections.createdAt),
+        OrderingTerm.asc(collections.id),
+      ]);
     query.addColumns([
       collections.id,
       collections.name,
       collections.description,
       collections.createdAt,
+      collections.isPinned,
+      collections.pinnedAt,
       count,
     ]);
     final rows = await query.get();
@@ -56,6 +68,8 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
             name: r.read(collections.name)!,
             description: r.read(collections.description),
             createdAt: r.read(collections.createdAt)!,
+            isPinned: r.read(collections.isPinned)!,
+            pinnedAt: r.read(collections.pinnedAt),
             itemCount: r.read(count) ?? 0,
           ),
         )
@@ -89,6 +103,25 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
   /// Deletes the collection with [id]; linked [CollectionItems] cascade.
   Future<int> deleteById(String id) =>
       (delete(collections)..where((t) => t.id.equals(id))).go();
+
+  /// Pins or unpins the collection with [id] (§19.4).
+  ///
+  /// Pinning stamps [Collections.pinnedAt] (which drives the deterministic
+  /// pinned ordering) and is a pure presentation preference — it never touches
+  /// membership, favourites, or the underlying videos. Unpinning clears both
+  /// the flag and the timestamp so the collection falls back to the normal
+  /// recency ordering. Returns the number of rows updated.
+  Future<int> setPinned({required String id, required bool pinned}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return (update(collections)..where((t) => t.id.equals(id))).write(
+      CollectionsCompanion(
+        isPinned: Value(pinned),
+        // Pin stamps the ordering timestamp; unpin clears it back to NULL.
+        pinnedAt: Value(pinned ? now : null),
+        updatedAt: Value(now),
+      ),
+    );
+  }
 
   /// Returns the video items in [collectionId] in the user's manual order.
   Future<List<VideoItem>> itemsFor(String collectionId) {

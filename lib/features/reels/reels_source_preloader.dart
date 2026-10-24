@@ -21,17 +21,26 @@ import 'package:mytube/sources/source_adapter.dart';
 ///
 /// The preloader resolves sources only — it never touches the player. Playback
 /// still goes through [PlaybackController]; a cached source simply lets the
-/// screen hand the next reel over without re-resolving.
+/// screen hand the next reel over without re-resolving. The optional [onWarmed]
+/// callback lets the host notice a fresh landing (e.g. to prewarm the next
+/// reel's engine through `PlaybackController.prewarm`, P7-11) — the preloader
+/// itself still never opens a player.
 class ReelsSourcePreloader {
   ReelsSourcePreloader({
     required PlaybackSourceResolver resolver,
     this.maxCache = 3,
+    this.onWarmed,
   }) : _resolver = resolver; // ignore: prefer_initializing_formals
 
   final PlaybackSourceResolver _resolver;
 
   /// The most resolved sources kept warm; older entries are evicted FIFO.
   final int maxCache;
+
+  /// Called after a preload lands fresh (current generation) and is cached,
+  /// with the item it belongs to and its resolved source. Never called for a
+  /// stale or failed resolution.
+  final void Function(VideoItemSummary item, PlayableSource source)? onWarmed;
 
   int _generation = 0;
   final Map<String, PlayableSource> _cache = <String, PlayableSource>{};
@@ -80,6 +89,7 @@ class ReelsSourcePreloader {
         while (_cache.length > maxCache) {
           _cache.remove(_cache.keys.first);
         }
+        onWarmed?.call(item, value);
       }
     } finally {
       _inFlight.remove(id);

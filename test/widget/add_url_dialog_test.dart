@@ -107,6 +107,12 @@ class _RecordingRepository implements VideoRepository {
       throw UnimplementedError();
 
   @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async => throw UnimplementedError();
+
+  @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
     String collectionId,
   ) async => Result.ok(const []);

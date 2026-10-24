@@ -1,3 +1,5 @@
+import 'dart:ui' show Size;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/sources/source_adapter.dart';
@@ -69,6 +71,22 @@ abstract interface class PlaybackController {
   /// [PlaybackState.canRetry] is true, but calling it unconditionally is safe.
   Future<void> retry();
 
+  /// Pre-initializes an engine for [source] in the background so a later
+  /// [play] of the same source skips the open+initialize delay — the Reels
+  /// surface uses this to pre-warm the next reel for a gapless swipe
+  /// (P7-11).
+  ///
+  /// Purely best-effort and never visible: the state machine is untouched,
+  /// and failures are dropped silently (a later [play] of that source loads
+  /// normally and reports errors as usual).  At most one source is prewarmed
+  /// at a time — a newer call supersedes the older warm engine.  Unsupported
+  /// schemes are ignored without error.
+  Future<void> prewarm(PlayableSource source);
+
+  /// Releases any engine held by [prewarm].  No-op when nothing is warm and
+  /// never affects the currently playing source.
+  Future<void> dropPrewarm();
+
   /// A widget that paints the current video, or null when nothing is loaded.
   ///
   /// Lets the render surface (P4-06) display video without importing the
@@ -105,6 +123,7 @@ class PlaybackState {
     this.volume = 1.0,
     this.canSeek = false,
     this.canRetry = false,
+    this.videoSize,
     this.error,
   });
 
@@ -129,6 +148,15 @@ class PlaybackState {
   /// (P4-07, AVAIL-002). Drives the visibility of the Retry affordance.
   final bool canRetry;
 
+  /// Intrinsic size of the loaded picture, already corrected for source
+  /// rotation, or null until the engine is initialized.
+  ///
+  /// `width / height` is the on-screen aspect ratio, so a render surface can
+  /// decide how to scale the video without ever touching the engine — the Reels
+  /// surface uses it to go full-bleed for portrait clips and letterbox
+  /// landscape ones, both of which preserve the ratio.
+  final Size? videoSize;
+
   /// Non-null when [status] is [PlaybackStatus.error].
   /// Must be a user-safe message — no tokens, no signed-URL parameters.
   final String? error;
@@ -137,6 +165,15 @@ class PlaybackState {
   bool get isPaused => status == PlaybackStatus.paused;
   bool get isBuffering => status == PlaybackStatus.buffering;
   bool get hasError => status == PlaybackStatus.error;
+
+  /// True when the loaded picture is wider than it is tall (a landscape clip).
+  /// False while the size is unknown, which the render surfaces treat as
+  /// "letterbox me" — the safe, nothing-cropped layout.
+  bool get isLandscapeVideo {
+    final size = videoSize;
+    if (size == null || size.isEmpty) return false;
+    return size.width > size.height;
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -149,6 +186,7 @@ class PlaybackState {
           other.volume == volume &&
           other.canSeek == canSeek &&
           other.canRetry == canRetry &&
+          other.videoSize == videoSize &&
           other.error == error;
 
   @override
@@ -160,6 +198,7 @@ class PlaybackState {
     volume,
     canSeek,
     canRetry,
+    videoSize,
     error,
   );
 }

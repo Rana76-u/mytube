@@ -201,6 +201,15 @@ abstract interface class VideoRepository {
   /// underlying video items or original files (ARCHITECTURE §9 — safe delete).
   Future<Result<void>> deleteCollection(String id);
 
+  /// Pins ([pinned] true) or unpins the collection [id] for Discover ordering
+  /// and priority (disc redesign §19). A pure presentation preference: it never
+  /// changes collection membership or favourites, and unpinning restores the
+  /// normal recency ordering.
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  });
+
   /// Returns the video items in [collectionId] in the user's manual order.
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
     String collectionId,
@@ -430,6 +439,8 @@ class CollectionSummary {
     this.description,
     required this.itemCount,
     required this.createdAt,
+    this.isPinned = false,
+    this.pinnedAt,
   });
 
   final String id;
@@ -439,6 +450,13 @@ class CollectionSummary {
 
   /// Creation timestamp in milliseconds since the epoch.
   final int createdAt;
+
+  /// Whether the user pinned this collection to the top of Discover (§19).
+  final bool isPinned;
+
+  /// Pin timestamp in milliseconds since the epoch, or null when unpinned.
+  /// Drives the deterministic pinned ordering (most-recently-pinned first).
+  final int? pinnedAt;
 }
 
 /// Order-independent set equality helper for value types above.
@@ -465,6 +483,7 @@ class VideoItemSummary {
     required this.watchProgressMs,
     this.lastPlayedAt,
     required this.createdAt,
+    this.primaryProvider,
   });
 
   final VideoItemId id;
@@ -476,6 +495,11 @@ class VideoItemSummary {
   final int watchProgressMs;
   final int? lastPlayedAt;
   final int createdAt;
+
+  /// The item's representative provider — its primary source location's type
+  /// (else the earliest-attached), or `null` when no source is known. Lets the
+  /// card show a source label without a per-item query.
+  final ProviderType? primaryProvider;
 }
 
 /// The persisted playback position for a video item.

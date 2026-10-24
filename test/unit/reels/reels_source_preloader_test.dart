@@ -164,5 +164,37 @@ void main() {
 
       expect(preloader.cachedCount, 0);
     });
+
+    test('onWarmed reports a fresh landing to the host', () async {
+      final warmed = <String>[];
+      final preloader = ReelsSourcePreloader(
+        resolver: _AutoResolver(),
+        onWarmed: (item, source) => warmed.add(item.id.value),
+      );
+      preloader.preload(_item('a'));
+      await _flush();
+
+      expect(warmed, ['a']);
+    });
+
+    test('onWarmed never fires for stale or failed preloads', () async {
+      var callbacks = 0;
+      final resolver = _ControlledResolver();
+      final preloader = ReelsSourcePreloader(
+        resolver: resolver,
+        onWarmed: (item, source) => callbacks++,
+      );
+
+      preloader.preload(_item('a'));
+      preloader.invalidate(); // 'a' lands stale (the user already swiped)
+      resolver.complete('a');
+      await _flush();
+
+      preloader.preload(_item('b'));
+      resolver.completeWithError('b');
+      await _flush();
+
+      expect(callbacks, 0);
+    });
   });
 }

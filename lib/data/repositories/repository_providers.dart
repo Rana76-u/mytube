@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/data/database/database_provider.dart';
+import 'package:mytube/data/repositories/drift_recommendation_history_repository.dart';
 import 'package:mytube/data/repositories/drift_video_repository.dart';
+import 'package:mytube/domain/repositories/recommendation_history_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 
 /// Riverpod provider for [VideoRepository].
@@ -22,3 +24,17 @@ final videoRepositoryProvider = Provider<VideoRepository>((ref) {
   ref.onDispose(repo.dispose);
   return repo;
 });
+
+/// Riverpod provider for [RecommendationHistoryRepository] (disc redesign §18,
+/// ADR-003).
+///
+/// Shares [databaseProvider] with the library repository and follows the same
+/// test seam: override [databaseProvider] with an in-memory database and the
+/// exposure store picks it up automatically.
+final recommendationHistoryRepositoryProvider =
+    Provider<RecommendationHistoryRepository>((ref) {
+      final db = ref.watch(databaseProvider);
+      final repo = DriftRecommendationHistoryRepository(db);
+      ref.onDispose(repo.dispose);
+      return repo;
+    });

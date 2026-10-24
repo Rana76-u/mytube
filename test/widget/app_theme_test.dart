@@ -4,11 +4,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/app/personal_video_hub_app.dart';
 import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/app/theme/theme_mode_notifier.dart';
+import 'package:mytube/data/database/app_database.dart';
+import 'package:mytube/data/database/database_provider.dart';
+
+/// Builds the app root inside a [ProviderScope] whose `databaseProvider` is
+/// overridden with the in-memory database, so mounting the live Discover tab
+/// does not open the real Drift store and leak a zero-duration timer.
+Widget _app() {
+  final db = AppDatabase.inMemory();
+  addTearDown(db.close);
+  return ProviderScope(
+    overrides: [databaseProvider.overrideWithValue(db)],
+    child: const PersonalVideoHubRoot(),
+  );
+}
 
 void main() {
   group('App theme wiring (P1-02)', () {
     testWidgets('launches with dark theme by default', (tester) async {
-      await tester.pumpWidget(const PersonalVideoHubApp());
+      await tester.pumpWidget(_app());
 
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
 
@@ -21,7 +35,7 @@ void main() {
     });
 
     testWidgets('light theme has Brightness.light', (tester) async {
-      await tester.pumpWidget(const PersonalVideoHubApp());
+      await tester.pumpWidget(_app());
 
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
 
@@ -29,7 +43,7 @@ void main() {
     });
 
     testWidgets('both themes use Material 3', (tester) async {
-      await tester.pumpWidget(const PersonalVideoHubApp());
+      await tester.pumpWidget(_app());
 
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
 
@@ -38,7 +52,11 @@ void main() {
     });
 
     testWidgets('themeMode updates live when notifier changes', (tester) async {
-      final container = ProviderContainer();
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
+      final container = ProviderContainer(
+        overrides: [databaseProvider.overrideWithValue(db)],
+      );
       addTearDown(container.dispose);
 
       await tester.pumpWidget(PersonalVideoHubApp(container: container));
@@ -74,19 +92,34 @@ void main() {
       expect(materialApp().themeMode, ThemeMode.dark);
     });
 
-    testWidgets('both themes share the same seed colour', (tester) async {
-      // Derive a reference ColorScheme to compare against the produced themes.
-      final darkScheme = ColorScheme.fromSeed(
-        seedColor: AppTheme.seedColor,
-        brightness: Brightness.dark,
-      );
+    testWidgets('dark theme applies the YouTube palette from Color Pallet.csv', (
+      tester,
+    ) async {
+      final scheme = AppTheme.dark.colorScheme;
+
+      // Primary — Red (#FF0000).
+      expect(scheme.primary, const Color(0xFFFF0000));
+      // Background (Dark) — Dark Charcoal (#0F0F0F) drives surface + scaffold.
+      expect(scheme.surface, const Color(0xFF0F0F0F));
+      expect(AppTheme.dark.scaffoldBackgroundColor, const Color(0xFF0F0F0F));
+      // Surface (Dark) — Medium Charcoal (#272727) for search bar / chips.
+      expect(scheme.surfaceContainerHigh, const Color(0xFF272727));
+      expect(scheme.surfaceContainerHighest, const Color(0xFF272727));
+      // Text Primary — Pure White; Text Secondary — Medium Grey (#AAAAAA).
+      expect(scheme.onSurface, const Color(0xFFFFFFFF));
+      expect(scheme.onSurfaceVariant, const Color(0xFFAAAAAA));
+    });
+
+    testWidgets('light theme derives the brand red primary from the seed', (
+      tester,
+    ) async {
       final lightScheme = ColorScheme.fromSeed(
         seedColor: AppTheme.seedColor,
         brightness: Brightness.light,
       );
 
-      expect(AppTheme.dark.colorScheme.primary, darkScheme.primary);
       expect(AppTheme.light.colorScheme.primary, lightScheme.primary);
+      expect(AppTheme.seedColor, const Color(0xFFFF0000));
     });
   });
 

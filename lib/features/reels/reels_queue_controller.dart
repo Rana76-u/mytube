@@ -1,32 +1,34 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mytube/core/result.dart';
-import 'package:mytube/data/repositories/repository_providers.dart';
-import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/recommendation_scorer_provider.dart';
 import 'package:mytube/features/reels/reels_queue.dart';
 
 /// Owns the vertical Reels queue (P6-01, PLAY-001).
 ///
-/// [build] loads the ordered reel list once from the library; the queue then
-/// tracks the viewport index as the user swipes.  P6-01 is deliberately scoped
-/// to the *queue and its swipe navigation* — starting playback on entry and
-/// looping (P6-02), the control overlay (P6-03), adjacent preloading with
-/// stale-work cancellation (P6-04), and rule-based ordering (P6-05/P6-06) are
-/// separate tasks that build on the state exposed here.
+/// [build] loads the ordered reel list from the rule-based recommendation
+/// pipeline ([recommendationsProvider]) rather than the library's raw
+/// most-recently-added order, so Reels plays a curated feed — unwatched,
+/// available, favourite and recently-added items rise while just-shown and
+/// recently-watched ones sink — instead of just walking the library one after
+/// another (P6-05/P6-06, DISC-001..003).
 ///
-/// The default order is the library's most-recently-added order. When the
-/// recommendation scorer (P6-05) lands it replaces the list source in [build]
-/// without changing the navigation surface.
+/// Reusing [recommendationsProvider] keeps a single recommendation pipeline
+/// (ADR-002): Reels and the Discover "Recommended" feed share the exact same
+/// scoring signals, source-availability demotion and cross-surface repetition
+/// reduction, so a video already surfaced in Discover is de-prioritised here
+/// and vice-versa. The queue then tracks the viewport index as the user swipes;
+/// the navigation surface ([goTo]/[next]/[previous]) is unchanged by the
+/// recommendation wiring. Starting playback on entry and looping (P6-02), the
+/// control overlay (P6-03) and adjacent preloading with stale-work cancellation
+/// (P6-04) build on the state exposed here.
 class ReelsQueueController extends AsyncNotifier<ReelsQueue> {
   @override
   Future<ReelsQueue> build() async {
-    final repository = ref.watch(videoRepositoryProvider);
-    final result = await repository.queryItems(
-      const LibraryQuery(sort: LibrarySort.recentlyAdded),
-    );
-    return switch (result) {
-      Ok(:final value) => ReelsQueue(items: value),
-      Err(:final error) => throw StateError(error.diagnosticMessage),
-    };
+    // Watch the ranked snapshot, not the repository: a reshuffle or mode change
+    // on the shared pipeline re-emits and Reels follows the fresh ranking, while
+    // the whole enrichment (availability reads, exposure history) stays owned
+    // by [RecommendationsController] rather than being duplicated here.
+    final ranked = await ref.watch(recommendationsProvider.future);
+    return ReelsQueue(items: ranked);
   }
 
   /// Points the queue at page [index], clamped to a valid reel.

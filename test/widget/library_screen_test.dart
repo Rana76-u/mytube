@@ -440,7 +440,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Video 1 starts un-favourited.
+      // Video 1 starts un-favourited. Open its ⋮ menu, then toggle favourite.
+      await tester.tap(find.byKey(const ValueKey('card_menu_id1')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('favourite_id1')));
       await tester.pumpAndSettle();
 
@@ -483,6 +485,8 @@ void main() {
       expect(find.byType(VideoItemCard), findsOneWidget);
 
       // Un-favourite Video 2 → it no longer matches the filter.
+      await tester.tap(find.byKey(const ValueKey('card_menu_id2')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('favourite_id2')));
       await tester.pumpAndSettle();
       expect(find.text('No Matches'), findsOneWidget);
@@ -507,6 +511,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const ValueKey('card_menu_id1')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tags_id1')));
       await tester.pumpAndSettle();
 
@@ -534,6 +540,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const ValueKey('card_menu_id1')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('tags_id1')));
       await tester.pumpAndSettle();
 
@@ -783,6 +791,12 @@ class _FakeEmptyRepository implements VideoRepository {
       throw UnimplementedError();
 
   @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async => throw UnimplementedError();
+
+  @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
     String collectionId,
   ) async => Result.ok([]);
@@ -1015,6 +1029,12 @@ class _FakeRepository implements VideoRepository {
       throw UnimplementedError();
 
   @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async => throw UnimplementedError();
+
+  @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
     String collectionId,
   ) async => Result.ok(const []);
@@ -1229,6 +1249,12 @@ class _FakeErrorRepository implements VideoRepository {
   @override
   Future<Result<void>> deleteCollection(String id) async =>
       throw UnimplementedError();
+
+  @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async => throw UnimplementedError();
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(

@@ -5,7 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/repositories/recommendation_history_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/discover_feed_mode.dart';
+import 'package:mytube/domain/services/discover_feed_ranker.dart';
+import 'package:mytube/domain/services/discover_session.dart';
 import 'package:mytube/domain/services/recommendation_scorer.dart';
 
 /// Wires the deterministic [RecommendationScorer] with controlled
@@ -16,6 +20,25 @@ import 'package:mytube/domain/services/recommendation_scorer.dart';
 /// built from a seeded [math.Random] (or none) to make ranking reproducible.
 final recommendationScorerProvider = Provider<RecommendationScorer>((ref) {
   return RecommendationScorer(random: math.Random());
+});
+
+/// The single ranking-strategy stage shared by all three Discover feed modes
+/// (disc redesign §17.3, ADR-002). It wraps the [recommendationScorerProvider]
+/// so Recommended/Unwatched reuse the exact same scoring signals while
+/// Recently Added bypasses scoring for chronological order.
+final discoverFeedRankerProvider = Provider<DiscoverFeedRanker>((ref) {
+  return DiscoverFeedRanker(ref.watch(recommendationScorerProvider));
+});
+
+/// The app-scoped Discover browsing-session policy (disc redesign §18.4).
+///
+/// A single instance lives for the whole [ProviderContainer] so the session id
+/// stays stable across tab navigation, playback and rebuilds — exactly the
+/// boundary §18.4 requires. A genuinely new session rolls over only after the
+/// configured inactivity timeout elapses between [DiscoverSession.touch] calls.
+/// Tests override this with a [DiscoverSession] built on a controllable clock.
+final discoverSessionProvider = Provider<DiscoverSession>((ref) {
+  return DiscoverSession();
 });
 
 /// Produces the ordered "For You" recommendation list (P6-06, DISC-002,
@@ -47,6 +70,7 @@ class RecommendationsController extends AsyncNotifier<List<VideoItemSummary>> {
       case Ok(:final value):
         _all = value;
         _availableById = await _readAvailability(repository, value);
+        await _loadExposureSignals();
         return _rank(value);
       case Err(:final error):
         throw StateError(error.diagnosticMessage);
@@ -60,6 +84,30 @@ class RecommendationsController extends AsyncNotifier<List<VideoItemSummary>> {
   /// (which would recreate the notifier and drop the session history).
   Future<void> reshuffle() async {
     if (_all.isEmpty) return;
+    await _loadExposureSignals();
+    state = AsyncData(_rank(_all));
+  }
+
+  /// The currently selected Discover feed mode (disc redesign §17). Defaults to
+  /// [DiscoverFeedMode.recommended]; the choice is session-scoped, not persisted
+  /// (§17.2 — "Do not store the selected mode permanently ... Session-level
+  /// persistence is sufficient"), so it lives on this notifier and is re-ranked
+  /// from the already-loaded library.
+  DiscoverFeedMode _mode = DiscoverFeedMode.recommended;
+  DiscoverFeedMode get mode => _mode;
+
+  /// Switches the main feed's ordering strategy without reloading the library
+  /// (§17.2). Changing modes resets the current feed's deduplication state so a
+  /// fresh pass is not biased by the previous mode's recently-shown head; the
+  /// re-rank reuses the cached availability signals.
+  void setMode(DiscoverFeedMode mode) {
+    if (_mode == mode) return;
+    _mode = mode;
+    _recentlyShown.clear();
+    if (_all.isEmpty) {
+      state = const AsyncData([]);
+      return;
+    }
     state = AsyncData(_rank(_all));
   }
 
@@ -77,8 +125,100 @@ class RecommendationsController extends AsyncNotifier<List<VideoItemSummary>> {
   Map<String, bool> _availableById = const {};
 
   /// Rolling local history of recently-recommended ids, ordered oldest-first so
-  /// it can be bounded. In-memory only — never uploaded (DISC-003).
+  /// it can be bounded. In-memory only — never uploaded (DISC-003). Complements
+  /// the persisted current-session exposure below so repetition reduction works
+  /// both inside a rapid refresh loop and across app runs.
   final LinkedHashSet<String> _recentlyShown = LinkedHashSet<String>();
+
+  /// Ids persisted as meaningfully exposed in the current browsing session
+  /// (disc redesign §18.2/§18.5). Loaded from the [RecommendationHistoryRepository]
+  /// and appended by [markExposed]; empty when no history store is reachable.
+  Set<String> _currentSessionExposed = const {};
+
+  /// Ids persisted as exposed in a *recent earlier* session but not this one;
+  /// the scorer applies the lighter cross-session penalty to these (§18.5).
+  Set<String> _recentSessionExposed = const {};
+
+  /// Retention budget for exposure history (§18.6): rows older than the window,
+  /// or beyond the count cap, are pruned when a genuinely new session begins.
+  static const Duration _exposureRetentionWindow = Duration(days: 7);
+  static const int _maxExposureRows = 2000;
+
+  DiscoverSession get _session => ref.read(discoverSessionProvider);
+
+  /// The exposure store, or null when it cannot be constructed (e.g. a unit
+  /// test that never wires a database). Exposure is explicitly best-effort
+  /// (§18, ADR-003): Discover must keep ranking on relevance alone when the
+  /// history layer is unavailable, so a failure here degrades gracefully.
+  RecommendationHistoryRepository? _historyRepositoryOrNull() {
+    try {
+      return ref.read(recommendationHistoryRepositoryProvider);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Advances the session boundary and refreshes the in-memory exposure signal
+  /// sets from the persisted history (§18.3/§18.5). Safe to call repeatedly.
+  Future<void> _loadExposureSignals() async {
+    _currentSessionExposed = const {};
+    _recentSessionExposed = const {};
+    final startedNewSession = _session.touch();
+    final repo = _historyRepositoryOrNull();
+    if (repo == null) return;
+    try {
+      if (startedNewSession) {
+        await repo.prune(
+          olderThan: DateTime.now().subtract(_exposureRetentionWindow),
+          maxRows: _maxExposureRows,
+        );
+      }
+      final inSession = await repo.exposedInSession(_session.sessionId);
+      if (inSession case Ok(:final value)) {
+        _currentSessionExposed = value.keys.toSet();
+      }
+      final before = await repo.exposedBefore(DateTime.now());
+      if (before case Ok(:final value)) {
+        _recentSessionExposed = value.difference(_currentSessionExposed);
+      }
+    } catch (_) {
+      // Best-effort: a history read failure must not break the feed; fall back
+      // to relevance-only ranking with the in-memory head still applied.
+      _currentSessionExposed = const {};
+      _recentSessionExposed = const {};
+    }
+  }
+
+  /// Records that the given feed item ids were *meaningfully presented* during
+  /// the current session (§18.3). The Discover UI (visibility detection) calls
+  /// this in a batch as cards scroll into view.
+  ///
+  /// Writes are deduplicated against the in-memory current-session set so an
+  /// item is persisted at most once per session — re-scrolling past it triggers
+  /// no further database writes (§18.3/§18.7). A missing/unreachable history
+  /// store is tolerated.
+  Future<void> markExposed(Iterable<String> videoItemIds) async {
+    final pending = {
+      for (final id in videoItemIds)
+        if (id.isNotEmpty && !_currentSessionExposed.contains(id)) id,
+    };
+    if (pending.isEmpty) return;
+    _currentSessionExposed = {..._currentSessionExposed, ...pending};
+    final repo = _historyRepositoryOrNull();
+    if (repo == null) return;
+    final atMs = DateTime.now().millisecondsSinceEpoch;
+    try {
+      for (final id in pending) {
+        await repo.recordExposure(
+          videoItemId: id,
+          sessionId: _session.sessionId,
+          atMs: atMs,
+        );
+      }
+    } catch (_) {
+      // Best-effort: exposure never breaks Discover.
+    }
+  }
 
   /// Reads each item's source locations once and reduces them to a single
   /// "is this reachable?" signal for the scorer (DISC-002). A failed lookup is
@@ -113,24 +253,44 @@ class RecommendationsController extends AsyncNotifier<List<VideoItemSummary>> {
   }
 
   List<VideoItemSummary> _rank(List<VideoItemSummary> items) {
-    final scorer = ref.read(recommendationScorerProvider);
+    final ranker = ref.read(discoverFeedRankerProvider);
+
+    // Current-session repetition = persisted exposure ∪ the in-memory head.
+    final shownIds = {..._recentlyShown, ..._currentSessionExposed};
+    // Controlled relaxation (§18.5): when the eligible pool is entirely already
+    // exposed, stop penalising so the feed keeps returning useful results
+    // instead of demoting every item uniformly toward randomness.
+    final poolFullyExposed =
+        _mode == DiscoverFeedMode.recommended &&
+        items.isNotEmpty &&
+        items.every((item) => shownIds.contains(item.id.value));
+    final effectiveShown = poolFullyExposed ? const <String>{} : shownIds;
+
     final candidates = [
       for (final item in items)
         RecommendationCandidate(
           item: item,
           isAvailable: _availableById[item.id.value] ?? true,
-          recentlyShown: _recentlyShown.contains(item.id.value),
+          recentlyShown: effectiveShown.contains(item.id.value),
+          seenInRecentSession:
+              _recentSessionExposed.contains(item.id.value) &&
+              !effectiveShown.contains(item.id.value),
         ),
     ];
-    final ranked = scorer.rank(candidates);
+    final ranked = ranker.order(_mode, candidates);
 
-    // Remember the new head so the next refresh demotes it (repetition
-    // reduction), evicting the oldest once the bounded history overflows.
-    for (final item in ranked.take(_shownHeadSize)) {
-      _recentlyShown.add(item.id.value);
-    }
-    while (_recentlyShown.length > _shownHistoryCap) {
-      _recentlyShown.remove(_recentlyShown.first);
+    // Repetition reduction is a Recommended-mode concern only (§18.5):
+    // Recently Added must keep strict chronological order and Unwatched must
+    // keep its eligibility-driven order, so neither should feed the head that
+    // would later demote it. Remember the new head so the next refresh demotes
+    // it, evicting the oldest once the bounded history overflows.
+    if (_mode == DiscoverFeedMode.recommended) {
+      for (final item in ranked.take(_shownHeadSize)) {
+        _recentlyShown.add(item.id.value);
+      }
+      while (_recentlyShown.length > _shownHistoryCap) {
+        _recentlyShown.remove(_recentlyShown.first);
+      }
     }
     return ranked;
   }

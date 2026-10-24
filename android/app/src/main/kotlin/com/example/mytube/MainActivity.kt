@@ -15,5 +15,11 @@ class MainActivity : FlutterActivity() {
         ThumbnailPlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
+        AudioFocusPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
+        MediaSessionPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
     }
 }

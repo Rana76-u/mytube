@@ -22,6 +22,17 @@ class Collections extends Table {
   /// Wall-clock timestamp (ms since epoch) of the last update to this row.
   IntColumn get updatedAt => integer()();
 
+  /// Whether the user pinned this collection to the top of Discover (P4 disc
+  /// redesign §19). Presentation/navigation preference only — it never changes
+  /// collection membership or favourites.
+  BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
+
+  /// Wall-clock timestamp (ms since epoch) when the collection was pinned,
+  /// or NULL when it is not pinned. Together with [isPinned] it gives a
+  /// deterministic pinned ordering (most-recently-pinned first, id tie-break)
+  /// without a manual drag-to-reorder subsystem.
+  IntColumn get pinnedAt => integer().nullable()();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }

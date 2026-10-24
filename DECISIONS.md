@@ -250,3 +250,301 @@ accepted.** Android toolchain is usable. A physical device
 (CPH2719, Android 16) was connected. The remaining doctor warning is
 Visual Studio C++ components for Windows-desktop apps and is out of
 MVP scope.
+
+---
+
+# Discover redesign decisions
+
+Recorded 2026-10-24 against the Discover Page Redesign
+(`DISCOVERY_PAGE_REDESIGN.md` §16–§20). These adopt the six
+recommended ADRs only after inspecting the existing architecture
+(P0-02 Riverpod, P0-03 player, Drift persistence) and confirming each
+decision is **actually implemented**, not merely proposed. They follow
+the template in §20: status, context, decision, alternatives, and
+consequences. Existing IDs and numbering are preserved; none of these
+supersede a Phase 0 decision.
+
+## ADR-001 --- Local-first recommendation architecture
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** Discover must surface useful suggestions with
+no app-owned backend, no ML service, and no user account (SEC-001,
+NFR-009, DISC-001).
+
+**Decision.** Keep recommendation generation entirely on-device and
+rule-based. Split the concerns into separate, reusable logical
+responsibilities across the existing layers: candidate eligibility and
+ranking in a framework-free `RecommendationScorer` (`lib/domain/`),
+orchestration and mode selection in `RecommendationsController` (a
+Riverpod `AsyncNotifier`), and persistence behind the repository
+boundary. No backend or network dependency is introduced.
+
+**Alternatives considered.** External recommendation API; on-device
+ML; one large ranking function embedded in a widget. All rejected —
+they add privacy surface, cost, or untestable UI coupling.
+
+**Consequences.** Ranking is explainable and unit-testable without a
+device; works offline for local content. Less sophisticated than
+collaborative systems and dependent on available local metadata, so
+sparse metadata must be handled explicitly (it is — unknown duration is
+treated conservatively).
+
+## ADR-002 --- One recommendation pipeline with distinct feed modes
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** Recommended, Recently Added, and Unwatched
+share eligibility, deduplication, and history concerns. Three parallel
+feeds would triple maintenance and diverge subtly.
+
+**Decision.** Run **one** shared candidate/ranking pipeline and vary
+only the ordering strategy per `DiscoverFeedMode` (`recommended` /
+`recentlyAdded` / `unwatched`). The Discover UI repopulates a single
+main feed from the selected mode via `RecommendationsController.setMode`
+rather than mounting separate feeds. Chronological and unwatched modes
+apply explicit ordering that generic relevance scoring cannot override.
+
+**Alternatives considered.** A per-mode implementation; one universal
+scoring formula for all three. Rejected for duplication and for letting
+relevance override intent (recency / unwatched-first).
+
+**Consequences.** Reused eligibility and dedup; fewer tests to keep
+honest; new modes can be added by extending the enum + ordering rule.
+Requires the pipeline interface to stay explicit, which it does.
+
+## ADR-003 --- Separate exposure history from playback history
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** "Shown in the feed" and "watched" are
+different signals. Deriving repetition-control from watch progress
+would create false progress writes and couple two subsystems.
+
+**Decision.** Persist recommendation **exposure** in its own Drift
+table (`recommendation_exposures`, schema v6) with bounded retention
+and session scoping, wholly separate from `video_items` watch progress
+and playback history. Only a meaningful feed presentation records an
+exposure (via `markExposed` when a page is actually surfaced); actual
+viewing progress stays owned by the playback subsystem. Recorded
+exposures never mutate watch progress, favourites, or `updatedAt`
+(guarded by a dedicated DAO test).
+
+**Alternatives considered.** No exposure tracking; deriving exposure
+from watch history; an unbounded history. Rejected — they either lose
+repetition control, pollute watch state, or grow without limit.
+
+**Consequences.** Supports session-aware repetition reduction while
+keeping playback and recommendation responsibilities separate; history
+can be pruned without touching the user's library. Costs a small amount
+of extra persistent state and lifecycle-aware tracking, which need (and
+have) tests.
+
+## ADR-004 --- Persistent collection pinning
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** Users want certain collections to lead the
+discovery surface; the preference must survive restarts without
+changing collection membership or favourites semantics.
+
+**Decision.** Store pinning as metadata on the **existing**
+`collections` table — an `is_pinned` flag plus a non-null `pinned_at`
+timestamp (schema v6 migration) — rather than a separate pinning
+subsystem or a second table. Ordering is deterministic: pinned first by
+most-recently-pinned, then unpinned newest-first. Pin/unpin never
+mutates membership or favourites, and deleting a pinned collection
+cascades cleanly with no stale pin metadata.
+
+**Alternatives considered.** In-memory pin state (lost on restart);
+deriving "pinned" from favourites (conflates two intents); a separate
+pinned-collections table (heavier than needed). The user chose
+`isPinned + pinnedAt` columns as the minimal schema change.
+
+**Consequences.** Survives restarts and drives both chip ordering and
+the Discover Collections strip. Requires one migration (done, with data
+preservation) and safe delete handling (tested).
+
+## ADR-005 --- Stable, bounded feed pagination
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** Discover needs lazy paging as the user
+scrolls, but must not re-run full ranking on every scroll event, show
+duplicates, or race concurrent fetches (NFR-003).
+
+**Decision.** Page lazily over an already-ranked in-memory snapshot
+using a framework-free `DiscoverFeedPaginator` with stable session
+ordering, logical-ID deduplication, a single in-flight request guard,
+and a generation token that cancels stale in-flight work when a
+mode change or refresh resets the feed. `DiscoverFeedController` wraps
+it into a bounded 20-item page state and records exposure only for
+newly surfaced items. The Library tab owns the complete list; Discover
+never dumps the whole library.
+
+**Alternatives considered.** Load everything at once; re-rank per
+scroll; offset pagination without repetition control; a server-style
+cursor system. All rejected as wasteful or overcomplex for local
+SQLite-scale libraries.
+
+**Consequences.** Responsive on large libraries, no duplicate or
+ordering-instability surprises, and refresh/mode changes stay
+deterministic. A snapshot can go stale when the library changes, so
+reset rules are explicit (rebuild re-ranks and re-pages from page one).
+
+## ADR-006 --- Shared video presentation components
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** Continue Watching, the main feed, carousels,
+and collection chips all render video/collection previews; duplicating
+thumbnail/error logic per section invites inconsistency.
+
+**Decision.** Reuse the existing `VideoThumbnail` / `VideoItemCard`
+components for the Discover main feed and add small, purposeful
+Discover widgets (`DiscoverCarousel`, `ContinueWatchingTile`,
+`DiscoverFilterChips`, `FeedModeControl`, `DiscoverBrowseRows`) for the
+horizontal/presentation variants. Source resolution, thumbnail caching,
+and playback navigation stay in their existing layers; the new widgets
+hold no database, recommendation, or playback business logic. (The
+earlier folder-style `CollectionChip` was retired by the YouTube-style
+redesign in favour of collection filter chips plus per-collection video
+card rows — see ADR-007.)
+
+**Alternatives considered.** A separate unrelated thumbnail/cards
+per section. Rejected for duplicated rendering and error handling.
+
+**Consequences.** Visual consistency and simpler tests, with a small
+couple of explicit presentation variants — while guarding against the
+components becoming a catch-all that absorbs domain logic.
+
+## ADR-007 --- YouTube-style Discover surface
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** The Discover page was reworked to read like a
+modern video home feed (a large card, a chip row, and horizontal browse
+shelves) without replacing any existing feature — Continue Watching, the
+mode-driven feed, lazy pagination + exposure, and pinned-collection
+ordering all had to survive. Two new data needs surfaced: the card's
+metadata line wanted a *source/provider label*, and the chip/shelf
+vocabulary had to come from the user's own collections and tags rather
+than a bespoke category list.
+
+**Decision.** Make the redesigned `VideoItemCard` **app-wide** (one
+tile everywhere, with an optional `width` variant so the same card also
+fits inside horizontal rows) rather than a Discover-only style. Give
+`VideoItemSummary` an optional `ProviderType? primaryProvider` (default
+`null`, so existing constructions still compile) populated by a Drift
+LEFT-JOIN on the item's primary (else earliest) source location — one
+representative label for multi-source duplicates, no new dependency. Add
+a pure `formatRelativeDate` util for the "Added N days ago" line. Introduce
+a framework-free `discoverFeedFilterProvider` (sealed `DiscoverFeedFilter`
++ `Notifier`) that `DiscoverFeedController.build` *watches*, so chip
+selection repopulates the same paginated/exposed feed and a chip change
+resets pagination through the existing generation guard. Surface capped,
+lazy horizontal shelves (`DiscoverBrowseRows` over
+`recentlyAddedRowProvider`/`collectionRowProvider`/`tagRowProvider`, each
+family provider `.take(≈10)`, ≤6 rows) rather than unbounded full scans.
+
+**Alternatives considered.** A separate Discover-only card (rejected:
+duplicate rendering/metadata logic, breaks ADR-006). A per-provider list
+on the card (rejected: multi-source duplicates need one representative,
+not a join that fans out rows). Shelves fed by a single upfront scan
+(rejected: AGENTS — keep reads cheap and lazy; family providers only run
+when a row builds).
+
+**Consequences.** A cohesive home feed built entirely on the existing
+Riverpod + Drift + repository layers, with the provider label resolved by
+one join in the summary query and no new package. The app-wide card keeps
+Library/Saved/Favorites/search visually consistent. The cost is a taller
+card that shifts lazy-viewport behaviour, so widget tests that assert on
+content below the shelves opt into a larger test surface rather than
+relying on the default viewport.
+
+## ADR-008 --- YouTube colour palette as the app-wide theme
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** The app needed a single, recognisable visual
+identity for the whole UI (SET-001 dark-first) rather than the earlier
+generic teal seed. A palette was supplied in `Color Pallet.csv` (Primary
+Red `#FF0000`, Dark-Charcoal background `#0F0F0F`, Medium-Charcoal
+surface `#272727`, Pure-White primary text, Medium-Grey `#AAAAAA`
+secondary text) and had to be applied without scattering hard-coded
+colours through widgets, which would break the ADR-006 shared-component
+approach and the "no hard-coded colour" rule in `AGENTS.md`.
+
+**Decision.** Keep `AppTheme` (`lib/app/theme/app_theme.dart`) as the
+single source of truth and build the default **dark** theme from the exact
+CSV hex values via `ColorScheme.fromSeed(brand red, dark).copyWith(...)`,
+overriding the neutral roles so they equal the palette: `primary` =
+`#FF0000`, `surface` + `surfaceContainerLowest` + `scaffoldBackgroundColor`
+= `#0F0F0F` (app / video-card background), the remaining
+`surfaceContainer*` = `#272727` (search bar, chips, bottom sheets),
+`onSurface` = `#FFFFFF`, `onSurfaceVariant` = `#AAAAAA`. Non-neutral
+tokens (secondary/tertiary/error/outline) are derived from the red seed so
+they stay coherent without inventing values the palette does not define.
+The CSV specifies dark neutrals only, so the light theme keeps deriving
+the same brand red from the seed (`fromSeed(red, light)`) rather than
+fabricating light neutrals; the palette therefore governs the default
+experience users actually see.
+
+**Alternatives considered.** Changing only the seed and letting Material
+3 tonal ramps approximate the colours (rejected: `fromSeed` tones do not
+hit the exact `#0F0F0F`/`#272727`/`#AAAAAA` values, so the background and
+text roles drift from the palette). Hard-coding the hex values per widget
+(rejected: violates `AGENTS.md` and ADR-006, and makes recolouring a
+scatter-edit). Inventing a full light-mode palette not present in the CSV
+(rejected: undocumented values would be guesses).
+
+**Consequences.** The whole app reads the YouTube palette through one
+`AppTheme` edit point while every widget keeps using
+`Theme.of(context).colorScheme`, so visual consistency and future
+recolouring stay trivial. `test/widget/app_theme_test.dart` now asserts
+the exact palette hex values on the dark scheme (replacing the earlier
+"both themes share the same seed colour" invariant, which the explicit
+override intentionally superseded). The one limitation is that light mode
+inherits Material tonal neutrals rather than a bespoke YouTube light
+palette, because the supplied CSV defines dark neutrals only.
+
+## ADR-009 --- App-driven MediaSessionCompat for notification controls
+
+**Context.** P13-03 needs Android media-session / notification / lock-screen
+controls that reflect the shared player. The `video_player` package (built on
+Media3 ExoPlayer) keeps its player instance private to the plugin, so the
+running engine cannot be handed to a Media3 `MediaSessionService` the way a
+hand-built ExoPlayer could. The app already owns an engine-neutral
+`PlaybackController` whose `PlaybackState` (status, position, duration,
+can-seek, speed) is the single source of truth for playback, and the UI layer
+must never touch a platform bridge directly (`AGENTS.md`).
+
+**Decision.** Back the notification with a classic `MediaSessionCompat`
+(androidx.media) plus a `mediaPlayback` foreground service, driven entirely by
+the app-owned `PlaybackController` state through a new `MediaSessionBridge` /
+`MediaSessionCoordinator` pair — the same bridge+coordinator split already used
+for audio focus (P13-01). Dart renders via `render`/`stop`/`release`; the
+service forwards transport as `onTransport`, and the coordinator maps it onto
+`resume`/`pause`/`seekTo`/`stop`. Transport is deliberately limited to
+play/pause/seek/stop and omits next/previous so the media session stays
+uncoupled from the Reels queue (a later task can add those once the session and
+the queue share an owner). Notification rendering is throttled by a signature
+that excludes `position` and relies on the OS animating the bar from the last
+base position, and the display title comes from a small app-owned
+`nowPlayingProvider` (playback screens publish the label; `PlayableSource` has
+none) rather than adding metadata to the engine-neutral controller.
+
+**Alternatives considered.** Adopting a Media3 `MediaSessionService` with a
+Media3 `ExoPlayer` (rejected: would force replacing `video_player`, a large
+engine migration far outside P13-03 scope). Putting a title onto
+`PlayableSource`/`PlaybackController` (rejected: leaks display metadata into
+the engine-neutral playback contract). Driving the notification directly from
+widgets (rejected: violates the layering rule that widgets never call a bridge).
+
+**Consequences.** Notification controls reuse the established bridge +
+scheduler pattern with zero engine coupling and keep working as a safe no-op on
+non-Android hosts; the same foreground service also supplies the reliable
+background audio P13-02 deferred. The cost is two extra moving parts (a service
+plus a static Dart-relay inside `MediaSessionPlugin`) and the accepted
+limitation that next/previous are intentionally absent until the queue owns the
+session; real on-device behavior is only confirmed by the P13-06 pass.

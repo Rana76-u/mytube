@@ -3,7 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
+import 'package:mytube/domain/repositories/recommendation_history_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/recommendation_scorer.dart';
+import 'package:mytube/domain/services/recommendation_scorer_provider.dart';
 import 'package:mytube/features/reels/reels_queue.dart';
 import 'package:mytube/features/reels/reels_queue_controller.dart';
 
@@ -158,11 +161,23 @@ void main() {
 }
 
 ProviderContainer _container(VideoRepository repository) => ProviderContainer(
-  overrides: [videoRepositoryProvider.overrideWithValue(repository)],
+  overrides: [
+    videoRepositoryProvider.overrideWithValue(repository),
+    recommendationHistoryRepositoryProvider.overrideWithValue(
+      _FakeHistoryRepository(),
+    ),
+    // The queue now sources its order from the recommendation pipeline; a
+    // deterministic (no-jitter) scorer keeps equal-signal reels in the stable
+    // id tie-break order the assertions below rely on, so the tests stay
+    // reproducible while still exercising the real ranking path.
+    recommendationScorerProvider.overrideWithValue(RecommendationScorer()),
+  ],
 );
 
 /// Repository fake returning a fixed reel list (or a failure) for
-/// [queryItems]; other members are unused by the queue and throw.
+/// [queryItems]; every item reports no source locations so the recommendation
+/// pipeline treats them all as optimistically available. Other members are
+/// unused by the queue and throw.
 class _FakeReelsRepository implements VideoRepository {
   _FakeReelsRepository({this.items = const [], this.shouldFail = false});
 
@@ -180,8 +195,42 @@ class _FakeReelsRepository implements VideoRepository {
   }
 
   @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(
+    VideoItemId id,
+  ) async => Ok(const <SourceLocation>[]);
+
+  @override
   Future<void> dispose() async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// In-memory exposure history that records nothing and reports nothing exposed,
+/// so the recommendation pipeline ranks purely on relevance without a real DB
+/// (the repetition-reduction behaviour is covered by the scorer-provider tests).
+class _FakeHistoryRepository implements RecommendationHistoryRepository {
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<Result<void>> recordExposure({
+    required String videoItemId,
+    required String sessionId,
+    required int atMs,
+  }) async => const Ok(null);
+
+  @override
+  Future<Result<Map<String, int>>> exposedInSession(String sessionId) async =>
+      const Ok(<String, int>{});
+
+  @override
+  Future<Result<Set<String>>> exposedBefore(DateTime cutoff) async =>
+      const Ok(<String>{});
+
+  @override
+  Future<Result<void>> prune({
+    required DateTime olderThan,
+    required int maxRows,
+  }) async => const Ok(null);
 }

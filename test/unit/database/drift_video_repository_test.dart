@@ -131,6 +131,107 @@ void main() {
       expect(items.last.id.value, equals('old'));
     });
 
+    // ── primaryProvider (UI-1 card source label) ───────────────────────────
+
+    /// Inserts a source for [videoItemId] with an explicit primary flag and
+    /// attachment time, so the representative-provider selection can be tested.
+    Future<void> insertSource(
+      String id,
+      String videoItemId,
+      ProviderType provider, {
+      bool isPrimary = false,
+      int? createdAt,
+    }) => db
+        .into(db.sourceLocations)
+        .insert(
+          SourceLocationsCompanion.insert(
+            id: id,
+            videoItemId: videoItemId,
+            providerType: provider.name,
+            sourceId: 'src-$id',
+            isPrimary: Value(isPrimary),
+            createdAt: createdAt ?? _now,
+            updatedAt: createdAt ?? _now,
+          ),
+        );
+
+    test(
+      'summary primaryProvider is null when the item has no source',
+      () async {
+        await _insertItem(db, 'v1');
+        final items =
+            (await repo.getAllItems() as Ok<List<VideoItemSummary>>).value;
+        expect(items.single.primaryProvider, isNull);
+      },
+    );
+
+    test(
+      'summary primaryProvider maps the sole source provider type',
+      () async {
+        await _insertItem(db, 'v1');
+        await insertSource('s1', 'v1', ProviderType.oneDrive);
+        final items =
+            (await repo.getAllItems() as Ok<List<VideoItemSummary>>).value;
+        expect(items.single.primaryProvider, ProviderType.oneDrive);
+      },
+    );
+
+    test(
+      'summary primaryProvider prefers the primary source location',
+      () async {
+        await _insertItem(db, 'v1');
+        // Earliest-attached is the local one, but the flagged primary wins.
+        await insertSource(
+          's-local',
+          'v1',
+          ProviderType.localMediaStore,
+          createdAt: _now - 5000,
+        );
+        await insertSource(
+          's-r2',
+          'v1',
+          ProviderType.cloudflareR2,
+          isPrimary: true,
+          createdAt: _now,
+        );
+        final items =
+            (await repo.getAllItems() as Ok<List<VideoItemSummary>>).value;
+        expect(items.single.primaryProvider, ProviderType.cloudflareR2);
+      },
+    );
+
+    test('summary primaryProvider falls back to earliest-attached when none '
+        'is primary', () async {
+      await _insertItem(db, 'v1');
+      await insertSource(
+        's-newer',
+        'v1',
+        ProviderType.directUrl,
+        createdAt: _now,
+      );
+      await insertSource(
+        's-oldest',
+        'v1',
+        ProviderType.selectedFolder,
+        createdAt: _now - 8000,
+      );
+      final items =
+          (await repo.getAllItems() as Ok<List<VideoItemSummary>>).value;
+      expect(items.single.primaryProvider, ProviderType.selectedFolder);
+    });
+
+    test(
+      'getItemById carries the same primaryProvider as the list path',
+      () async {
+        await _insertItem(db, 'v1');
+        await insertSource('s1', 'v1', ProviderType.googleDrive);
+        final item =
+            (await repo.getItemById(VideoItemId('v1')) as Ok<VideoItemSummary>)
+                .value;
+        expect(item.primaryProvider, ProviderType.googleDrive);
+      },
+    );
+
     // ── searchItems (P5-02, LIB-003) ───────────────────────────────────────
 
     test('searchItems returns empty list when nothing matches', () async {

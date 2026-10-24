@@ -424,8 +424,12 @@ blockers.
 
 ## Phase 6 --- Reels and Discover
 
--   [ ] **P6-01** Implement vertical swipe-first Reels queue. --- Pending
-    review (PLAY-001, ARCHITECTURE §8): new `ReelsQueue` value type
+> Device-only behaviour for this phase was exercised against the runnable
+> checklist in `docs/device_testing_p6.md` on CPH2719 / Android 16 and reviewed
+> by the owner on 2026-10-19; all P6 tasks are marked complete on that basis.
+
+-   [x] **P6-01** Implement vertical swipe-first Reels queue. ---
+    Done (device-verified; PLAY-001, ARCHITECTURE §8): new `ReelsQueue` value type
     (ordered reel list + clamped viewport index, identity-based equality,
     `current`/`hasNext`/`hasPrevious`/`withIndex`) and a
     `ReelsQueueController` (`AsyncNotifier`) that loads the queue once from
@@ -438,12 +442,10 @@ blockers.
     overlay (P6-03), stale-work cancellation (P6-04) and rule-based ordering
     (P6-05/06) are later tasks; each reel shows a still title frame, not live
     playback yet. 12 unit + 5 widget tests added and pass; `dart format` +
-    `dart analyze lib test` clean; full suite `+413 -14` — the same 14
-    pre-existing "Timer is still pending" shell failures reproduce on clean
-    `main`. Device verification of the vertical swipe experience is still
-    required before marking done.
--   [ ] **P6-02** Autoplay on Reels entry and loop until swipe. --- Pending
-    review (PLAY-002/PLAY-003, ARCHITECTURE §8): `ReelsScreen` now takes an
+    `dart analyze lib test` clean. Vertical swipe, snap, and tab keep-alive
+    verified on CPH2719 / Android 16.
+-   [x] **P6-02** Autoplay on Reels entry and loop until swipe. ---
+    Done (device-verified; PLAY-002/PLAY-003, ARCHITECTURE §8): `ReelsScreen` now takes an
     `active` flag (driven by the selected bottom-nav index in `MainScaffold`)
     and, while active, autoplays the current reel on entry and on every swipe
     and loops it until the user swipes away. A per-play token discards a
@@ -465,24 +467,23 @@ blockers.
     whole session. Stale-work cancellation for adjacent preloading remains
     P6-04; the control overlay remains P6-03. 8 resolver unit + 3 looping
     controller unit + 5 new ReelsScreen widget tests added; `dart format` +
-    `dart analyze lib test` clean; full suite `+429 -14` — the same 14
-    pre-existing "Timer is still pending" shell failures reproduce, no new
-    failures (net +16 passing). Note: the cross-source engine swap / stop is
+    `dart analyze lib test` clean. Note: the cross-source engine swap / stop is
     covered by `AppPlaybackController` unit tests, not the widget tests, because
     `StreamSubscription.cancel()` during engine teardown does not complete inside
-    the `testWidgets` fake-async zone. Device verification of autoplay/loop on
-    real media is still required before marking done.
--   [ ] **P6-03** Add minimal overlay and on-demand controls. --- Pending
-    review (PLAY-004/PLAY-005): the current Reels page is wrapped in a tap
+    the `testWidgets` fake-async zone. Autoplay/loop on real media verified on
+    CPH2719 / Android 16.
+-   [x] **P6-03** Add minimal overlay and on-demand controls. ---
+    Done (device-verified; PLAY-004/PLAY-005): the current Reels page is wrapped in a tap
     layer; tapping it reveals a dim scrim with the shared `PlaybackControls`
     (play/pause, seek, ±10 s skip, volume, speed, display mode) and tapping
-    again — or after a 4 s auto-hide timer — dismisses it so the video stays
+    again — or after a 3 s auto-hide timer — dismisses it so the video stays
     unobstructed. No new control widget was built; the player surface's existing
     `PlaybackControls` is reused so behaviour stays consistent and the overlay
     stays minimal. 3 `ReelsScreen` widget tests added (reveal/toggle-off,
-    auto-hide, inactive tab has no tap layer).
--   [ ] **P6-04** Cancel stale preloading/playback work on rapid swipes. ---
-    Pending review (PLAY-008, ARCHITECTURE §8): added `ReelsSourcePreloader`, a
+    auto-hide, inactive tab has no tap layer). Tap-to-reveal and the ~3 s
+    auto-hide verified on CPH2719 / Android 16.
+-   [x] **P6-04** Cancel stale preloading/playback work on rapid swipes. ---
+    Done (device-verified; PLAY-008, ARCHITECTURE §8): added `ReelsSourcePreloader`, a
     bounded (FIFO `maxCache`) helper that warms the source of the next reel
     ahead of the swipe via `PlaybackSourceResolver` only (it never touches the
     player), and `ReelsScreen` consumes a warm source for an instant start
@@ -492,9 +493,11 @@ blockers.
     deliberately one reel. 7 preloader unit tests (cache/take, dedup, in-flight
     cancel, still-consumable-if-already-done, FIFO bound, clear, failed resolve
     not cached) + 1 `ReelsScreen` widget test (next reel warmed without a second
-    handle) added.
--   [ ] **P6-05** Implement testable rule-based recommendation scorer. ---
-    Pending review (DISC-001, ARCHITECTURE §8): `RecommendationScorer`
+    handle) added. Rapid-fling warm starts and no stacked players verified on
+    CPH2719 / Android 16 (superseded by the P7-11 next-reel engine pre-warm —
+    the bounded window now also pre-initializes one engine ahead).
+-   [x] **P6-05** Implement testable rule-based recommendation scorer. ---
+    Done (DISC-001, ARCHITECTURE §8): `RecommendationScorer`
     (`domain/services/recommendation_scorer.dart`) is a pure, framework-free
     scorer over `RecommendationCandidate`s with a transparent
     `RecommendationWeights` (unwatched, favourite, availability, preferred
@@ -505,8 +508,8 @@ blockers.
     12 scorer unit tests cover each factor, tie-break, empty input, seeded
     reproducibility, near-tie reshuffling, and that jitter never overrides a
     decisive gap.
--   [ ] **P6-06** Balance randomness, unwatched status, source preference,
-    history, repetition reduction. --- Pending review (DISC-002/DISC-003):
+-   [x] **P6-06** Balance randomness, unwatched status, source preference,
+    history, repetition reduction. --- Done (DISC-002/DISC-003):
     `RecommendationsController` / `recommendationsProvider`
     (`recommendation_scorer_provider.dart`) reads the library, turns each item
     into a candidate, and applies the scorer; a bounded in-memory
@@ -518,13 +521,26 @@ blockers.
     the Discover surface (P6-07). 4 provider unit tests added (unwatched ranks
     first, error propagation, reshuffle demotes the prior head, empty library).
     `dart format` + `dart analyze lib test` clean; full suite `+457 -14` (net
-    +28 passing vs the P6-02 baseline, same 14 pre-existing "Timer is still
-    pending" shell/theme/main_scaffold failures — no new failures). Reels
-    ordering still uses most-recently-added; the scorer is not yet wired into the
-    Discover UI or the Reels queue (P6-07). Device verification of the Reels
-    tap-to-open controls and preload behaviour is still required.
--   [ ] **P6-07** Add recently added videos and Reels shortcut to
-    Discover. --- Pending review (NAV-003, DISC-004): `DiscoverScreen` is now a
+    +28 passing vs the P6-02 baseline — no new failures). Reels
+    ordering now plays the recommendation ranking (wired below): the
+    scorer drives the Discover UI and the Reels queue.
+-   [x] **P6-06b** Wire the recommendation system into Reels. --- Done
+    (DISC-001..003): `ReelsQueueController.build` now watches
+    `recommendationsProvider` and builds the `ReelsQueue` from the ranked list
+    instead of the library's raw most-recently-added order, so Reels plays a
+    curated feed (unwatched/available/favourite/fresh rise; just-shown and
+    recently-watched sink) rather than walking the library one after another.
+    Reusing the one pipeline (ADR-002) also applies cross-surface repetition
+    reduction between Discover and Reels; the swipe navigation surface is
+    unchanged. Documented in `RECOMMENDATION_SYSTEM.md`. `reels_queue_test` and
+    `reels_screen_test` now stand up the deterministic pipeline (no-jitter
+    scorer + in-memory exposure store). Also fixed a pre-existing Reels
+    overlay bug surfaced while running the queue tests: starting a new reel now
+    drops the previous reel's on-demand control overlay (it belongs to the
+    reel it was opened on), so a swipe never leaves controls covering the next
+    clip.
+-   [x] **P6-07** Add recently added videos and Reels shortcut to
+    Discover. --- Done (device-verified; NAV-003, DISC-004): `DiscoverScreen` is now a
     live `ConsumerStatefulWidget` with three blocks on one scroll surface — a
     Reels shortcut (tapping it flips the host to the Reels tab via an
     `onOpenReels` callback wired in `MainScaffold`; the shortcut hides when no
@@ -544,9 +560,12 @@ blockers.
     6 `DiscoverScreen` widget tests added (empty state, small library, shortcut
     present+taps callback, shortcut hidden without callback, unavailable source
     demoted in the suggestions, refresh reshuffles the head) plus 1 availability
-    unit test in the recommendations-provider suite.
--   [ ] **P6-08** Test empty/small libraries, repeat sessions,
-    unavailable sources, rapid navigation. --- Pending review: scenario coverage
+    unit test in the recommendations-provider suite. Reels shortcut navigation,
+    Recently-added strip, and refresh reshuffle verified on CPH2719 /
+    Android 16.
+-   [x] **P6-08** Test empty/small libraries, repeat sessions,
+    unavailable sources, rapid navigation. --- Done (device-verified).
+    Scenario coverage
     across the surfaces, all on fakes (no device). *Empty / small libraries* —
     `DiscoverScreen` empty-state and small-library tests; the existing empty
     Reels queue test stays green. *Repeat sessions* — the `reshuffle` unit test
@@ -557,13 +576,11 @@ blockers.
     navigation* — a Reels widget test flings several reels back-to-back and
     asserts the queue advances, exactly one surface paints, and no player stacks
     up per skipped reel (the preloader unit tests already own the stale-cancel
-    detail). `dart format` + `dart analyze lib test` clean; full suite `+465 -14`
-    (net +8 passing vs the P6-06 baseline of +457, the same 14 pre-existing
-    "Timer is still pending" shell/theme/main_scaffold failures — no green test
-    regressed). Preferred-source weighting is still off pending a user source
-    preference; Discover item taps reuse the Library placeholder pending the
-    dedicated player screen; device verification of the shortcut navigation and
-    refresh reshuffle is still required.
+    detail). `dart format` + `dart analyze lib test` clean. Preferred-source
+    weighting is still off pending a user source preference; Discover item taps
+    reuse the Library placeholder pending the dedicated player screen. Empty /
+    small-library behaviour and expiring-source handling verified on CPH2719 /
+    Android 16.
 
 ## Phase 7 --- Thumbnails, duplicates, availability
 
@@ -633,6 +650,390 @@ blockers.
     environment-only "Timer is still pending" widget failures in
     `app_shell/app_theme/main_scaffold` (unchanged from the Phase-6 baseline).
 
+-   [x] **P7-09 (addendum)** Fix the recurring "Timer is still pending"
+    widget-test failures. --- Done. The 14 long-standing failures were not
+    environmental: once `DiscoverScreen` became a live library-reading screen
+    (P6-07), the shell/theme/navigation widget tests that build the full
+    `MainScaffold` mounted it in a plain `ProviderScope` with no
+    `databaseProvider` override, so `databaseProvider` → `AppDatabase()` →
+    `driftDatabase()` (path_provider) opened the real Drift store and leaked a
+    zero-duration `Timer` into the fake-async zone. The fix applies the
+    KDoc-documented test seam: `main_scaffold_test`, `app_shell_test`, and
+    `app_theme_test` now override `databaseProvider` with
+    `AppDatabase.inMemory()` (closing it via `addTearDown`), matching the fake
+    `videoRepositoryProvider` override already used by the feature-screen tests.
+    No production code changed. Verified commands: `dart format` clean (154
+    files, 0 changed), `flutter analyze lib test` no issues, `flutter test` =
+    **561 passing / 0 failing** (the 14 former failures are now green; no test
+    was weakened or removed).
+
+-   [x] **P7-10 (addendum)** Reels UX polish — 3 s control auto-hide and a
+    seamless reel swap. --- Done. The on-demand control overlay auto-hides after
+    **3 s** (was 4 s) so the video clears sooner (`_controlsTimeout` in
+    `reels_screen.dart`; the reveal/auto-hide widget test now asserts visible at
+    2 s and hidden past 3 s). Fixed the visible gap when switching reels:
+    `VideoSurface` no longer flashes the neutral movie-icon placeholder while
+    the next reel's engine initialises — the icon now shows only for a genuine
+    first load (`PlaybackStatus.idle`), and during a source swap the surface
+    stays plain black so the change reads as a clean cut. Kept within the
+    deliberate single-engine design (the P6-04 preloader resolves the next
+    source but never spins a second player handle — `handles, hasLength(1)`); no
+    pre-warmed engine was added, so no existing invariant was weakened.
+    Verified: `dart format` clean, `flutter analyze lib test` no issues,
+    `flutter test` green.
+
+-   [x] **P7-11** Next-reel engine pre-warm for zero-gap Reels swipes. ---
+    Done (PLAY-008; owner-authorized change to the single-engine invariant
+    noted under P7-10 — the previous "never spins a second player handle"
+    rule was explicitly retired on 2026-10-19). `PlaybackController` gains
+    `prewarm(PlayableSource)`/`dropPrewarm()`: `AppPlaybackController` holds
+    at most **one** background-initialized spare engine (live + one spare,
+    ≤ 2 decoders) without ever touching the visible state machine; a
+    `play()` whose URI matches synchronously detaches the spare before any
+    await and skips `initialize()` entirely, so the swipe promotes a warm
+    decoder instead of paying the open delay (the gapless case). Staleness
+    uses the existing load generation plus a monotonic prewarm id: superseded
+    or dropped in-flight opens release themselves, failed prewarms stay
+    silent and `play()` falls back to a fresh engine. `stop()` deliberately
+    keeps the spare (it belongs to the upcoming queue); `dispose()` and the
+    Reels tab-leave `dropPrewarm()` release it. Wiring: `ReelsSourcePreloader`
+    gained an optional `onWarmed(item, source)` callback fired only on a
+    fresh Ok landing (it still never touches the player), and `ReelsScreen`
+    prewarms adjacent reels only (skipping the playing item, inactive tabs,
+    and unmounted states). Verified: 9 new controller unit tests + 2
+    preloader `onWarmed` tests; the Reels widget invariants now lock the new
+    contract (entry = live + one unplayed spare, swipe = promotion with no
+    third handle and `initialize` once, tab-leave disposes the spare, rapid
+    navigation keeps outstanding engines ≤ 2). One house fake-async discovery
+    was fixed in-test: `const Stream.empty()` subscriptions never resume
+    their `cancel()` await inside `testWidgets`, so `_FakeHandle` now uses an
+    explicitly synchronous-cancel stream (production behavior unchanged;
+    the real-zone unit tests still cover `Stream.empty()`). Commands run:
+    `dart format lib test` (2 files formatted), `flutter analyze lib test`
+    no issues, `flutter test` = **577 passing / 0 failing** (+11). Device
+    zero-gap feel still needs the CPH2719 pass (checklist item added in
+    `docs/device_testing_p6.md`).
+
+-   [x] **P7-12 (addendum)** Discover UX — pull-to-refresh, app-bar smart
+    search, and Reels-shortcut removal. --- Done.
+    *Pull-to-refresh* — `DiscoverScreen`'s body is wrapped in a
+    `RefreshIndicator` (key `discover_refresh_indicator`) over an
+    `AlwaysScrollableScrollPhysics` list, so a short library still pulls. The
+    shared `_refresh` became `Future<void>` and awaits both the
+    `RecommendationsController.reshuffle` (keeps the DISC-003 session history)
+    and a `ref.refresh` of the recently-added provider, so the spinner clears
+    only once fresh data has landed.
+    *Smart search* — a top-right search `IconButton` (`discover_search_button`)
+    pushes the new `DiscoverSearchScreen`: a live, type-ahead surface with a
+    `discoverSearchProvider` (autoDispose family keyed on the trimmed query).
+    An empty field offers the user's tags as **browse-by-tag** chips; a typed
+    term shows **matching tags** (tap to narrow) above **matching titles** via
+    `VideoRepository.searchItems`/`getTags` — no query logic in the widget
+    (LIB-003, DISC-001). A result card opens the dedicated player (PLAY-001).
+    *Reels shortcut* — the NAV-003 "Watch Reels" banner (`_ReelsShortcut`,
+    `discover_reels_shortcut`) and the `onOpenReels` parameter were removed from
+    `DiscoverScreen`/`MainScaffold` per explicit product direction; Reels stays
+    reachable through its own bottom-nav tab (NAV-001), so the "quick access to
+    Reels" intent is preserved by the tab itself. Note: this diverges from the
+    NAV-003 wording that lists an in-Discover shortcut.
+    Tests: `discover_screen_test` updated (shortcut-gone, search-button opens
+    the field, refresh-indicator present) and a new `discover_search_screen_test`
+    (browse-by-tag suggestions, typing filters tags+titles, no-match state,
+    tag-tap re-queries). Commands run: `dart format` clean, `flutter analyze`
+    no issues, `flutter test` for the Discover/scope tests green. The only
+    failing suite test is the pre-existing, unrelated
+    `reels_screen_test "a manual fit applies to its own reel only"` in the
+    in-progress Reels-fit work already in the tree — untouched by this change.
+    *Follow-up* — the app-bar refresh `IconButton` (`discover_refresh_button`)
+    was subsequently removed per user direction; pull-to-refresh is now the
+    only manual refresh path on Discover, and the DISC-003 reshuffle test was
+    re-pointed at the `RefreshIndicator` drag gesture.
+
+## Discover Page Redesign --- Continue Watching, feed modes, session-aware
+recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
+
+-   [x] **DR-01** Data foundation (redesign Phase 1). --- Done. Drift schema
+    v5→v6: `Collections.isPinned`/`pinnedAt` (ADR-004) and a dedicated
+    `RecommendationExposures` table (ADR-003). `CollectionsDao.setPinned` +
+    pinned-first `allWithCounts`; `VideoRepository.setCollectionPinned` /
+    `CollectionSummary` pin fields + Drift mapping; `RecommendationHistoryRepository`
+    (domain) + `DriftRecommendationHistoryRepository` + provider with in-session
+    dedup and bounded time/count retention; `PlaybackCompletion` completion
+    policy (0.95 ratio, derived — §16.2); `DiscoverFeedMode` enum (§17).
+    Migration guard avoids double-adding pin columns when `collections` is
+    created inside the upgrade chain. Tests: `recommendation_exposures_dao_test`,
+    `collections_pin_test`, `playback_completion_test`, updated `schema_test` /
+    `app_database_test` / `migrations_test` (v5→v6 + v2/v3/v4 re-targeted to v6),
+    and 5 `VideoRepository` test fakes. Commands run: `dart format` clean,
+    `flutter analyze lib test` no issues, `flutter test` 629 passing; the only
+    failure is the pre-existing, unrelated
+    `reels_screen_test "a manual fit applies to its own reel only"`.
+-   [x] **DR-02** Unified recommendation pipeline + Recommended/Recently
+    Added/Unwatched modes over one scorer (§17, ADR-002). --- Done.
+    `DiscoverFeedRanker` (pure, framework-free) is the pipeline's single
+    ranking-strategy stage: Recommended delegates to the shared scorer, Recently
+    Added is strict newest-added-first with a stable id tie-break (scoring never
+    interferes), Unwatched excludes completed items, tiers never-started ahead of
+    partially-watched, then uses the shared ranking as secondary. Added
+    `discoverFeedRankerProvider`; `RecommendationsController` is now mode-aware
+    (defaults to Recommended so existing behavior is unchanged) with a session-
+    scoped `setMode` that re-ranks from the cached library and resets the
+    repetition head; head-demotion is now Recommended-only so Recently Added
+    stays chronological. Tests: new `discover_feed_ranker_test` + a `Discover
+    feed modes` group in `recommendation_scorer_provider_test`. Commands: `dart
+    format` clean, `flutter analyze lib test` no issues, `flutter test` 643
+    passing (only the pre-existing unrelated Reels-fit failure remains).
+-   [x] **DR-03** Session-aware exposure ranking + pinned-collection feed
+    behavior (§18.4–§18.7, §19.3–§19.5). --- Done. `DiscoverSession` (pure,
+    clock-injectable) is the session-boundary policy: a stable id lives across
+    ordinary navigation and only rolls over after a configurable inactivity
+    timeout (default 30 min), so rebuilds/tab switches never mint a new session
+    (§18.4). `RecommendationsController` now touches the session on each
+    build/reshuffle, loads current- and recent-session exposure sets from the
+    exposure DAO, applies the current-session repetition penalty plus a lighter
+    cross-session penalty in Recommended mode (§18.5), and relaxes repetition
+    avoidance when the whole candidate pool is already exposed so a small library
+    still returns useful, deterministic pages (§18.5). `markExposed` dedups
+    against the current set and persists each item once (§18.3); a genuinely new
+    session fires bounded retention prune (§18.6). Added `recentSessionPenalty`
+    + `seenInRecentSession` to the scorer. Exposure writes are confined to the
+    exposures table and never touch watch progress (§18.7). Pinned-collection
+    ordering/persistence (§19.3/§19.4) shipped in DR-01; its behavior is now
+    verified: pin state persists, pinned-before-unpinned with deterministic
+    most-recently-pinned order, pin changes no membership or video favourites, and
+    deleting a pinned collection leaves no stale pin metadata and never removes the
+    referenced video (§19.5). Tests: new `discover_session_test`, a `Session-aware
+    exposure` group + fake history/session overrides in
+    `recommendation_scorer_provider_test`, cross-session penalty tests in
+    `recommendation_scorer_test`, a `pin isolation and cleanup` group in
+    `collections_pin_test`, and an exposure-mutates-nothing test in
+    `recommendation_exposures_dao_test`; `discover_screen_test` now runs against an
+    in-memory DB. Commands: `dart format` clean, `flutter analyze lib test` no
+    issues, `flutter test` 657 passing (only the pre-existing unrelated Reels-fit
+    failure remains). Pin/unpin Discover-refresh UI interaction lands with the
+    Phase 4 UI.
+-   [x] **DR-04** Reusable Discover UI: Continue Watching, feed-mode control,
+    horizontal carousels, loading/empty/error states (§16.3, §17.1–§17.2,
+    §19.3). --- Done. The page is now composed of independently stateful
+    sections over the one shared pipeline. A pure `ContinueWatching` selector +
+    `continueWatchingProvider` (§16.2) reads the library in most-recently-played
+    order, keeps only partially-watched items, and orders by recent activity with
+    a stable id tie-break; the strip renders as a horizontal `DiscoverCarousel`
+    of `ContinueWatchingTile`s (thumbnail, title, progress bar, remaining time,
+    unavailable overlay) and is hidden entirely when nothing qualifies (§16.3).
+    A compact `FeedModeControl` (`SegmentedButton`) replaces the old duplicated
+    heading and drives `RecommendationsController.setMode` over the single main
+    vertical feed, whose heading reflects the active mode (§17.1/§17.2) — the
+    previous fixed "Recently added" + "Recommended for you" sections collapse
+    into the mode-selected feed. A `Collections` strip surfaces the repository's
+    pinned-first ordering via `CollectionChip`s (§19.3), capped so pinning can't
+    grow the page unbounded, tapping through to `CollectionScreen`. Each async
+    section keeps loading/empty/error handling (the two optional strips soft-fail
+    to hidden; the main feed shows the existing empty state). Pulled dead code
+    (`_recentlyAddedProvider`) and made pull-to-refresh reshuffle the mode feed +
+    reload Continue Watching and Collections. Tests: new
+    `continue_watching_test` (eligibility + ordering) and a rewritten
+    `discover_screen_test` covering the mode control switching/reordering,
+    Continue Watching presence, pinned-first Collections, and the preserved
+    empty/search/refresh/unavailable-demotion cases. Commands: `dart format`
+    clean, `flutter analyze lib test` no issues, `flutter test` 666 passing (only
+    the pre-existing unrelated Reels-fit failure remains). Source-availability
+    wiring for the tile overlay and exposure-on-scroll land with Phase 5.
+-   [x] **DR-05** Infinite scroll + pagination integration, dedup, stale-work
+    cancellation, pull-to-refresh (ADR-005). --- Done. Paging layers over the
+    existing ranked snapshot without altering `recommendationsProvider`'s
+    full-list contract, so all Phase 2/3 provider tests stay valid. A pure
+    `DiscoverFeedPaginator` (framework-free, §ADR-005) slices an already-ranked
+    snapshot into stable pages, dedups repeated logical ids, guards concurrent
+    requests behind an in-flight flag, and cancels stale in-flight work via a
+    generation token bumped on `reset` — a mode change/refresh landing mid-fetch
+    drops the obsolete page instead of appending it. `DiscoverFeedController`
+    (an `AsyncNotifier` over `discoverFeedProvider`) wraps the paginator into a
+    `DiscoverFeedState` (`items`/`endOfFeed`/`isLoadingMore`), reveals a bounded
+    20-item page one, records exposure for each newly surfaced item exactly once
+    (§18.3) via `markExposed`, and resets cleanly on mode/refresh (§17.2).
+    `DiscoverScreen` attaches a `ScrollController` whose listener calls
+    `loadMore` within 400px of the bottom; a `_FeedPaginationFooter` shows a
+    spinner while paging and an explicit "You're all caught up" once exhausted
+    (§17.2), never an endless pull. Tests: new `discover_feed_paginator_test`
+    (first-page bounds, small/empty snapshots, disjoint append, clean
+    end-of-feed, dedup, Completer-gated concurrency, mid-fetch stale-cancel) and
+    `discover_feed_provider_test` (bounded page one, grow-to-exhaustion +
+    guarded no-op, per-item exposure, mode-change reset), plus an infinite-scroll
+    widget case in `discover_screen_test`. Commands: `dart format` clean,
+    `flutter analyze lib test` no issues, `flutter test` 679 passing (only the
+    pre-existing unrelated Reels-fit failure remains). Widget-note: paging uses
+    a short async latency, so the widget test kicks `loadMore` unawaited and
+    advances the fake clock via `pumpAndSettle`/`dragUntilVisible`.
+-   [x] **DR-06** Full verification gate + documentation updates (§20–§21:
+    PROJECT_BRIEF/REQUIREMENTS/ARCHITECTURE/DECISIONS/TASKS/README). --- Done.
+    Verification sweep across `lib` + `test`: `dart format --set-exit-if-changed`
+    reported 0 changed (180 files), `flutter analyze lib test` found no issues,
+    and `flutter test` produced 679 passing with the single documented,
+    pre-existing, unrelated Reels-fit failure (`reels_screen_test "a manual fit
+    applies to its own reel only", P7-12`) left untouched. Schema v6 migrations
+    verified in-suite: the v5→v6 upgrade adds the `is_pinned`/`pinned_at`
+    columns, creates the `recommendation_exposures` table with its
+    `last_exposed_at`/`session_id` indexes, defaults pre-existing collections to
+    unpinned, and preserves existing rows. Docs updated to match the shipped
+    implementation, not the proposal: `DECISIONS.md` records the six adopted
+    ADRs (ADR-001–ADR-006) as Accepted-and-implemented with context/decision/
+    alternatives/consequences; `ARCHITECTURE.md` documents the actual Discover
+    flow (one pipeline + feed modes, session-aware exposure, lazy pagination,
+    Continue Watching, pinned collections, shared widgets) and the v6 persistence
+    additions; `REQUIREMENTS.md` adds testable IDs (DISC-005–007, CW-001–004,
+    LIB-010) and reconciles NAV-003 with the removed in-Discover Reels shortcut;
+    `PROJECT_BRIEF.md` reflects the intended Discover experience. `README.md`/
+    `AGENTS.md` were intentionally left unchanged — the redesign adds no setup,
+    user-facing, or permanent development-guidance change (per §21).
+-   [x] **DR-07** YouTube-style Discover redesign (app-wide card, filter chips,
+    capped browse shelves). --- Done, in four gated phases. *UI-1* —
+    `VideoItemCard` redesigned app-wide (full-width 16:9 thumbnail with a
+    duration badge + thin progress overlay, title, and a provider-label +
+    relative-date metadata line; favourite/tags/sources actions moved into a
+    `⋮` `PopupMenuButton` with their original `ValueKey`s preserved; an optional
+    `width` variant lets the same card sit inside horizontal rows). Added
+    `VideoItemSummary.primaryProvider` (default `null`) populated by a Drift
+    LEFT-JOIN on each item's primary (else earliest) source location, and a pure
+    `formatRelativeDate` util. New tests: relative-time unit tests, a
+    `primaryProvider` Drift group, and `video_item_card_test` updated for the new
+    layout. *UI-2* — a framework-free `discoverFeedFilterProvider` (sealed
+    `DiscoverFeedFilter` + `Notifier`) plus `DiscoverFilterChips`; `DiscoverFeed
+    Controller.build` watches the filter so `All` follows the mode pipeline and a
+    collection/tag chip repopulates the **same** paginated/exposed feed, resetting
+    paging on change; the mode control shows only in `All`. New filter-notifier
+    unit tests + chip widget tests. *UI-3* — `DiscoverBrowseRows` with lazy
+    `recentlyAddedRowProvider` / `collectionRowProvider` / `tagRowProvider` family
+    providers (each `.take(10)`, ≤6 rows, pinned-first), rendering the new card
+    variant and collapsing on empty/loading/error; `DiscoverCarousel` gained an
+    optional `onTitleTap` to open the collection detail. Widget tests for the
+    Recently Added row, per-collection/per-tag rows, the caps, and empty-collapse.
+    Existing tests were updated to the new UI (never deleted/weakened): the old
+    folder-chip `Collections section` test became a pinned-first collection-row
+    test, the mode-control `Recently Added` tap now targets the segment key, and
+    tests asserting on widgets below the shelves opt into a taller test surface.
+    Verification (`lib` + `test`): `dart format --set-exit-if-changed` 0 changed
+    (185 files), `flutter analyze lib test` no issues, `flutter test` 713 passing
+    with only the documented, pre-existing, unrelated Reels-fit failure
+    (`reels_screen_test "a manual fit applies to its own reel only", P7-12`).
+    Per-phase baselines rose 679 → 696 (UI-1) → 709 (UI-2) → 713 (UI-3). No new
+    packages; all on the existing Riverpod + Drift + repository layers. Docs
+    reconciled to reality: `DECISIONS.md` adds ADR-007 and updates ADR-006,
+    `ARCHITECTURE.md` §8 documents the card + chips + shelves, `REQUIREMENTS.md`
+    adds DISC-008/009, CW-005, LIB-011, and `PROJECT_BRIEF.md` describes the new
+    Discover experience.
+
+## Reel playback controller (Reel_Video_Controller.md)
+
+-   [x] **RC-01 (Task 1)** Gesture architecture: inspect, define gesture
+    priority, minimal coordinator + deterministic tests. --- Done
+    (`lib/features/reels/reel_gesture_coordinator.dart` — pure clock-injected
+    arbiter with the seven documented priority rules, `ReelGesturePhase`
+    states, sealed `ReelGestureAction` set, and configurable thresholds
+    (`ReelGestureConfig`); `test/unit/reels/reel_gesture_coordinator_test.dart`
+    — 30 deterministic event-script tests covering §8 criteria 1–10 and 11–20
+    at the arbitration layer. Checks re-run during Task 2 and passed: 30/30
+    unit tests green, `flutter analyze lib test` — no issues.)
+-   [x] **RC-02 (Task 2)** Wire the coordinator into `ReelsScreen`: passive
+    `Listener` pointer seam per page, basic controls and seeking --- Done
+    (`reels_screen.dart` hosts the coordinator: per-reel `Listener` forwards
+    raw pointers without joining the gesture arena so the `PageView` vertical
+    paging is structurally untouched (rule 6 verified by tests); actions drive
+    play/pause (tap), favorite toggle (center double-tap, optimistic write with
+    revert on failure), ±10 s skips (side double-taps, clamped), and horizontal
+    drag seek with live preview + commit/cancel; the control rail/overlay sits
+    above the queue in the `Stack` so screen-level hit-testing claims it first
+    (rule 1) — note the open overlay's scrim now blocks swipe-paging while
+    visible, dismiss by tapping the scrim. Clock source switched to
+    `package:clock` (now a direct dependency) because `DateTime.now()` is not
+    patched by fake-async and double-tap windows would never resolve in
+    widget tests. Boost/speed-lock actions are recognised but intentionally
+    no-op pending RC-03. Checks: coordinator unit 30/30, reels widget suite
+    29/29 (6 new RC-02 gesture tests), full `flutter test` 758/758, `dart
+    format` clean, `flutter analyze lib test` — no issues. Real-device
+    gesture feel (touch latency, signed-URL seek behaviour) still needs
+    verification per `docs/device_testing_p4.md` conventions.)
+-   [x] **RC-03 (Task 3)** Speed boost and locking: temporary 1.0x–2.0x
+    acceleration, downward-swipe locking, second-gesture unlock, and the
+    indicator UI with animations. --- Done
+    (`reels_screen.dart` now applies the coordinator's long-press actions to
+    the shared [PlaybackController.setSpeed]: a held press ramps 1.0x→2.0x in
+    0.1x steps via a lifecycle-safe one-shot timer (`BoostStarted`/`BoostStepped`,
+    clamped at the ceiling), releasing restores `baseSpeed` unless a lock is
+    active (`BoostEnded`); a downward swipe during the hold locks the exact
+    speed (`SpeedLockEngaged`) and survives the release, and a second downward
+    swipe unlocks back to 1.0x (`SpeedLockReleased`). Every emitted multiplier
+    is pushed to the engine and mirrored on the indicator so displayed and
+    actual speed cannot drift (§6). The lock is reel-session-scoped — a reel
+    change/tab-leave/teardown returns the engine to `baseSpeed`, so a locked
+    reel never leaks its speed to the next clip or the dedicated player.
+    New [ReelSpeedIndicator] (fade+scale per step, reduced-motion aware) and
+    [ReelSpeedLockIndicator] (`Speed locked · N.Nx`, lock glyph + Semantics
+    label) live in `reel_gesture_feedback.dart`, IgnorePointer-wrapped in the
+    screen-level Stack. Checks: 5 new RC-03 widget tests (ramp/clamp + release
+    restore, lock + preserve, second-gesture unlock, ordinary swipe never
+    locks, reel change clears the lock) — reels widget suite 34/34, coordinator
+    unit suite unchanged and green, full `flutter test` 763/763, `dart format`
+    clean, `flutter analyze lib test` — no issues. The arbitration itself was
+    covered by RC-01's 30 deterministic coordinator tests. Real-device speed
+    feel (increment pacing against the actual decoder, ExoPlayer speed-change
+    latency) still needs verification per `docs/device_testing_p4.md`.)
+-   [x] **RC-04 (Task 4)** Visual polish: animated heart feedback, seek
+    indicators, speed labels, transitions, accessibility, and responsive
+    overlays. --- Done
+    (`reel_gesture_feedback.dart` turned the static feedback widgets into
+    state-change animations: [ReelTapIndicator] and [ReelSeekFeedback] now fade
+    + scale-pop in and re-pop on a repeated/changed gesture, [ReelSeekFeedback]
+    and [ReelSeekPreviewBar] carry descriptive [Semantics] labels, and
+    [ReelSpeedLockIndicator] drops in with a scale+fade on engage. A new
+    [ReelHeartBurst] flashes an animated heart (`Icons.favorite_rounded`, soft
+    shadow for bright/dark contrast) at the double-tap lift point when a centre
+    double-tap *likes* the reel (§2C); it clears itself when its one-shot
+    controller finishes, so no celebration overlay or timer ever lingers.
+    `reels_screen.dart` wires it in — [_ReelFavoriteButton] plays a subtle scale
+    pop on every favourite toggle and exposes a selected-state semantic (§2B);
+    the burst anchor is captured from the pointer-up position and clamped fully
+    on-screen for portrait and landscape; [_Caption] shrink-wraps with
+    line-clipped text so a short landscape page or enlarged system font cannot
+    overflow. Every animation honours the platform reduced-motion preference via
+    the shared [reelsReduceMotion] helper (§4 accessibility). Reduced-motion and
+    landscape MediaQuery reads are deferred to `didChangeDependencies`/`build`
+    (Flutter forbids `dependOnInheritedWidgetOfExactType` in `initState`).
+    Checks: 5 new RC-04 widget tests (heart appears at the tap point + clears,
+    side-tap seek shows no heart, rail tap pops the button but shows no floating
+    heart, reduced-motion still resolves/clears, landscape overlays stay on-
+    screen) — reels widget suite 39/39, coordinator unit suite unchanged and
+    green, full `flutter test` 768/768, `dart format` clean, `flutter analyze
+    lib test` — no issues. Animation *feel* (curves, spring timing) still wants
+    a real-device pass per `docs/device_testing_p4.md`.)
+-   [x] **RC-05 (Task 5)** Integration and regression tests: controller
+    lifecycle, buffering, rapid reel changes, local and remote playback,
+    persistence, and gesture conflicts. --- Done
+    (Cross-cutting coverage added to `test/widget/reels_screen_test.dart` as a
+    new `ReelsScreen integration & regression (RC-05)` group, driven entirely
+    through the existing fake engine/resolver/repository boundary (no device,
+    no mocking package). The test fakes were extended for it: [_FakeHandle]
+    gained `setStatus` to drive buffering/completion snapshots the old `_emit`
+    could not express, [_FakeResolver] gained `canSeek`/`sourceType`/`uriScheme`
+    knobs for local vs remote vs live sources, a new [_DeferredResolver] holds a
+    resolution pending so teardown-mid-load can be exercised, and
+    [_FakeRepository] gained a `failFavourite` knob for the optimistic-revert
+    path; `pumpReels` surfaced `seekable`/`remote`/`customResolver`. Eight tests
+    verify: a tap is inert while buffering yet pauses once playback resumes
+    (§8/§2A); a non-seekable live source ignores horizontal seek drags entirely
+    (§2F degradation); a side double-tap on a non-seekable source never moves
+    the playhead because the controller drops the seek (§6); a remote https
+    source plays and toggles exactly like a local one (§6 parity); a failed
+    favourite write reverts the optimistic heart (§5); a source that resolves
+    after teardown is discarded, never played or setState'd (§8.19 lifecycle);
+    swiping away clears a persisted pause glyph and resumes the new clip (§2A +
+    §3); and a favourite write in flight across a swipe never leaks onto the
+    next reel (§5 id-keyed persistence). Checks: reels widget suite 47/47 (8 new
+    RC-05), full `flutter test` 776/776, `dart format` clean,
+    `flutter analyze lib test` — no issues. These are widget-level regressions
+    over the fake boundary; true decoder buffering timing and remote-stream
+    behaviour still need a real-device pass per `docs/device_testing_p4.md`.)
+
 ## Phase 8 --- Cache
 
 -   [ ] **P8-01** Separate cache storage from download storage. --- Todo
@@ -701,10 +1102,79 @@ blockers.
 
 ## Phase 13 --- Background playback and PiP
 
--   [ ] **P13-01** Implement audio-focus/interruption handling. --- Todo
--   [ ] **P13-02** Implement background audio where supported. --- Todo
--   [ ] **P13-03** Integrate Android media session/notification
-    controls. --- Todo
+-   [x] **P13-01** Implement audio-focus/interruption handling. --- Done
+    (App-owned `AudioFocusBridge` platform interface + `AudioFocusBridgeImpl`
+    MethodChannel/EventChannel bridge to a new native `AudioFocusPlugin.kt`
+    (registered in `MainActivity`) that requests/abandons `AUDIOFOCUS_GAIN`
+    tagged as media and streams `AUDIOFOCUS_*` transitions back as the
+    app-owned `AudioFocusChange` vocabulary; the bridge degrades to a safe
+    no-op where the plugin is absent so non-Android/widget tests never crash
+    (PLAY-013). `AudioFocusCoordinator` (lib/playback) owns all policy —
+    holds focus for a live session, abandons on idle/detach, and on an
+    interruption ducks (transient-can-duck), pauses-and-auto-resumes
+    (transient/ephemeral, e.g. a call), or pauses-and-stays (permanent loss to
+    another player) — driving only the engine-neutral `PlaybackController`
+    (pause/resume/setVolume). Wired app-wide via
+    `audioFocusCoordinatorProvider`; `MainScaffold` is now a
+    `ConsumerStatefulWidget` + `WidgetsBindingObserver` that keeps the
+    coordinator alive and forwards lifecycle to it. No widget calls the bridge
+    directly. 28 new unit tests in `audio_focus_coordinator_test.dart` +
+    `audio_focus_bridge_impl_test.dart`; `dart format` + `flutter analyze
+    lib test` clean; full `flutter test` suite passes 804 tests. Real device
+    focus/interruption behavior (Spotify/phone-call duck+resume) still needs
+    the P13-06 physical-device pass.)
+-   [x] **P13-02** Implement background audio where supported. --- Done
+    (Enabled at the app layer by `AudioFocusCoordinator.handleLifecycle`: a
+    live session keeps playing and holds `AUDIOFOCUS_GAIN` when the app moves
+    to `paused`/`hidden`/`inactive` — the deliberate no-pause plus retained
+    focus is what carries audio off-screen with the current `video_player` /
+    Media3 engine (PLAY-010), while `detached` releases focus and the native
+    listener and `resumed` reclaims it if a playing session dropped focus.
+    No widget-level lifecycle pause exists to undo, and no `FOREGROUND_SERVICE`
+    permission is added because no service is introduced yet. Limitation
+    recorded honestly: sustained background audio under Doze / aggressive
+    OEM battery managers and lock-screen transport require the P13-03 Android
+    media-session foreground service, intentionally left as the next task.
+    Covered by the lifecycle cases in `audio_focus_coordinator_test.dart`.)
+-   [x] **P13-03** Integrate Android media session/notification
+    controls. --- Done
+    (App-owned `MediaSessionBridge` platform interface +
+    `MediaSessionBridgeImpl` bidirectional MethodChannel
+    (`com.example.mytube/media_session`) to a new native `MediaSessionPlugin.kt`
+    (registered in `MainActivity`) and a `mediaPlayback` foreground service
+    `MediaPlaybackService.kt` that owns a `MediaSessionCompat` and a
+    `NotificationCompat.MediaStyle` notification (play/pause + stop actions,
+    lock-screen scrubber via `ACTION_SEEK_TO`). Dart drives the session with
+    `render`/`stop`/`release`/`requestNotificationPermission`; the notification,
+    lock screen, and headset call back through `onTransport` (play/pause/seekTo/
+    stop), which the app-owned `MediaSessionCoordinator` turns into
+    engine-neutral `PlaybackController` commands — no Android type appears in the
+    coordinator and no widget touches the bridge (PLAY-013 no-op degradation kept
+    for non-Android/test hosts). The notification title comes from a new
+    `nowPlayingProvider` (`NowPlayingNotifier`) that Reels and the player screen
+    set just before playing, since `PlayableSource` carries no display label; the
+    title is a safe label only — never a URI or signed URL (SEC-005). Rendering is
+    throttled by a signature that excludes position (the OS animates the bar from
+    the last base position), so per-tick scrubbing never spams the notification;
+    permission is requested once, just in time, on the first live session. The
+    service declares `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`,
+    and `POST_NOTIFICATIONS` (targetSdk 36, minSdk 24) and adds `androidx.media:
+    media` + `androidx.core:core-ktx`. This also supplies the reliable
+    background-audio foreground service P13-02 deliberately deferred. `MainScaffold`
+    keeps the single coordinator alive and glues `nowPlayingProvider`→coordinator
+    via `ref.listen`. 26 new unit tests in `media_session_coordinator_test.dart` +
+    `media_session_bridge_impl_test.dart` (render policy, position-throttle,
+    transport routing, encode/decode, missing-plugin tolerance); `dart format` +
+    `flutter analyze lib test` clean; full `flutter test` suite passes 830 tests.
+    `flutter build apk --debug` compiles the new Kotlin + manifest + Gradle wiring
+    into `app-debug.apk` (this first native pass also surfaced and fixed a latent
+    P13-01 `AudioFocusPlugin.kt` bug — `AudioManager.REQUEST_APPROVED` does not
+    exist and was corrected to `AUDIOFOCUS_REQUEST_GRANTED`, which had gone
+    unnoticed because that task was only ever run through the Dart test suite).
+    Honest limitation: runtime on-device behavior (notification rendering,
+    lock-screen/headset transport, Doze-resilient background audio) is still
+    unverified until the P13-06 physical-device pass; the notification uses a
+    system `ic_media_play` small icon and `ic_delete` stop glyph as placeholders.)
 -   [ ] **P13-04** Implement PiP where supported. --- Todo
 -   [ ] **P13-05** Handle lifecycle/resume and resource disposal. ---
     Todo

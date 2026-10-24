@@ -1,3 +1,5 @@
+import 'dart:ui' show Size;
+
 import 'package:flutter/widgets.dart' show Widget;
 import 'package:mytube/sources/source_adapter.dart';
 
@@ -50,6 +52,7 @@ class PlayerSnapshot {
     required this.duration,
     required this.speed,
     required this.volume,
+    this.videoSize,
     this.errorText,
   });
 
@@ -69,6 +72,15 @@ class PlayerSnapshot {
   final Duration duration;
   final double speed;
   final double volume;
+
+  /// Intrinsic size of the picture in the orientation it is displayed in, or
+  /// null before the engine is initialized.
+  ///
+  /// Already rotation-corrected (a 90°/270° source reports swapped width and
+  /// height), so consumers can treat `width / height` as the on-screen aspect
+  /// ratio without knowing anything about the engine. The Reels surface uses it
+  /// to pick a full-bleed vs letterboxed layout without distorting the picture.
+  final Size? videoSize;
 
   /// Raw engine error description, or null when healthy.
   /// Never surfaced to the UI verbatim.

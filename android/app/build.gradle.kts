@@ -47,4 +47,7 @@ flutter {
 dependencies {
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // P13-03 media session / MediaStyle notification / foreground service.
+    implementation("androidx.media:media:1.7.0")
+    implementation("androidx.core:core-ktx:1.15.0")
 }

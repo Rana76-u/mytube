@@ -98,6 +98,13 @@ Future<AppDatabase> _openWithUpgradeFrom(int fromVersion) async {
           )
         ''');
       }
+      // A genuine v5 snapshot already carries the provider thumbnail column;
+      // the v5 -> v6 upgrade must not try to re-add it.
+      if (fromVersion >= 5) {
+        rawDb.execute(
+          'ALTER TABLE source_locations ADD COLUMN thumbnail_uri TEXT',
+        );
+      }
       rawDb.execute('PRAGMA user_version = $fromVersion');
     },
   );
@@ -132,6 +139,7 @@ void main() {
           'collections',
           'collection_items',
           'app_preferences',
+          'recommendation_exposures',
         ]),
       );
     });
@@ -150,16 +158,18 @@ void main() {
           'idx_video_tags_video_item_id',
           'idx_collection_items_collection_id',
           'idx_video_items_last_played_at',
+          'idx_recommendation_exposures_last_exposed_at',
+          'idx_recommendation_exposures_session_id',
         ]),
       );
     });
 
-    test('schema version is 5 after onCreate', () async {
+    test('schema version is 6 after onCreate', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(5));
+      expect(v, equals(6));
     });
   });
 
@@ -196,12 +206,12 @@ void main() {
       expect(indexes, contains('idx_source_locations_video_item_id'));
     });
 
-    test('schema version is 5 after v2 upgrade', () async {
+    test('schema version is 6 after v2 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(5));
+      expect(v, equals(6));
     });
   });
 
@@ -233,12 +243,12 @@ void main() {
       );
     });
 
-    test('schema version is 5 after v3 upgrade', () async {
+    test('schema version is 6 after v3 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(5));
+      expect(v, equals(6));
     });
   });
 
@@ -298,12 +308,90 @@ void main() {
       );
     });
 
-    test('schema version is 5 after v4 upgrade', () async {
+    test('schema version is 6 after v4 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(5));
+      expect(v, equals(6));
+    });
+  });
+
+  // ── onUpgrade v5 → v6 (disc redesign §18/§19) ──────────────────────────────
+  group('Migration — v5 → v6 upgrade', () {
+    late AppDatabase db;
+    setUp(() async => db = await _openWithUpgradeFrom(5));
+    tearDown(() async => db.close());
+
+    test('collections gain the is_pinned and pinned_at columns', () async {
+      final columns = await db
+          .customSelect('PRAGMA table_info(collections)')
+          .map((r) => r.read<String>('name'))
+          .get();
+      expect(columns, containsAll(<String>['is_pinned', 'pinned_at']));
+    });
+
+    test('recommendation_exposures table is created', () async {
+      final tables = await db
+          .customSelect("SELECT name FROM sqlite_master WHERE type='table'")
+          .map((r) => r.read<String>('name'))
+          .get();
+      expect(tables, contains('recommendation_exposures'));
+    });
+
+    test('v6 exposure indexes are created', () async {
+      final indexes = await db
+          .customSelect("SELECT name FROM sqlite_master WHERE type='index'")
+          .map((r) => r.read<String>('name'))
+          .get();
+      expect(
+        indexes,
+        containsAll(<String>[
+          'idx_recommendation_exposures_last_exposed_at',
+          'idx_recommendation_exposures_session_id',
+        ]),
+      );
+    });
+
+    test(
+      'pre-existing collections default to unpinned after upgrade',
+      () async {
+        await db.customStatement(
+          '''
+            INSERT INTO collections (id, name, created_at, updated_at)
+            VALUES ('oldc', 'Old playlist', ?, ?)
+            ''',
+          [_now, _now],
+        );
+        final row = await (db.select(
+          db.collections,
+        )..where((t) => t.id.equals('oldc'))).getSingle();
+        expect(row.isPinned, isFalse);
+        expect(row.pinnedAt, isNull);
+
+        // The new columns are writable after the upgrade.
+        await (db.update(
+          db.collections,
+        )..where((t) => t.id.equals('oldc'))).write(
+          const CollectionsCompanion(
+            isPinned: Value(true),
+            pinnedAt: Value(123),
+          ),
+        );
+        final updated = await (db.select(
+          db.collections,
+        )..where((t) => t.id.equals('oldc'))).getSingle();
+        expect(updated.isPinned, isTrue);
+        expect(updated.pinnedAt, equals(123));
+      },
+    );
+
+    test('schema version is 6 after v5 upgrade', () async {
+      final v = await db
+          .customSelect('PRAGMA user_version')
+          .map((r) => r.read<int>('user_version'))
+          .getSingle();
+      expect(v, equals(6));
     });
   });
 

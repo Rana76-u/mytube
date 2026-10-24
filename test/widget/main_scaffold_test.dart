@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/app/main_scaffold.dart';
+import 'package:mytube/data/database/app_database.dart';
+import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/features/discover/discover_screen.dart';
 import 'package:mytube/features/library/library_screen.dart';
 import 'package:mytube/features/reels/reels_screen.dart';
@@ -9,8 +11,20 @@ import 'package:mytube/features/saved/saved_screen.dart';
 import 'package:mytube/features/settings/settings_screen.dart';
 
 /// Wraps [MainScaffold] in the minimal widget harness it needs.
-Widget _harness() =>
-    const ProviderScope(child: MaterialApp(home: MainScaffold()));
+///
+/// The active Discover tab now reads the library, so the real Drift database
+/// would open on build and leak a zero-duration `driftDatabase` timer into the
+/// fake-async zone ("A Timer is still pending"). Override `databaseProvider`
+/// with the documented in-memory database so the navigation tree stays
+/// platform-free; `db.close` runs at teardown (the KDoc-recommended pattern).
+Widget _harness() {
+  final db = AppDatabase.inMemory();
+  addTearDown(db.close);
+  return ProviderScope(
+    overrides: [databaseProvider.overrideWithValue(db)],
+    child: const MaterialApp(home: MainScaffold()),
+  );
+}
 
 void main() {
   group('MainScaffold navigation (P1-03, P1-04)', () {

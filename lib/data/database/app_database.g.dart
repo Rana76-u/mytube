@@ -2024,6 +2024,32 @@ class $CollectionsTable extends Collections
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isPinnedMeta = const VerificationMeta(
+    'isPinned',
+  );
+  @override
+  late final GeneratedColumn<bool> isPinned = GeneratedColumn<bool>(
+    'is_pinned',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_pinned" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _pinnedAtMeta = const VerificationMeta(
+    'pinnedAt',
+  );
+  @override
+  late final GeneratedColumn<int> pinnedAt = GeneratedColumn<int>(
+    'pinned_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2031,6 +2057,8 @@ class $CollectionsTable extends Collections
     description,
     createdAt,
     updatedAt,
+    isPinned,
+    pinnedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2082,6 +2110,18 @@ class $CollectionsTable extends Collections
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('is_pinned')) {
+      context.handle(
+        _isPinnedMeta,
+        isPinned.isAcceptableOrUnknown(data['is_pinned']!, _isPinnedMeta),
+      );
+    }
+    if (data.containsKey('pinned_at')) {
+      context.handle(
+        _pinnedAtMeta,
+        pinnedAt.isAcceptableOrUnknown(data['pinned_at']!, _pinnedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -2111,6 +2151,14 @@ class $CollectionsTable extends Collections
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      isPinned: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_pinned'],
+      )!,
+      pinnedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pinned_at'],
+      ),
     );
   }
 
@@ -2135,12 +2183,25 @@ class Collection extends DataClass implements Insertable<Collection> {
 
   /// Wall-clock timestamp (ms since epoch) of the last update to this row.
   final int updatedAt;
+
+  /// Whether the user pinned this collection to the top of Discover (P4 disc
+  /// redesign §19). Presentation/navigation preference only — it never changes
+  /// collection membership or favourites.
+  final bool isPinned;
+
+  /// Wall-clock timestamp (ms since epoch) when the collection was pinned,
+  /// or NULL when it is not pinned. Together with [isPinned] it gives a
+  /// deterministic pinned ordering (most-recently-pinned first, id tie-break)
+  /// without a manual drag-to-reorder subsystem.
+  final int? pinnedAt;
   const Collection({
     required this.id,
     required this.name,
     this.description,
     required this.createdAt,
     required this.updatedAt,
+    required this.isPinned,
+    this.pinnedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2152,6 +2213,10 @@ class Collection extends DataClass implements Insertable<Collection> {
     }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    map['is_pinned'] = Variable<bool>(isPinned);
+    if (!nullToAbsent || pinnedAt != null) {
+      map['pinned_at'] = Variable<int>(pinnedAt);
+    }
     return map;
   }
 
@@ -2164,6 +2229,10 @@ class Collection extends DataClass implements Insertable<Collection> {
           : Value(description),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      isPinned: Value(isPinned),
+      pinnedAt: pinnedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinnedAt),
     );
   }
 
@@ -2178,6 +2247,8 @@ class Collection extends DataClass implements Insertable<Collection> {
       description: serializer.fromJson<String?>(json['description']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      isPinned: serializer.fromJson<bool>(json['isPinned']),
+      pinnedAt: serializer.fromJson<int?>(json['pinnedAt']),
     );
   }
   @override
@@ -2189,6 +2260,8 @@ class Collection extends DataClass implements Insertable<Collection> {
       'description': serializer.toJson<String?>(description),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'isPinned': serializer.toJson<bool>(isPinned),
+      'pinnedAt': serializer.toJson<int?>(pinnedAt),
     };
   }
 
@@ -2198,12 +2271,16 @@ class Collection extends DataClass implements Insertable<Collection> {
     Value<String?> description = const Value.absent(),
     int? createdAt,
     int? updatedAt,
+    bool? isPinned,
+    Value<int?> pinnedAt = const Value.absent(),
   }) => Collection(
     id: id ?? this.id,
     name: name ?? this.name,
     description: description.present ? description.value : this.description,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    isPinned: isPinned ?? this.isPinned,
+    pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
   );
   Collection copyWithCompanion(CollectionsCompanion data) {
     return Collection(
@@ -2214,6 +2291,8 @@ class Collection extends DataClass implements Insertable<Collection> {
           : this.description,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      isPinned: data.isPinned.present ? data.isPinned.value : this.isPinned,
+      pinnedAt: data.pinnedAt.present ? data.pinnedAt.value : this.pinnedAt,
     );
   }
 
@@ -2224,13 +2303,23 @@ class Collection extends DataClass implements Insertable<Collection> {
           ..write('name: $name, ')
           ..write('description: $description, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('isPinned: $isPinned, ')
+          ..write('pinnedAt: $pinnedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, description, createdAt, updatedAt);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    description,
+    createdAt,
+    updatedAt,
+    isPinned,
+    pinnedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2239,7 +2328,9 @@ class Collection extends DataClass implements Insertable<Collection> {
           other.name == this.name &&
           other.description == this.description &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.isPinned == this.isPinned &&
+          other.pinnedAt == this.pinnedAt);
 }
 
 class CollectionsCompanion extends UpdateCompanion<Collection> {
@@ -2248,6 +2339,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
   final Value<String?> description;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<bool> isPinned;
+  final Value<int?> pinnedAt;
   final Value<int> rowid;
   const CollectionsCompanion({
     this.id = const Value.absent(),
@@ -2255,6 +2348,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.description = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.isPinned = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CollectionsCompanion.insert({
@@ -2263,6 +2358,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     this.description = const Value.absent(),
     required int createdAt,
     required int updatedAt,
+    this.isPinned = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -2274,6 +2371,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Expression<String>? description,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<bool>? isPinned,
+    Expression<int>? pinnedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2282,6 +2381,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       if (description != null) 'description': description,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (isPinned != null) 'is_pinned': isPinned,
+      if (pinnedAt != null) 'pinned_at': pinnedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2292,6 +2393,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     Value<String?>? description,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<bool>? isPinned,
+    Value<int?>? pinnedAt,
     Value<int>? rowid,
   }) {
     return CollectionsCompanion(
@@ -2300,6 +2403,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
       description: description ?? this.description,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      isPinned: isPinned ?? this.isPinned,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2322,6 +2427,12 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (isPinned.present) {
+      map['is_pinned'] = Variable<bool>(isPinned.value);
+    }
+    if (pinnedAt.present) {
+      map['pinned_at'] = Variable<int>(pinnedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2336,6 +2447,8 @@ class CollectionsCompanion extends UpdateCompanion<Collection> {
           ..write('description: $description, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('isPinned: $isPinned, ')
+          ..write('pinnedAt: $pinnedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2898,6 +3011,357 @@ class AppPreferencesCompanion extends UpdateCompanion<AppPreference> {
   }
 }
 
+class $RecommendationExposuresTable extends RecommendationExposures
+    with TableInfo<$RecommendationExposuresTable, RecommendationExposure> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RecommendationExposuresTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _videoItemIdMeta = const VerificationMeta(
+    'videoItemId',
+  );
+  @override
+  late final GeneratedColumn<String> videoItemId = GeneratedColumn<String>(
+    'video_item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES video_items (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<String> sessionId = GeneratedColumn<String>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _firstExposedAtMeta = const VerificationMeta(
+    'firstExposedAt',
+  );
+  @override
+  late final GeneratedColumn<int> firstExposedAt = GeneratedColumn<int>(
+    'first_exposed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastExposedAtMeta = const VerificationMeta(
+    'lastExposedAt',
+  );
+  @override
+  late final GeneratedColumn<int> lastExposedAt = GeneratedColumn<int>(
+    'last_exposed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    videoItemId,
+    sessionId,
+    firstExposedAt,
+    lastExposedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'recommendation_exposures';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RecommendationExposure> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('video_item_id')) {
+      context.handle(
+        _videoItemIdMeta,
+        videoItemId.isAcceptableOrUnknown(
+          data['video_item_id']!,
+          _videoItemIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_videoItemIdMeta);
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('first_exposed_at')) {
+      context.handle(
+        _firstExposedAtMeta,
+        firstExposedAt.isAcceptableOrUnknown(
+          data['first_exposed_at']!,
+          _firstExposedAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_firstExposedAtMeta);
+    }
+    if (data.containsKey('last_exposed_at')) {
+      context.handle(
+        _lastExposedAtMeta,
+        lastExposedAt.isAcceptableOrUnknown(
+          data['last_exposed_at']!,
+          _lastExposedAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_lastExposedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {videoItemId, sessionId};
+  @override
+  RecommendationExposure map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RecommendationExposure(
+      videoItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}video_item_id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_id'],
+      )!,
+      firstExposedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}first_exposed_at'],
+      )!,
+      lastExposedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}last_exposed_at'],
+      )!,
+    );
+  }
+
+  @override
+  $RecommendationExposuresTable createAlias(String alias) {
+    return $RecommendationExposuresTable(attachedDatabase, alias);
+  }
+}
+
+class RecommendationExposure extends DataClass
+    implements Insertable<RecommendationExposure> {
+  /// FK → [VideoItems.id] — the logical video that was shown.
+  final String videoItemId;
+
+  /// Stable id identifying the browsing session the exposure happened in
+  /// (§18.4). No backend/account: a locally generated grouping token.
+  final String sessionId;
+
+  /// Wall-clock timestamp (ms since epoch) of the first meaningful exposure.
+  final int firstExposedAt;
+
+  /// Wall-clock timestamp (ms since epoch) of the most recent exposure.
+  final int lastExposedAt;
+  const RecommendationExposure({
+    required this.videoItemId,
+    required this.sessionId,
+    required this.firstExposedAt,
+    required this.lastExposedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['video_item_id'] = Variable<String>(videoItemId);
+    map['session_id'] = Variable<String>(sessionId);
+    map['first_exposed_at'] = Variable<int>(firstExposedAt);
+    map['last_exposed_at'] = Variable<int>(lastExposedAt);
+    return map;
+  }
+
+  RecommendationExposuresCompanion toCompanion(bool nullToAbsent) {
+    return RecommendationExposuresCompanion(
+      videoItemId: Value(videoItemId),
+      sessionId: Value(sessionId),
+      firstExposedAt: Value(firstExposedAt),
+      lastExposedAt: Value(lastExposedAt),
+    );
+  }
+
+  factory RecommendationExposure.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RecommendationExposure(
+      videoItemId: serializer.fromJson<String>(json['videoItemId']),
+      sessionId: serializer.fromJson<String>(json['sessionId']),
+      firstExposedAt: serializer.fromJson<int>(json['firstExposedAt']),
+      lastExposedAt: serializer.fromJson<int>(json['lastExposedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'videoItemId': serializer.toJson<String>(videoItemId),
+      'sessionId': serializer.toJson<String>(sessionId),
+      'firstExposedAt': serializer.toJson<int>(firstExposedAt),
+      'lastExposedAt': serializer.toJson<int>(lastExposedAt),
+    };
+  }
+
+  RecommendationExposure copyWith({
+    String? videoItemId,
+    String? sessionId,
+    int? firstExposedAt,
+    int? lastExposedAt,
+  }) => RecommendationExposure(
+    videoItemId: videoItemId ?? this.videoItemId,
+    sessionId: sessionId ?? this.sessionId,
+    firstExposedAt: firstExposedAt ?? this.firstExposedAt,
+    lastExposedAt: lastExposedAt ?? this.lastExposedAt,
+  );
+  RecommendationExposure copyWithCompanion(
+    RecommendationExposuresCompanion data,
+  ) {
+    return RecommendationExposure(
+      videoItemId: data.videoItemId.present
+          ? data.videoItemId.value
+          : this.videoItemId,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      firstExposedAt: data.firstExposedAt.present
+          ? data.firstExposedAt.value
+          : this.firstExposedAt,
+      lastExposedAt: data.lastExposedAt.present
+          ? data.lastExposedAt.value
+          : this.lastExposedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecommendationExposure(')
+          ..write('videoItemId: $videoItemId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('firstExposedAt: $firstExposedAt, ')
+          ..write('lastExposedAt: $lastExposedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(videoItemId, sessionId, firstExposedAt, lastExposedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RecommendationExposure &&
+          other.videoItemId == this.videoItemId &&
+          other.sessionId == this.sessionId &&
+          other.firstExposedAt == this.firstExposedAt &&
+          other.lastExposedAt == this.lastExposedAt);
+}
+
+class RecommendationExposuresCompanion
+    extends UpdateCompanion<RecommendationExposure> {
+  final Value<String> videoItemId;
+  final Value<String> sessionId;
+  final Value<int> firstExposedAt;
+  final Value<int> lastExposedAt;
+  final Value<int> rowid;
+  const RecommendationExposuresCompanion({
+    this.videoItemId = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.firstExposedAt = const Value.absent(),
+    this.lastExposedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RecommendationExposuresCompanion.insert({
+    required String videoItemId,
+    required String sessionId,
+    required int firstExposedAt,
+    required int lastExposedAt,
+    this.rowid = const Value.absent(),
+  }) : videoItemId = Value(videoItemId),
+       sessionId = Value(sessionId),
+       firstExposedAt = Value(firstExposedAt),
+       lastExposedAt = Value(lastExposedAt);
+  static Insertable<RecommendationExposure> custom({
+    Expression<String>? videoItemId,
+    Expression<String>? sessionId,
+    Expression<int>? firstExposedAt,
+    Expression<int>? lastExposedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (videoItemId != null) 'video_item_id': videoItemId,
+      if (sessionId != null) 'session_id': sessionId,
+      if (firstExposedAt != null) 'first_exposed_at': firstExposedAt,
+      if (lastExposedAt != null) 'last_exposed_at': lastExposedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RecommendationExposuresCompanion copyWith({
+    Value<String>? videoItemId,
+    Value<String>? sessionId,
+    Value<int>? firstExposedAt,
+    Value<int>? lastExposedAt,
+    Value<int>? rowid,
+  }) {
+    return RecommendationExposuresCompanion(
+      videoItemId: videoItemId ?? this.videoItemId,
+      sessionId: sessionId ?? this.sessionId,
+      firstExposedAt: firstExposedAt ?? this.firstExposedAt,
+      lastExposedAt: lastExposedAt ?? this.lastExposedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (videoItemId.present) {
+      map['video_item_id'] = Variable<String>(videoItemId.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<String>(sessionId.value);
+    }
+    if (firstExposedAt.present) {
+      map['first_exposed_at'] = Variable<int>(firstExposedAt.value);
+    }
+    if (lastExposedAt.present) {
+      map['last_exposed_at'] = Variable<int>(lastExposedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RecommendationExposuresCompanion(')
+          ..write('videoItemId: $videoItemId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('firstExposedAt: $firstExposedAt, ')
+          ..write('lastExposedAt: $lastExposedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2912,6 +3376,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $AppPreferencesTable appPreferences = $AppPreferencesTable(this);
+  late final $RecommendationExposuresTable recommendationExposures =
+      $RecommendationExposuresTable(this);
   late final VideoItemsDao videoItemsDao = VideoItemsDao(this as AppDatabase);
   late final SourceLocationsDao sourceLocationsDao = SourceLocationsDao(
     this as AppDatabase,
@@ -2922,6 +3388,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final CollectionsDao collectionsDao = CollectionsDao(
     this as AppDatabase,
   );
+  late final RecommendationExposuresDao recommendationExposuresDao =
+      RecommendationExposuresDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2934,6 +3402,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     collections,
     collectionItems,
     appPreferences,
+    recommendationExposures,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2971,6 +3440,15 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('collection_items', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'video_items',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [
+        TableUpdate('recommendation_exposures', kind: UpdateKind.delete),
+      ],
     ),
   ]);
 }
@@ -3060,6 +3538,31 @@ final class $$VideoItemsTableReferences
 
     final cache = $_typedResult.readTableOrNull(
       _collectionItemsRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<
+    $RecommendationExposuresTable,
+    List<RecommendationExposure>
+  >
+  _recommendationExposuresRefsTable(_$AppDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.recommendationExposures,
+        aliasName: 'video_items__id__recommendation_exposures__video_item_id',
+      );
+
+  $$RecommendationExposuresTableProcessedTableManager
+  get recommendationExposuresRefs {
+    final manager = $$RecommendationExposuresTableTableManager(
+      $_db,
+      $_db.recommendationExposures,
+    ).filter((f) => f.videoItemId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _recommendationExposuresRefsTable($_db),
     );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
@@ -3198,6 +3701,32 @@ class $$VideoItemsTableFilterComposer
                 $removeJoinBuilderFromRootComposer,
           ),
     );
+    return f(composer);
+  }
+
+  Expression<bool> recommendationExposuresRefs(
+    Expression<bool> Function($$RecommendationExposuresTableFilterComposer f) f,
+  ) {
+    final $$RecommendationExposuresTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.recommendationExposures,
+          getReferencedColumn: (t) => t.videoItemId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$RecommendationExposuresTableFilterComposer(
+                $db: $db,
+                $table: $db.recommendationExposures,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
     return f(composer);
   }
 }
@@ -3383,6 +3912,33 @@ class $$VideoItemsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> recommendationExposuresRefs<T extends Object>(
+    Expression<T> Function($$RecommendationExposuresTableAnnotationComposer a)
+    f,
+  ) {
+    final $$RecommendationExposuresTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.recommendationExposures,
+          getReferencedColumn: (t) => t.videoItemId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$RecommendationExposuresTableAnnotationComposer(
+                $db: $db,
+                $table: $db.recommendationExposures,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$VideoItemsTableTableManager
@@ -3402,6 +3958,7 @@ class $$VideoItemsTableTableManager
             bool sourceLocationsRefs,
             bool videoTagsRefs,
             bool collectionItemsRefs,
+            bool recommendationExposuresRefs,
           })
         > {
   $$VideoItemsTableTableManager(_$AppDatabase db, $VideoItemsTable table)
@@ -3480,6 +4037,7 @@ class $$VideoItemsTableTableManager
                 sourceLocationsRefs = false,
                 videoTagsRefs = false,
                 collectionItemsRefs = false,
+                recommendationExposuresRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
@@ -3487,6 +4045,7 @@ class $$VideoItemsTableTableManager
                     if (sourceLocationsRefs) db.sourceLocations,
                     if (videoTagsRefs) db.videoTags,
                     if (collectionItemsRefs) db.collectionItems,
+                    if (recommendationExposuresRefs) db.recommendationExposures,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -3554,6 +4113,27 @@ class $$VideoItemsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (recommendationExposuresRefs)
+                        await $_getPrefetchedData<
+                          VideoItem,
+                          $VideoItemsTable,
+                          RecommendationExposure
+                        >(
+                          currentTable: table,
+                          referencedTable: $$VideoItemsTableReferences
+                              ._recommendationExposuresRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$VideoItemsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).recommendationExposuresRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.videoItemId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -3578,6 +4158,7 @@ typedef $$VideoItemsTableProcessedTableManager =
         bool sourceLocationsRefs,
         bool videoTagsRefs,
         bool collectionItemsRefs,
+        bool recommendationExposuresRefs,
       })
     >;
 typedef $$SourceLocationsTableCreateCompanionBuilder =
@@ -4674,6 +5255,8 @@ typedef $$CollectionsTableCreateCompanionBuilder =
       Value<String?> description,
       required int createdAt,
       required int updatedAt,
+      Value<bool> isPinned,
+      Value<int?> pinnedAt,
       Value<int> rowid,
     });
 typedef $$CollectionsTableUpdateCompanionBuilder =
@@ -4683,6 +5266,8 @@ typedef $$CollectionsTableUpdateCompanionBuilder =
       Value<String?> description,
       Value<int> createdAt,
       Value<int> updatedAt,
+      Value<bool> isPinned,
+      Value<int?> pinnedAt,
       Value<int> rowid,
     });
 
@@ -4745,6 +5330,16 @@ class $$CollectionsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<bool> get isPinned => $composableBuilder(
+    column: $table.isPinned,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   Expression<bool> collectionItemsRefs(
     Expression<bool> Function($$CollectionItemsTableFilterComposer f) f,
   ) {
@@ -4804,6 +5399,16 @@ class $$CollectionsTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get isPinned => $composableBuilder(
+    column: $table.isPinned,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CollectionsTableAnnotationComposer
@@ -4831,6 +5436,12 @@ class $$CollectionsTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get isPinned =>
+      $composableBuilder(column: $table.isPinned, builder: (column) => column);
+
+  GeneratedColumn<int> get pinnedAt =>
+      $composableBuilder(column: $table.pinnedAt, builder: (column) => column);
 
   Expression<T> collectionItemsRefs<T extends Object>(
     Expression<T> Function($$CollectionItemsTableAnnotationComposer a) f,
@@ -4891,6 +5502,8 @@ class $$CollectionsTableTableManager
                 Value<String?> description = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<bool> isPinned = const Value.absent(),
+                Value<int?> pinnedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion(
                 id: id,
@@ -4898,6 +5511,8 @@ class $$CollectionsTableTableManager
                 description: description,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                isPinned: isPinned,
+                pinnedAt: pinnedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4907,6 +5522,8 @@ class $$CollectionsTableTableManager
                 Value<String?> description = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
+                Value<bool> isPinned = const Value.absent(),
+                Value<int?> pinnedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CollectionsCompanion.insert(
                 id: id,
@@ -4914,6 +5531,8 @@ class $$CollectionsTableTableManager
                 description: description,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                isPinned: isPinned,
+                pinnedAt: pinnedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5523,6 +6142,333 @@ typedef $$AppPreferencesTableProcessedTableManager =
       AppPreference,
       PrefetchHooks Function()
     >;
+typedef $$RecommendationExposuresTableCreateCompanionBuilder =
+    RecommendationExposuresCompanion Function({
+      required String videoItemId,
+      required String sessionId,
+      required int firstExposedAt,
+      required int lastExposedAt,
+      Value<int> rowid,
+    });
+typedef $$RecommendationExposuresTableUpdateCompanionBuilder =
+    RecommendationExposuresCompanion Function({
+      Value<String> videoItemId,
+      Value<String> sessionId,
+      Value<int> firstExposedAt,
+      Value<int> lastExposedAt,
+      Value<int> rowid,
+    });
+
+final class $$RecommendationExposuresTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $RecommendationExposuresTable,
+          RecommendationExposure
+        > {
+  $$RecommendationExposuresTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $VideoItemsTable _videoItemIdTable(_$AppDatabase db) => db.videoItems
+      .createAlias('recommendation_exposures__video_item_id__video_items__id');
+
+  $$VideoItemsTableProcessedTableManager get videoItemId {
+    final $_column = $_itemColumn<String>('video_item_id')!;
+
+    final manager = $$VideoItemsTableTableManager(
+      $_db,
+      $_db.videoItems,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_videoItemIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$RecommendationExposuresTableFilterComposer
+    extends Composer<_$AppDatabase, $RecommendationExposuresTable> {
+  $$RecommendationExposuresTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get firstExposedAt => $composableBuilder(
+    column: $table.firstExposedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get lastExposedAt => $composableBuilder(
+    column: $table.lastExposedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$VideoItemsTableFilterComposer get videoItemId {
+    final $$VideoItemsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.videoItemId,
+      referencedTable: $db.videoItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$VideoItemsTableFilterComposer(
+            $db: $db,
+            $table: $db.videoItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$RecommendationExposuresTableOrderingComposer
+    extends Composer<_$AppDatabase, $RecommendationExposuresTable> {
+  $$RecommendationExposuresTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get firstExposedAt => $composableBuilder(
+    column: $table.firstExposedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get lastExposedAt => $composableBuilder(
+    column: $table.lastExposedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$VideoItemsTableOrderingComposer get videoItemId {
+    final $$VideoItemsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.videoItemId,
+      referencedTable: $db.videoItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$VideoItemsTableOrderingComposer(
+            $db: $db,
+            $table: $db.videoItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$RecommendationExposuresTableAnnotationComposer
+    extends Composer<_$AppDatabase, $RecommendationExposuresTable> {
+  $$RecommendationExposuresTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<int> get firstExposedAt => $composableBuilder(
+    column: $table.firstExposedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get lastExposedAt => $composableBuilder(
+    column: $table.lastExposedAt,
+    builder: (column) => column,
+  );
+
+  $$VideoItemsTableAnnotationComposer get videoItemId {
+    final $$VideoItemsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.videoItemId,
+      referencedTable: $db.videoItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$VideoItemsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.videoItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$RecommendationExposuresTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $RecommendationExposuresTable,
+          RecommendationExposure,
+          $$RecommendationExposuresTableFilterComposer,
+          $$RecommendationExposuresTableOrderingComposer,
+          $$RecommendationExposuresTableAnnotationComposer,
+          $$RecommendationExposuresTableCreateCompanionBuilder,
+          $$RecommendationExposuresTableUpdateCompanionBuilder,
+          (RecommendationExposure, $$RecommendationExposuresTableReferences),
+          RecommendationExposure,
+          PrefetchHooks Function({bool videoItemId})
+        > {
+  $$RecommendationExposuresTableTableManager(
+    _$AppDatabase db,
+    $RecommendationExposuresTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RecommendationExposuresTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$RecommendationExposuresTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$RecommendationExposuresTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> videoItemId = const Value.absent(),
+                Value<String> sessionId = const Value.absent(),
+                Value<int> firstExposedAt = const Value.absent(),
+                Value<int> lastExposedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RecommendationExposuresCompanion(
+                videoItemId: videoItemId,
+                sessionId: sessionId,
+                firstExposedAt: firstExposedAt,
+                lastExposedAt: lastExposedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String videoItemId,
+                required String sessionId,
+                required int firstExposedAt,
+                required int lastExposedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => RecommendationExposuresCompanion.insert(
+                videoItemId: videoItemId,
+                sessionId: sessionId,
+                firstExposedAt: firstExposedAt,
+                lastExposedAt: lastExposedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $RecommendationExposuresTable,
+                    RecommendationExposure
+                  >(table),
+                  $$RecommendationExposuresTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({videoItemId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (videoItemId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.videoItemId,
+                                referencedTable:
+                                    $$RecommendationExposuresTableReferences
+                                        ._videoItemIdTable(db),
+                                referencedColumn:
+                                    $$RecommendationExposuresTableReferences
+                                        ._videoItemIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$RecommendationExposuresTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $RecommendationExposuresTable,
+      RecommendationExposure,
+      $$RecommendationExposuresTableFilterComposer,
+      $$RecommendationExposuresTableOrderingComposer,
+      $$RecommendationExposuresTableAnnotationComposer,
+      $$RecommendationExposuresTableCreateCompanionBuilder,
+      $$RecommendationExposuresTableUpdateCompanionBuilder,
+      (RecommendationExposure, $$RecommendationExposuresTableReferences),
+      RecommendationExposure,
+      PrefetchHooks Function({bool videoItemId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5540,4 +6486,9 @@ class $AppDatabaseManager {
       $$CollectionItemsTableTableManager(_db, _db.collectionItems);
   $$AppPreferencesTableTableManager get appPreferences =>
       $$AppPreferencesTableTableManager(_db, _db.appPreferences);
+  $$RecommendationExposuresTableTableManager get recommendationExposures =>
+      $$RecommendationExposuresTableTableManager(
+        _db,
+        _db.recommendationExposures,
+      );
 }

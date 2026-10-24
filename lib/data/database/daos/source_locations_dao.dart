@@ -28,6 +28,30 @@ class SourceLocationsDao extends DatabaseAccessor<AppDatabase>
     sourceLocations,
   )..where((t) => t.id.equals(id))).getSingleOrNull();
 
+  /// Returns one representative `providerType` name per item — the primary
+  /// location, else the earliest-attached — for [videoItemIds] in a single
+  /// query, so list cards can show a source label without a per-item lookup.
+  /// Items with no source are simply absent from the map.
+  Future<Map<String, String>> primaryProviderTypesFor(
+    List<String> videoItemIds,
+  ) async {
+    if (videoItemIds.isEmpty) return const {};
+    final rows =
+        await (select(sourceLocations)
+              ..where((t) => t.videoItemId.isIn(videoItemIds))
+              ..orderBy([
+                (t) => OrderingTerm.asc(t.videoItemId),
+                (t) => OrderingTerm.desc(t.isPrimary),
+                (t) => OrderingTerm.asc(t.createdAt),
+              ]))
+            .get();
+    final result = <String, String>{};
+    for (final row in rows) {
+      result.putIfAbsent(row.videoItemId, () => row.providerType);
+    }
+    return result;
+  }
+
   /// Inserts or replaces a source location row.
   Future<void> upsertLocation(SourceLocationsCompanion companion) =>
       into(sourceLocations).insertOnConflictUpdate(companion);

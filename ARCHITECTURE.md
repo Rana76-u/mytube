@@ -60,6 +60,28 @@ Flutter screens, widgets, routing, and view state. Widgets must not
 query SQLite directly or implement OAuth/provider networking. Select one
 state-management solution early and apply it consistently.
 
+### Theme
+
+A single dark-first Material 3 theme lives in
+`lib/app/theme/app_theme.dart` (`AppTheme`) and is the **only** place
+colour values are defined. It implements the YouTube palette recorded in
+`Color Pallet.csv` (see ADR-008 in `DECISIONS.md`): red primary
+(`#FF0000`) on a two-tone charcoal dark surface (background `#0F0F0F`,
+elevated surface `#272727`), white primary text (`#FFFFFF`), and
+medium-grey secondary text (`#AAAAAA`). `AppTheme.dark` builds an
+explicit `ColorScheme` from those exact values; `AppTheme.light` derives
+the same brand red from the seed so accents stay on-brand when the user
+follows a light system theme. The active mode is held by
+`ThemeModeNotifier` (Riverpod) and defaults to dark (SET-001).
+
+Palette roles map onto Material 3 tokens as: `primary` → play buttons,
+active tab icons, live badges; `surface` + `scaffoldBackgroundColor` →
+app and video-card backgrounds; `surfaceContainer*` → search bar, chips,
+bottom sheets; `onSurface` / `onSurfaceVariant` → primary / secondary
+text. Widgets obtain every colour through `Theme.of(context).colorScheme`
+and must not hard-code hex values, so recolouring the whole app is a
+single `AppTheme` edit.
+
 ### Domain
 
 Framework-light models and use cases for listing/search/filter/sort,
@@ -122,6 +144,18 @@ only where necessary - created/updated timestamps
 -   `downloads` for app-managed offline copies and status
 -   typed `app_preferences` for theme, cache limit, and playback
     defaults
+
+Discover-redesign persistence (Drift schema **v6**):
+
+-   `collections` carries `is_pinned` and `pinned_at` so pinning is a
+    user-owned organization preference that survives restarts and drives
+    deterministic ordering (pinned by most-recently-pinned first, then
+    unpinned newest-first) without touching membership or favourites
+    (ADR-004).
+-   `recommendation_exposures` (indexed on `last_exposed_at` and
+    `session_id`) records where a video was *shown in the feed*, kept
+    entirely separate from watch progress and playback history, with
+    bounded retention (ADR-003).
 
 Do not store provider tokens in the library database as plaintext. Never
 use a short-lived signed URL as the only durable source identity.
@@ -202,6 +236,66 @@ Use deterministic, testable rule-based scoring: - positive weight for
 unwatched items, - source preference/availability and recency, -
 controlled randomization, - penalty for recently shown items, - modest
 influence from local viewing history.
+
+Implemented flow (disc redesign §16–§19, ADR-001–ADR-006):
+
+-   **One shared pipeline, many modes.** `RecommendationScorer`
+    produces a ranked candidate list; `RecommendationsController` (a
+    Riverpod `AsyncNotifier`) applies the selected `DiscoverFeedMode`
+    ordering — `recommended`, `recentlyAdded`, or `unwatched` — over the
+    **same** eligibility/dedup pipeline. The UI repopulates one main
+    feed from the active mode rather than mounting three feeds
+    (ADR-002).
+-   **Session-aware exposure.** Surfacing a page records an exposure in
+    the dedicated `recommendation_exposures` table via `markExposed`;
+    repetition reduction reads recent exposures, never watch progress,
+    so a suggestion shown is not mistaken for a video watched (ADR-003).
+-   **Lazy pagination.** `DiscoverFeedPaginator` pages the already-ranked
+    snapshot (bounded page size, logical-ID dedup, single in-flight
+    guard, and a generation token that drops stale in-flight work when a
+    mode change or refresh resets the feed). `DiscoverFeedController`
+    exposes a `DiscoverFeedState` (`items`/`endOfFeed`/`isLoadingMore`)
+    and records exposure only for newly surfaced items; `DiscoverScreen`
+    calls `loadMore` near the bottom and shows an explicit end-of-feed
+    affordance instead of re-ranking on scroll (ADR-005).
+-   **Continue Watching.** A pure selector keeps only partially-watched
+    items (via the shared playback-completion policy), ordered by
+    most-recent activity with a stable id tie-break; the strip hides
+    itself entirely when nothing qualifies (§16).
+-   **App-wide card.** `VideoItemCard` is the single video tile across
+    Library, Discover, Saved, Favorites and search: a full-width 16:9
+    thumbnail with a duration badge and a thin progress overlay, then the
+    title and a metadata line of *provider label + relative date*. The
+    provider label is `VideoItemSummary.primaryProvider`, resolved in the
+    Drift repository by reading the item's primary (else earliest) source
+    location's `providerType` — one representative provider for
+    multi-source duplicates, with no extra dependency (ADR-006).
+-   **Filter chips drive the feed.** `DiscoverFilterChips` renders
+    `All` plus every saved collection (pinned-first) and library tag. The
+    selection lives in a framework-free `discoverFeedFilterProvider` (a
+    sealed `DiscoverFeedFilter` + `Notifier`). `DiscoverFeedController
+    .build` *watches* that filter: `All` follows the ranked mode
+    pipeline; a collection/tag reads that group through the same
+    repository (`getCollectionItems` / `queryItems(tagIds)`). Because the
+    build watches the filter, a chip change re-runs it and the paginator's
+    generation guard resets pagination and dedup exactly like a mode
+    change (UI-2, ADR-005). The mode control only shows in the `All`
+    state.
+-   **Capped browse rows.** `DiscoverBrowseRows` stacks a
+    `recentlyAddedRowProvider` strip, one row per collection
+    (`collectionRowProvider`, pinned-first) and one per tag
+    (`tagRowProvider`) — each bounded to ≈10 cards and ≈6 rows, each
+    fetched lazily by a family provider only when its row builds, and
+    collapsing to nothing when its group is empty/loading/error (UI-3).
+    These sit alongside — not in place of — the `All`-state Recently Added
+    *mode*; the main feed remains the deep-paging surface.
+-   **Pinned collections.** Both the chip row and the collection browse
+    rows inherit the repository's pinned-first ordering (§19, ADR-004).
+-   **Shared presentation.** Reuses `VideoThumbnail`/`VideoItemCard` and
+    small Discover-only widgets (`DiscoverCarousel`,
+    `ContinueWatchingTile`, `DiscoverFilterChips`, `FeedModeControl`,
+    `DiscoverBrowseRows`); no database, recommendation, or playback logic
+    lives in these widgets (ADR-006).
 
 Do not upload history or build an ML pipeline for MVP.
 

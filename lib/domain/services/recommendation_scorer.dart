@@ -34,6 +34,7 @@ class RecommendationWeights {
     this.historyMaxPenalty = 15,
     this.historyPerDay = 0.4,
     this.recentlyShownPenalty = 40,
+    this.recentSessionPenalty = 15,
     this.randomAmplitude = 12,
   });
 
@@ -67,6 +68,13 @@ class RecommendationWeights {
   /// repetition-reduction rule (DISC-003).
   final double recentlyShownPenalty;
 
+  /// Smaller penalty for an item shown in a *recent previous* browsing session
+  /// rather than the current one (disc redesign §18.5). It is deliberately
+  /// lighter than [recentlyShownPenalty] so cross-session history nudges, but
+  /// never dominates, the ranking, and it fades out entirely once the row is
+  /// pruned by retention (§18.6).
+  final double recentSessionPenalty;
+
   /// Maximum magnitude of the controlled-randomization jitter added to a score.
   final double randomAmplitude;
 }
@@ -83,6 +91,7 @@ class RecommendationCandidate {
     this.isAvailable = true,
     this.isPreferredSource = false,
     this.recentlyShown = false,
+    this.seenInRecentSession = false,
   });
 
   final VideoItemSummary item;
@@ -96,6 +105,12 @@ class RecommendationCandidate {
   /// Whether the item appeared in the recent recommendation head (drives the
   /// repetition-reduction penalty, DISC-003).
   final bool recentlyShown;
+
+  /// Whether the item was meaningfully exposed in a *recent previous* session
+  /// but not the current one. Drives the lighter cross-session penalty (disc
+  /// redesign §18.5). Kept separate from [recentlyShown] so the current-session
+  /// demotion dominates and cross-session memory only fine-tunes it.
+  final bool seenInRecentSession;
 }
 
 /// Scores and ranks [RecommendationCandidate]s (P6-05, DISC-001).
@@ -158,6 +173,12 @@ class RecommendationScorer {
 
     // Repetition reduction: drop anything that was in the last head.
     if (candidate.recentlyShown) total -= weights.recentlyShownPenalty;
+
+    // Lighter cross-session demotion (§18.5) — only for items seen in a recent
+    // earlier session that were not already penalised as just-shown.
+    if (!candidate.recentlyShown && candidate.seenInRecentSession) {
+      total -= weights.recentSessionPenalty;
+    }
 
     // Controlled randomization: bounded jitter, only enough to reshuffle
     // near-ties. A null random leaves the ranking deterministic.

@@ -9,6 +9,7 @@ import 'package:mytube/domain/services/watch_progress_service.dart';
 import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 import 'package:mytube/features/player/playback_controls.dart';
 import 'package:mytube/features/player/video_surface.dart';
+import 'package:mytube/playback/now_playing.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/playback_provider.dart';
 import 'package:mytube/sources/source_adapter.dart';
@@ -100,6 +101,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     final source = (result as Ok<PlayableSource>).value;
     if (token != _playToken || !mounted) return;
 
+    // Publish the item's title for the media notification / lock screen
+    // (P13-03). Safe label only — never the resolved URI.
+    ref.read(nowPlayingProvider.notifier).setTitle(widget.item.title);
+
     await _controller.play(source);
     if (token != _playToken || !mounted) return;
 
@@ -107,6 +112,12 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     // (P5-08/LIB-002). Failure is silent: playback simply starts over.
     final resume = await _watchProgress.resumePosition(widget.item.id);
     if (token != _playToken || !mounted || resume == null) return;
+    // Skip an end-of-media resume point: seeking to (or past) the final frame
+    // leaves the video frozen on a last frame — often black — that reads as
+    // "nothing plays / no video." A stale progress near the end is treated as
+    // "watch again from the start."
+    final duration = _controller.state.value.duration;
+    if (duration > Duration.zero && resume >= duration) return;
     await _controller.seekTo(resume);
   }
 
@@ -162,7 +173,10 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            const Expanded(child: Center(child: VideoSurface())),
+            // The surface expands into the whole area itself, so a clip is
+            // scaled to the largest aspect-true size the screen allows; Fit
+            // (the default) still letterboxes rather than cropping.
+            const Expanded(child: VideoSurface()),
             // Error text and the gated Retry affordance already live inside
             // PlaybackControls (P4-07/AVAIL-002/PLAY-009) — no duplication.
             const PlaybackControls(),

@@ -20,7 +20,14 @@ import 'package:mytube/playback/playback_provider.dart';
 /// player screen's job via `controller.play`.  Fullscreen and orientation
 /// controls land with the screen itself.
 class PlaybackControls extends ConsumerStatefulWidget {
-  const PlaybackControls({super.key});
+  const PlaybackControls({super.key, this.showDisplayMode = true});
+
+  /// Whether to offer the app-wide display-mode selector (PLAY-006).
+  ///
+  /// Reels hides it: that surface picks its own aspect-true fit per clip and
+  /// exposes a contain/cover toggle instead, so a menu that can also stretch
+  /// the picture would only contradict it.
+  final bool showDisplayMode;
 
   /// Skip delta used by the replay/forward buttons.
   static const Duration skipDelta = Duration(seconds: 10);
@@ -201,7 +208,7 @@ class _PlaybackControlsState extends ConsumerState<PlaybackControls> {
             // PLAY-005/PLAY-006: display-mode selector (Fit / Fill-Crop /
             // Stretch). Held in the app-wide notifier so it survives across
             // sources and drives `VideoSurface`.
-            _DisplayModeMenu(),
+            if (widget.showDisplayMode) _DisplayModeMenu(),
           ],
         ),
       ],

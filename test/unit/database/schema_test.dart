@@ -59,16 +59,17 @@ void main() {
 
     // ── Schema version ──────────────────────────────────────────────────────
 
-    test('schema version is 5', () async {
-      // The overall schema version is 5 (P7-04/P7-02 added the
-      // source_locations.thumbnail_uri column); earlier groups documented
-      // their own tables rather than the version number itself. The
-      // authoritative version tests live in migrations_test.dart.
+    test('schema version is 6', () async {
+      // The overall schema version is 6 (disc redesign §18/§19 added the
+      // collection pinning columns and the recommendation_exposures table on
+      // top of the v5 thumbnail_uri column); earlier groups documented their
+      // own tables rather than the version number itself. The authoritative
+      // version tests live in migrations_test.dart.
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(5));
+      expect(version, equals(6));
     });
 
     // ── VideoItems ───────────────────────────────────────────────────────────
@@ -226,6 +227,9 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows.first.name, equals('Favourites'));
       expect(rows.first.description, isNull);
+      // New collections start unpinned (§19).
+      expect(rows.first.isPinned, isFalse);
+      expect(rows.first.pinnedAt, isNull);
     });
 
     // ── CollectionItems ──────────────────────────────────────────────────────

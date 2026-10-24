@@ -4,11 +4,13 @@ import 'package:drift_flutter/drift_flutter.dart';
 
 import 'daos/app_preferences_dao.dart';
 import 'daos/collections_dao.dart';
+import 'daos/recommendation_exposures_dao.dart';
 import 'daos/source_locations_dao.dart';
 import 'daos/video_items_dao.dart';
 import 'tables/app_preferences_table.dart';
 import 'tables/collection_items_table.dart';
 import 'tables/collections_table.dart';
+import 'tables/recommendation_exposures_table.dart';
 import 'tables/source_locations_table.dart';
 import 'tables/tags_table.dart';
 import 'tables/video_items_table.dart';
@@ -24,6 +26,8 @@ part 'app_database.g.dart';
 ///   v3 — [Tags] + [VideoTags] + [Collections] + [CollectionItems] (P2-03)
 ///   v4 — [AppPreferences] + indexes (P2-05 / P2-07)
 ///   v5 — [SourceLocations.thumbnailUri] (P7-02)
+///   v6 — [Collections.isPinned]/[Collections.pinnedAt] + [RecommendationExposures]
+///        (disc redesign §18/§19 — pinned collections, session-aware exposure)
 @DriftDatabase(
   tables: [
     VideoItems,
@@ -33,14 +37,21 @@ part 'app_database.g.dart';
     Collections,
     CollectionItems,
     AppPreferences,
+    RecommendationExposures,
   ],
-  daos: [VideoItemsDao, SourceLocationsDao, AppPreferencesDao, CollectionsDao],
+  daos: [
+    VideoItemsDao,
+    SourceLocationsDao,
+    AppPreferencesDao,
+    CollectionsDao,
+    RecommendationExposuresDao,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -51,6 +62,7 @@ class AppDatabase extends _$AppDatabase {
     onCreate: (m) async {
       await m.createAll();
       await _createIndexes();
+      await _createV6Indexes();
     },
     onUpgrade: (m, from, to) async {
       // v1 → v2: video items and source locations
@@ -62,8 +74,16 @@ class AppDatabase extends _$AppDatabase {
       if (from < 3) {
         await m.createTable(tags);
         await m.createTable(videoTags);
+        // Created from the current table definition, so a fresh-in-upgrade
+        // collections table already carries the v6 pin columns below.
         await m.createTable(collections);
         await m.createTable(collectionItems);
+      } else if (from < 6) {
+        // v5 → v6: collection pinning metadata (disc redesign §19). Existing
+        // collections (created before v6) gain the columns and default to
+        // unpinned; no user data is discarded.
+        await m.addColumn(collections, collections.isPinned);
+        await m.addColumn(collections, collections.pinnedAt);
       }
       // v3 → v4: app preferences + indexes
       if (from < 4) {
@@ -73,6 +93,13 @@ class AppDatabase extends _$AppDatabase {
       // v4 → v5: provider thumbnail reference on source locations (P7-02)
       if (from < 5) {
         await m.addColumn(sourceLocations, sourceLocations.thumbnailUri);
+      }
+      // v5 → v6: session-aware exposure history + indexes (disc redesign §18).
+      // The exposures table is new, so creating it is safe for any pre-v6
+      // database regardless of when collections was introduced.
+      if (from < 6) {
+        await m.createTable(recommendationExposures);
+        await _createV6Indexes();
       }
     },
   );
@@ -101,6 +128,23 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_video_items_last_played_at '
       'ON video_items (last_played_at)',
+    );
+  }
+
+  /// Creates the indexes introduced alongside schema v6.
+  ///
+  /// Called from [onCreate] (fresh installs) and the v5→v6 upgrade so both
+  /// paths converge on the same index set.
+  Future<void> _createV6Indexes() async {
+    // Supports the session-scoped exposure lookup and time-bounded retention
+    // cleanup without a full-table scan.
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_recommendation_exposures_last_exposed_at '
+      'ON recommendation_exposures (last_exposed_at)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_recommendation_exposures_session_id '
+      'ON recommendation_exposures (session_id)',
     );
   }
 

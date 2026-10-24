@@ -2,28 +2,71 @@ import 'package:flutter/material.dart';
 
 /// Produces the [ThemeData] objects used throughout the app.
 ///
-/// The app is **dark-first** (SET-001). Both themes share a single seed colour
-/// so surface, primary, and error tokens stay consistent across modes.
+/// The palette is the YouTube colour scheme defined in `Color Pallet.csv`:
+/// a red primary on a two-tone charcoal dark surface. The app is
+/// **dark-first** (SET-001), so these exact neutral roles are applied to the
+/// default dark theme; the light theme derives the same red primary from the
+/// seed so both modes stay on-brand.
 ///
 /// All consumers obtain colours through [Theme.of] or [ColorScheme]; they must
 /// not hard-code colour values.
 abstract final class AppTheme {
-  /// Seed colour used to derive both light and dark [ColorScheme]s.
-  ///
-  /// Change this constant to recolour the entire app; no other edits needed.
-  static const Color seedColor = Color(0xFF1A6B8A);
+  // ---------------------------------------------------------------------------
+  // YouTube palette — see `Color Pallet.csv`.
+  // ---------------------------------------------------------------------------
 
-  /// [ThemeData] for [ThemeMode.dark] — the default launch experience.
-  static ThemeData get dark => ThemeData(
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: Brightness.dark,
-    ),
-    useMaterial3: true,
-  );
+  /// Primary — Red. Play buttons, live badges, active tab icons.
+  static const Color primary = Color(0xFFFF0000);
+
+  /// Background (Dark) — Dark Charcoal. App background, video card background.
+  static const Color backgroundDark = Color(0xFF0F0F0F);
+
+  /// Surface (Dark) — Medium Charcoal. Search bar, chip buttons, bottom sheet.
+  static const Color surfaceDark = Color(0xFF272727);
+
+  /// Text Primary — Pure White. Video titles, primary labels.
+  static const Color textPrimary = Color(0xFFFFFFFF);
+
+  /// Text Secondary — Medium Grey. Channel names, view counts, upload dates.
+  static const Color textSecondary = Color(0xFFAAAAAA);
+
+  /// Seed colour used to derive the non-neutral tokens (secondary, tertiary,
+  /// error, outline) and the light [ColorScheme]. It is the brand red so every
+  /// derived tone stays on-brand.
+  static const Color seedColor = primary;
+
+  /// [ThemeData] for [ThemeMode.dark] — the default launch experience, built
+  /// directly from the palette in `Color Pallet.csv`.
+  static ThemeData get dark {
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: seedColor,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: primary,
+          onPrimary: textPrimary,
+          // Base surface is the app / video-card background (#0F0F0F).
+          surface: backgroundDark,
+          surfaceContainerLowest: backgroundDark,
+          // Elevated containers (search bar, chips, bottom sheet) use #272727.
+          surfaceContainerLow: surfaceDark,
+          surfaceContainer: surfaceDark,
+          surfaceContainerHigh: surfaceDark,
+          surfaceContainerHighest: surfaceDark,
+          onSurface: textPrimary,
+          onSurfaceVariant: textSecondary,
+        );
+
+    return ThemeData(
+      colorScheme: scheme,
+      useMaterial3: true,
+      scaffoldBackgroundColor: backgroundDark,
+    );
+  }
 
   /// [ThemeData] for [ThemeMode.light] — used when the system chooses light
-  /// or when the user has not overridden to dark.
+  /// or when the user has not overridden to dark. Derives the brand red from
+  /// the same seed so accents match the dark theme.
   static ThemeData get light => ThemeData(
     colorScheme: ColorScheme.fromSeed(
       seedColor: seedColor,

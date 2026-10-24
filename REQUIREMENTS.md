@@ -31,8 +31,10 @@ local/direct-URL release.
 -   **NAV-001:** Provide five tabs: Discover, Reels, Library, Saved,
     Settings.
 -   **NAV-002:** Discover is the default launch screen.
--   **NAV-003:** Discover includes recently added videos, rule-based
-    suggestions, and quick access to Reels.
+-   **NAV-003:** Discover presents a single mode-selected feed
+    (Recommended / Recently Added / Unwatched), a Continue Watching
+    strip when items are eligible, and pinned-first collections, backed
+    by rule-based suggestions. Reels remains its own dedicated tab.
 -   **NAV-004:** Saved contains favorites and custom collections.
 -   **NAV-005:** Settings contains provider connections, folder
     management, playback preferences, downloads, cache, and library
@@ -131,6 +133,19 @@ local/direct-URL release.
 -   **LIB-008:** Removing one duplicate source does not remove other
     copies.
 -   **LIB-009:** Provide useful empty states.
+-   **LIB-010:** Let users pin collections; persist the pin across
+    restarts and order collections deterministically (pinned first by
+    most-recently-pinned, then unpinned newest-first). Pinning changes
+    neither collection membership nor favourites, and removing a pinned
+    collection leaves no stale pin data.
+-   **LIB-011:** Present every video with one shared, app-wide card (used
+    across Library, Discover, Saved, Favorites and search): a 16:9
+    thumbnail with a duration badge and a thin progress overlay when
+    partially watched, the title, and a metadata line combining a
+    relative "added" date with a single source/provider label derived
+    from the item's primary (else earliest) source location. Missing
+    duration, date, or provider data degrade gracefully rather than
+    hiding the item.
 
 ## Duplicate detection and availability
 
@@ -183,6 +198,50 @@ local/direct-URL release.
 -   **DISC-003:** Keep recommendation history local and avoid repeatedly
     showing the same small subset when more videos exist.
 -   **DISC-004:** Provide useful empty/small-library states.
+-   **DISC-005:** Offer Recommended, Recently Added, and Unwatched feed
+    modes as ordering strategies over one shared eligibility/ranking
+    pipeline; changing modes repopulates a single main feed rather than
+    mounting separate feeds.
+-   **DISC-006:** Record recommendation exposure separately from watch
+    progress and playback history; reduce repetition within a session
+    using recent exposures, and never create or alter watch progress as
+    a side effect of showing a suggestion.
+-   **DISC-007:** Page the feed lazily with bounded pages, deduplicate
+    by logical identity, guard against concurrent/racing page requests,
+    preserve selection and dedup state across refreshes, cancel stale
+    in-flight work when the mode changes or the feed resets, show an
+    explicit end-of-feed state instead of spinning, and handle
+    loading/empty/error per section without blocking the primary feed.
+-   **DISC-008:** Offer a filter-chip row (`All`, then saved collections
+    pinned-first, then library tags) that repopulates the single main
+    feed with the selected group's items through the same lazy pagination
+    and exposure pipeline; selecting a chip resets pagination and
+    deduplication the way a mode change does, and the feed-mode control
+    applies only in the `All` state.
+-   **DISC-009:** Surface capped, lazily-loaded horizontal browse shelves
+    — a Recently Added strip plus one row per collection (pinned-first)
+    and one per tag — each bounded in rows and cards, fetched only when
+    the row is built, and hidden entirely when its group is empty,
+    loading, or errored. These shelves complement, and never replace,
+    the mode-driven main feed.
+
+## Continue Watching
+
+-   **CW-001:** Surface videos that are partially watched (progress
+    beyond a start but below the completion threshold) and resume them
+    from persisted progress when selected.
+-   **CW-002:** Order the strip by most-recent activity with a stable
+    tie-break; never include never-watched or completed items.
+-   **CW-003:** Hide the Continue Watching section entirely when nothing
+    is eligible, and degrade it gracefully (no blocking loading/error
+    chrome over the primary feed) while its query resolves or if it
+    fails.
+-   **CW-004:** Reflect source availability on each tile; an unavailable
+    item stays visible with a clear indicator rather than vanishing.
+-   **CW-005:** Render the strip as a bounded horizontal carousel whose
+    tiles share the app-wide card's visual language (thumbnail, progress
+    bar, remaining time), so Continue Watching stays visually consistent
+    with the redesigned feed without duplicating its layout logic.
 
 ## Thumbnails, cache, and downloads
 

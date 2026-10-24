@@ -16,13 +16,17 @@ class VideoThumbnail extends ConsumerWidget {
   const VideoThumbnail({
     super.key,
     required this.item,
-    this.width = 80,
-    this.height = 60,
+    this.width,
+    this.height,
   });
 
   final VideoItemSummary item;
-  final double width;
-  final double height;
+
+  /// Explicit tile size. When both are `null` the thumbnail fills its parent's
+  /// constraints (used by the full-width 16:9 card layout); otherwise it is
+  /// sized to the given box (horizontal rows, Continue Watching tiles).
+  final double? width;
+  final double? height;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -30,25 +34,25 @@ class VideoThumbnail extends ConsumerWidget {
     // ThumbnailService), never an error state.
     final bytes = ref.watch(videoThumbnailProvider(item.id.value)).value;
 
-    return SizedBox(
-      width: width,
-      height: height,
-      child: bytes == null
-          ? placeholder(context)
-          : ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(
-                bytes,
-                key: ValueKey('thumbnail_${item.id.value}'),
-                fit: BoxFit.cover,
-                width: width,
-                height: height,
-                // Decoded previews may legitimately disappear from the
-                // in-memory cache; fall back instead of throwing.
-                errorBuilder: (_, _, _) => placeholder(context),
-              ),
+    final content = bytes == null
+        ? placeholder(context)
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              bytes,
+              key: ValueKey('thumbnail_${item.id.value}'),
+              fit: BoxFit.cover,
+              width: width,
+              height: height,
+              // Decoded previews may legitimately disappear from the
+              // in-memory cache; fall back instead of throwing.
+              errorBuilder: (_, _, _) => placeholder(context),
             ),
-    );
+          );
+
+    return (width == null && height == null)
+        ? SizedBox.expand(child: content)
+        : SizedBox(width: width, height: height, child: content);
   }
 
   /// The neutral fallback tile — the same look the library grid used before

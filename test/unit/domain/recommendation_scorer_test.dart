@@ -126,6 +126,44 @@ void main() {
       // The stale watch is penalised less, so it scores higher.
       expect(scorer.score(longAgo), greaterThan(scorer.score(justWatched)));
     });
+
+    test('a recent-previous-session exposure is penalised, but lighter than '
+        'the current session (disc §18.5)', () {
+      final scorer = _deterministic();
+      final base = RecommendationCandidate(item: _item(id: 'b'));
+      final recentSession = RecommendationCandidate(
+        item: _item(id: 'r'),
+        seenInRecentSession: true,
+      );
+      final currentSession = RecommendationCandidate(
+        item: _item(id: 'c'),
+        recentlyShown: true,
+      );
+
+      // Cross-session memory nudges down but stays above a just-shown item.
+      expect(scorer.score(base), greaterThan(scorer.score(recentSession)));
+      expect(
+        scorer.score(recentSession),
+        greaterThan(scorer.score(currentSession)),
+      );
+    });
+
+    test('the current-session penalty wins when both signals are present '
+        '(disc §18.5)', () {
+      final scorer = _deterministic();
+      final both = RecommendationCandidate(
+        item: _item(id: 'both'),
+        recentlyShown: true,
+        seenInRecentSession: true,
+      );
+      final justShown = RecommendationCandidate(
+        item: _item(id: 'shown'),
+        recentlyShown: true,
+      );
+      // seenInRecentSession is suppressed when recentlyShown already applies, so
+      // the two score identically — no double-counting.
+      expect(scorer.score(both), scorer.score(justShown));
+    });
   });
 
   group('RecommendationScorer ranking (P6-05)', () {

@@ -279,7 +279,15 @@ class _FakeSavedRepository implements VideoRepository {
   @override
   Future<Result<List<CollectionSummary>>> getCollections() async {
     final sorted = [..._collections]
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      ..sort((a, b) {
+        // Pinned-first, matching the real DAO ordering policy (§19.3).
+        if (a.isPinned != b.isPinned) return b.isPinned ? 1 : -1;
+        if (a.isPinned) {
+          final byPinned = (b.pinnedAt ?? 0).compareTo(a.pinnedAt ?? 0);
+          if (byPinned != 0) return byPinned;
+        }
+        return b.createdAt.compareTo(a.createdAt);
+      });
     return Result.ok(
       sorted
           .map(
@@ -289,6 +297,8 @@ class _FakeSavedRepository implements VideoRepository {
               description: c.description,
               itemCount: _membership[c.id]?.length ?? 0,
               createdAt: c.createdAt,
+              isPinned: c.isPinned,
+              pinnedAt: c.pinnedAt,
             ),
           )
           .toList(),
@@ -335,6 +345,8 @@ class _FakeSavedRepository implements VideoRepository {
         description: c.description,
         itemCount: c.itemCount,
         createdAt: c.createdAt,
+        isPinned: c.isPinned,
+        pinnedAt: c.pinnedAt,
       );
     }
     return Result.ok(null);
@@ -344,6 +356,27 @@ class _FakeSavedRepository implements VideoRepository {
   Future<Result<void>> deleteCollection(String id) async {
     _collections.removeWhere((c) => c.id == id);
     _membership.remove(id);
+    return Result.ok(null);
+  }
+
+  @override
+  Future<Result<void>> setCollectionPinned({
+    required String id,
+    required bool pinned,
+  }) async {
+    final index = _collections.indexWhere((c) => c.id == id);
+    if (index >= 0) {
+      final c = _collections[index];
+      _collections[index] = CollectionSummary(
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        itemCount: c.itemCount,
+        createdAt: c.createdAt,
+        isPinned: pinned,
+        pinnedAt: pinned ? DateTime.now().millisecondsSinceEpoch : null,
+      );
+    }
     return Result.ok(null);
   }
 

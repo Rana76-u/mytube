@@ -112,11 +112,11 @@ void main() {
 
     testWidgets('shows the manage-sources entry point only when a handler is '
         'supplied (P7-06)', (tester) async {
-      // No handler → no sources button.
+      // No handler → no overflow menu, so no sources entry.
       await _pump(tester, VideoItemCard(item: _item(), onTap: () {}));
-      expect(find.byKey(const ValueKey('sources_test-id')), findsNothing);
+      expect(find.byKey(const ValueKey('card_menu_test-id')), findsNothing);
 
-      // Handler supplied → button appears and is tappable.
+      // Handler supplied → the ⋮ menu exposes a tappable sources entry.
       var opened = false;
       await _pump(
         tester,
@@ -126,8 +126,58 @@ void main() {
           onManageSources: () => opened = true,
         ),
       );
+      await tester.tap(find.byKey(const ValueKey('card_menu_test-id')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('sources_test-id')));
+      await tester.pumpAndSettle();
       expect(opened, isTrue);
+    });
+
+    testWidgets('labels the source and shows a watched/added date (UI-1)', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        VideoItemCard(
+          item: VideoItemSummary(
+            id: VideoItemId('test-id'),
+            title: 'Test Video',
+            isFavourite: false,
+            watchProgressMs: 0,
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+            primaryProvider: ProviderType.oneDrive,
+          ),
+          onTap: () {},
+        ),
+      );
+
+      final meta = find.byKey(const ValueKey('meta_test-id'));
+      expect(meta, findsOneWidget);
+      expect(
+        tester.widget<Text>(meta).data,
+        allOf(contains('OneDrive'), contains('Added')),
+      );
+    });
+
+    testWidgets('overlays a progress bar for a partially-watched item (UI-1)', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        VideoItemCard(
+          item: VideoItemSummary(
+            id: VideoItemId('test-id'),
+            title: 'Test Video',
+            durationMs: 100000,
+            isFavourite: false,
+            watchProgressMs: 40000,
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+          onTap: () {},
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('progress_test-id')), findsOneWidget);
     });
   });
 }

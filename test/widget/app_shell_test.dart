@@ -8,10 +8,25 @@ import 'package:mytube/app/personal_video_hub_app.dart';
 import 'package:mytube/app/uncaught_app_error.dart';
 import 'package:mytube/core/errors/app_exception.dart';
 import 'package:mytube/core/logging/privacy_safe_logger.dart';
+import 'package:mytube/data/database/app_database.dart';
+import 'package:mytube/data/database/database_provider.dart';
+
+/// Builds the app root inside a [ProviderScope] whose `databaseProvider` is
+/// overridden with the in-memory database. The now-live Discover tab reads the
+/// library on build, which would otherwise open the real Drift store and leak a
+/// zero-duration `driftDatabase` timer into the fake-async zone.
+Widget _app() {
+  final db = AppDatabase.inMemory();
+  addTearDown(db.close);
+  return ProviderScope(
+    overrides: [databaseProvider.overrideWithValue(db)],
+    child: const PersonalVideoHubRoot(),
+  );
+}
 
 void main() {
   testWidgets('app shell renders the five-tab scaffold', (tester) async {
-    await tester.pumpWidget(const PersonalVideoHubApp());
+    await tester.pumpWidget(_app());
 
     expect(find.byType(ProviderScope), findsOneWidget);
     expect(find.byType(MainScaffold), findsOneWidget);
@@ -28,7 +43,11 @@ void main() {
   testWidgets('uncaught errors show a dismissible banner, not secrets', (
     tester,
   ) async {
-    final container = ProviderContainer();
+    final db = AppDatabase.inMemory();
+    addTearDown(db.close);
+    final container = ProviderContainer(
+      overrides: [databaseProvider.overrideWithValue(db)],
+    );
     addTearDown(container.dispose);
 
     await tester.pumpWidget(PersonalVideoHubApp(container: container));

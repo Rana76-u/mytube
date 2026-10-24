@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Size, SizedBox;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/playback/video_player_handle.dart';
 import 'package:mytube/sources/source_adapter.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 /// Manual fake [VideoPlayerPlatform] (house style — no mocking package).
@@ -421,5 +423,79 @@ void main() {
         await subscription.cancel();
       },
     );
+  });
+
+  group('VideoPlayerHandle.buildVideo', () {
+    /// Initializes a handle and drives the engine's `initialized` event with
+    /// the given natural [size] / [rotationCorrection], returning the handle.
+    Future<VideoPlayerHandle> initializedHandle({
+      required Size size,
+      int rotationCorrection = 0,
+    }) async {
+      final handle = VideoPlayerHandle(
+        source: _source('https://example.com/v.mp4'),
+      );
+      addTearDown(handle.dispose);
+
+      final initializing = handle.initialize();
+      await pumpEventQueue();
+      platform.emit(
+        0,
+        VideoEvent(
+          eventType: VideoEventType.initialized,
+          duration: const Duration(seconds: 10),
+          size: size,
+          rotationCorrection: rotationCorrection,
+        ),
+      );
+      await initializing;
+      return handle;
+    }
+
+    test('returns null before the engine is initialized', () {
+      final handle = VideoPlayerHandle(
+        source: _source('https://example.com/v.mp4'),
+      );
+      addTearDown(handle.dispose);
+
+      expect(handle.buildVideo(), isNull);
+    });
+
+    test(
+      'anchors the texture to the natural size so layout stays bounded',
+      () async {
+        final handle = await initializedHandle(size: const Size(1920, 1080));
+
+        final widget = handle.buildVideo();
+        // A FittedBox lays its child out with unbounded constraints; the anchored
+        // SizedBox is what keeps the texture from ever taking an infinite size
+        // (the Reels-open layout crash).
+        expect(widget, isA<SizedBox>());
+        final box = widget! as SizedBox;
+        expect(box.width, 1920);
+        expect(box.height, 1080);
+        expect(box.child, isA<VideoPlayer>());
+      },
+    );
+
+    test(
+      'swaps the box for 90°/270° rotation to match the internal RotatedBox',
+      () async {
+        final handle = await initializedHandle(
+          size: const Size(1920, 1080),
+          rotationCorrection: 90,
+        );
+
+        final box = handle.buildVideo()! as SizedBox;
+        expect(box.width, 1080);
+        expect(box.height, 1920);
+      },
+    );
+
+    test('returns null when the engine reports an empty size', () async {
+      final handle = await initializedHandle(size: Size.zero);
+
+      expect(handle.buildVideo(), isNull);
+    });
   });
 }
