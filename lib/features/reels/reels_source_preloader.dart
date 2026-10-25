@@ -53,6 +53,12 @@ class ReelsSourcePreloader {
   /// when nothing warm exists (the caller then resolves on the playback path).
   PlayableSource? take(VideoItemSummary item) => _cache.remove(item.id.value);
 
+  /// Returns a previously-preloaded source for [item] **without** removing it,
+  /// or `null` when nothing warm exists. Lets a host re-warm an engine (for
+  /// example after the app resumes from background, P13-05) while leaving the
+  /// cache intact for the upcoming swipe.
+  PlayableSource? peek(VideoItemSummary item) => _cache[item.id.value];
+
   /// Starts warming [item] in the background. A no-op when it is already cached
   /// or already being resolved, so repeated settles never double up work.
   void preload(VideoItemSummary item) {

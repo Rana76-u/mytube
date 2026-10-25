@@ -1175,11 +1175,90 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
     lock-screen/headset transport, Doze-resilient background audio) is still
     unverified until the P13-06 physical-device pass; the notification uses a
     system `ic_media_play` small icon and `ic_delete` stop glyph as placeholders.)
--   [ ] **P13-04** Implement PiP where supported. --- Todo
--   [ ] **P13-05** Handle lifecycle/resume and resource disposal. ---
-    Todo
+-   [x] **P13-04** Implement PiP where supported. --- Done
+    (App-owned `PipBridge` platform interface + `PipBridgeImpl` bidirectional
+    MethodChannel (`com.example.mytube/pip`) to a new native `PipPlugin.kt`
+    (registered in `MainActivity`, `ActivityAware`) plus `android:supportsPictureInPicture`
+    on the activity. PiP is feature-detected — API 26+ *and*
+    `FEATURE_PICTURE_IN_PICTURE` — so `isSupported()` is false on every other
+    host and the control never appears as dead weight; API 24–25 no-op safely
+    (NFR-006). The app-owned `PipCoordinator` owns policy only (no Android type
+    reaches it): it publishes `supported` / `inPip` as `ValueListenable<bool>`,
+    mirrors native enter/leave onto `inPip`, keeps auto-enter-on-leave enabled
+    (Android 12 `setAutoEnterEnabled`, API 31+) only while a live video session
+    (`buffering`/`playing`/`paused`) is on screen and drops it on
+    `idle`/`completed`/`error`, and derives the float window's aspect ratio from
+    `PlaybackState.videoSize` through the pure `pipAspectFor` helper — clamped
+    into Android's legal `[1:2.39, 2.39:1]` band and reduced to lowest terms
+    (`1920×1080 → 16:9`). Because Android PiP captures the whole Flutter window,
+    the Reels and player surfaces read `inPip` and hide overlay chrome while
+    floating (app bar + controls on the player; the controller layer + caption on
+    Reels); widgets call `PipCoordinator.enter()` and never touch the bridge
+    (PLAY-013 no-op degradation kept). `MainScaffold` keeps the single coordinator
+    alive for the shell's lifetime. `setAutoEnterEnabled` lives on
+    `PictureInPictureParams.Builder`, so `PipPlugin` tracks aspect + the
+    auto-enter flag together and re-applies both via one `setPictureInPictureParams`
+    (surfaced by the native build — `Activity.setAutoEnterEnabled` does not exist).
+    24 new tests: `pip_coordinator_test.dart` (support publish, mode mirror,
+    auto-enter live↔idle toggle + dedup, aspect derivation, unsupported no-op,
+    dispose/release) and `pip_bridge_impl_test.dart` (pure `pipAspectFor`
+    portrait/landscape/square/clamp/empty, command channel, missing-plugin +
+    PlatformException tolerance, `onPipModeChanged` delivery); 3 widget tests in
+    `video_player_pip_test.dart` (offer control only when supported, hide
+    overlay chrome while floating). `dart format` + `flutter analyze lib test`
+    clean; full `flutter test` suite passes 854 tests; `flutter build apk --debug`
+    compiles the new Kotlin + manifest into `app-debug.apk`. Honest limitation:
+    real on-device PiP transitions (Home-gesture auto-enter, drag/resize,
+    on-screen float animation) are unverified until the P13-06 physical-device
+    pass; auto-enter requires API 31+, lower levels shrink only via the explicit
+    control.)
+-   [x] **P13-05** Handle lifecycle/resume and resource disposal. --- Done
+    (Two real gaps behind PLAY-009/PLAY-012/PLAY-013, both closed at the app
+    lifecycle boundary without new bridges. (1) *Progress durability on
+    backgrounding:* background audio (P13-02) keeps the playback screen alive,
+    so a position still inside its throttle window was the only record and could
+    be lost if Android reclaimed the process. `WatchProgressService` now tracks a
+    per-item `dirty` flag (set on every reported tick, cleared only by a
+    successful write) exposing `hasPending`, plus a best-effort `flushAll()` that
+    persists just the dirty items and returns how many were written (a failing
+    store degrades quietly, never throws). `MainScaffold`, already the app-wide
+    `WidgetsBindingObserver`, forwards `didChangeAppLifecycleState` to it and
+    flushes on any non-`resumed` state when `hasPending` — write-free when
+    nothing was watched, skipped on resume. (2) *Reels spare decoder:* the tab
+    is kept alive by the shell `IndexedStack`, so a tab-leave release never fired
+    when only the app backgrounded, leaving the idle next-reel engine holding a
+    codec off-screen. `_ReelsScreenState` now registers its own observer:
+    `dropPrewarm()` on `paused`/`hidden` (the live reel deliberately keeps
+    playing) and re-arms on `resumed` via a new non-destructive
+    `ReelsSourcePreloader.peek()` so the cached source feeds `prewarm` without a
+    re-resolve and the upcoming swipe still finds it; `inactive`/`detached` are
+    no-ops to avoid decoder churn on an app-switcher peek. Dart-only, so no
+    native/manifest change and no APK build. 6 new tests: bulk-flush group in
+    `watch_progress_service_test.dart` (`hasPending` transitions, `flushAll`
+    count/skip/clear + swallowed save failure), a shell-policy widget test in
+    `app_shell_test.dart` (flush on `paused`, skip on `hidden` with nothing
+    pending, never on `resumed`), and a Reels lifecycle widget test in
+    `reels_screen_test.dart` (spare disposed on background while the live reel
+    survives; fresh warm engine on resume with no extra resolve). Two existing
+    `WatchProgressService` fakes gained the new members. `dart format` +
+    `flutter analyze lib test` clean; full `flutter test` suite passes 860 tests.
+    Honest limitation: actual OS process-reclaim and mid-background codec loss
+    are unverified until the P13-06 physical-device pass — the code guarantees
+    the flush and release/re-arm fire on the lifecycle callbacks, not that Android
+    reclaims identically across OEMs.)
 -   [ ] **P13-06** Test on physical devices and supported Android
-    versions. --- Todo
+    versions. --- Blocked: owner device run required
+    (Preparation complete. `docs/device_testing_p13.md` provides a
+    37-scenario manual checklist covering every P13-01→05 device-only behaviour
+    (audio focus duck/pause/resume against real players, background audio
+    persistence under Doze, notification/lock-screen transport, PiP
+    auto-enter/explicit/aspect/unsupported, watch-progress survive-reclaim,
+    spare-decoder release/re-arm/leak-check). The debug APK (`app-debug.apk`)
+    compiles and includes all Phase 13 Kotlin (AudioFocusPlugin,
+    MediaSessionPlugin, MediaPlaybackService, PipPlugin, manifest).
+    **Completion criterion:** all scenarios pass on CPH2719 / Android 16
+    (API 36) plus at least one lower-API check for PiP degradation; results
+    recorded per-scenario. Awaiting owner physical-device run.)
 
 ## Phase 14 --- Backup and restore
 

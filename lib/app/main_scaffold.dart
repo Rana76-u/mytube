@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/domain/services/watch_progress_service.dart';
+import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 import 'package:mytube/features/discover/discover_screen.dart';
 import 'package:mytube/features/library/library_screen.dart';
 import 'package:mytube/features/reels/reels_screen.dart';
@@ -53,12 +57,25 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   /// coordinator owns all notification rendering and transport routing.
   late final MediaSessionCoordinator _mediaSession;
 
+  /// Throttled watch-progress store (P5-08). The shell holds it only so
+  /// [didChangeAppLifecycleState] can flush any pending position when the app
+  /// leaves the foreground (P13-05, PLAY-012): background audio (P13-02) keeps
+  /// the playback screen alive while playing, so its per-tick writes are the
+  /// only progress record and a throttle-window position would be lost if the OS
+  /// reclaims the process before the next save.
+  late final WatchProgressService _watchProgress;
+
   @override
   void initState() {
     super.initState();
     _audioFocus = ref.read(audioFocusCoordinatorProvider);
     _mediaSession = ref.read(mediaSessionCoordinatorProvider);
     _mediaSession.setNowPlaying(ref.read(nowPlayingProvider));
+    _watchProgress = ref.read(watchProgressServiceProvider);
+    // Instantiate the app-wide PiP coordinator once so its auto-enter policy and
+    // mode subscription live for the shell's lifetime; the Reels / player routes
+    // read its `inPip` / `supported` listenables through the same provider.
+    ref.read(pipCoordinatorProvider);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -73,6 +90,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     // Route lifecycle to playback focus/background policy (P13-02). Reels and
     // the player screen handle their own tab visibility separately.
     _audioFocus.handleLifecycle(state);
+    // Persist any in-flight watch progress the moment the app leaves the
+    // foreground, so a position still inside its throttle window survives a
+    // process reclaim (P13-05, PLAY-012). `hasPending` keeps this write-free
+    // when nothing was watched, and the guard is skipped on `resumed`.
+    if (state != AppLifecycleState.resumed && _watchProgress.hasPending) {
+      unawaited(_watchProgress.flushAll());
+    }
   }
 
   static const List<_TabItem> _tabs = [

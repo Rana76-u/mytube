@@ -6,6 +6,8 @@ import 'package:mytube/platform/media_session_bridge.dart';
 import 'package:mytube/platform/media_session_bridge_impl.dart';
 import 'package:mytube/platform/media_store_bridge.dart';
 import 'package:mytube/platform/media_store_bridge_impl.dart';
+import 'package:mytube/platform/pip_bridge.dart';
+import 'package:mytube/platform/pip_bridge_impl.dart';
 import 'package:mytube/platform/remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/saf_bridge.dart';
 import 'package:mytube/platform/saf_bridge_impl.dart';
@@ -59,3 +61,11 @@ final audioFocusBridgeProvider = Provider<AudioFocusBridge>(
 final mediaSessionBridgeProvider = Provider<MediaSessionBridge>(
   (ref) => MediaSessionBridgeImpl(),
 );
+
+/// Riverpod provider for the Android Picture-in-Picture bridge (P13-04).
+///
+/// The [PipBridgeImpl] degrades to a safe no-op and reports `isSupported` false
+/// where the native plugin is absent or the device lacks PiP, so unsupported
+/// hosts never show a dead control or crash (NFR-006, PLAY-013). Override with
+/// a fake bridge to drive enter / mode changes in tests.
+final pipBridgeProvider = Provider<PipBridge>((ref) => PipBridgeImpl());

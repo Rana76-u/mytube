@@ -548,3 +548,94 @@ background audio P13-02 deferred. The cost is two extra moving parts (a service
 plus a static Dart-relay inside `MediaSessionPlugin`) and the accepted
 limitation that next/previous are intentionally absent until the queue owns the
 session; real on-device behavior is only confirmed by the P13-06 pass.
+
+## ADR-010 --- Feature-detected PiP behind an app-owned coordinator
+
+**Context.** P13-04 must shrink the video into Android Picture-in-Picture "where
+supported" (PLAY-010). PiP needs API 26+, but `minSdk` stays 24 so Android 7–7.1
+must keep running and no-op safely (NFR-006). Auto-enter-on-Home is a newer
+API 31 capability, and the aspect ratio handed to `setAspectRatio` has to sit
+inside Android's `[1:2.39, 2.39:1]` band in lowest terms or the call throws. PiP
+captures the whole Flutter window, so any overlay chrome drawn in Dart would
+float with it unless the UI hides it. Widgets must never call a platform bridge
+(`AGENTS.md`).
+
+**Decision.** Keep PiP behind a narrow `PipBridge` / `PipCoordinator` pair — the
+same split used for audio focus (P13-01) and media session (P13-03). The bridge
+feature-detects (`isSupported()` = API 26+ *and* `FEATURE_PICTURE_IN_PICTURE`),
+so an unsupported or non-Android host reports `false` and the control simply
+never renders — no dead button, no crash. The app-owned coordinator holds the
+policy: it publishes `supported` / `inPip` as `ValueListenable<bool>`, mirrors
+native enter/leave callbacks onto `inPip`, derives the aspect ratio through a
+pure top-level `pipAspectFor(Size?)` (clamp to the legal band, reduce by gcd) so
+the math is unit-testable without a channel, and keeps auto-enter enabled only
+while a *live* session (`buffering`/`playing`/`paused`) is on screen — dropped on
+`idle`/`completed`/`error` so a Home press then leaves the app rather than
+floating nothing. Playback screens read `inPip` and remove overlay chrome while
+floating; they trigger PiP through `PipCoordinator.enter()`, never the bridge.
+`PipPlugin` tracks aspect and the auto-enter flag together and re-applies both
+with a single `setPictureInPictureParams`, because `setAutoEnterEnabled` lives on
+`PictureInPictureParams.Builder` (API 31+), not on `Activity`.
+
+**Alternatives considered.** Gating on `Build.VERSION.SDK_INT` alone (rejected:
+some API 26+ ROMs omit the PiP system feature, so the control would appear and
+then fail). Hiding chrome natively in the plugin (rejected: Flutter owns the
+window; the only way to affect its content is from Dart). Putting the aspect
+math in the coordinator inline (rejected: a pure top-level helper is directly
+testable). Auto-enter only, no explicit control (rejected: leaves API 26–30 users
+unable to enter PiP at all, since `setAutoEnterEnabled` is API 31+).
+
+**Consequences.** A single safe path across API levels 24–36: explicit
+`enter()` works on every supported device, Home-gesture auto-enter lights up on
+12+, and 24–25 no-op. The cost is a `ValueListenable` the surfaces must observe
+and one static Dart-relay in `PipPlugin` (fed from `MainActivity`
+`onPictureInPictureModeChanged`, since a plugin cannot observe the mode change
+itself). Real PiP transitions — drag, resize, the float animation — remain
+unverified until the P13-06 device pass.
+
+## ADR-011 --- Flush progress and release the spare Reels decoder at the app-background boundary
+
+**Context.** P13-05 must make lifecycle transitions graceful and resume-safe
+(PLAY-009/PLAY-012/PLAY-013) without leaking resources. Two behaviours collided
+with earlier decisions. Background audio (P13-02) deliberately keeps the playback
+screen alive on `paused`/`hidden`, so per-tick watch progress is the *only*
+durable record — and a position still inside `WatchProgressService`'s throttle
+window would be lost if Android reclaimed the process. Separately, the Reels tab
+is kept mounted by the shell `IndexedStack`, so its existing "release the spare
+next-reel engine on tab leave" path (P7-11) never fires when the *app*
+backgrounds while Reels stays the current tab — an idle decoder would be held
+off-screen, and Android can reclaim background codecs regardless. `AGENTS.md`
+forbids widgets touching persistence directly and wants controllers/subscriptions
+disposed on lifecycle changes.
+
+**Decision.** Act at the app lifecycle boundary through the seams that already
+exist, adding no new bridge. `WatchProgressService` grows a per-item `dirty`
+flag (set by every `reportPosition`, cleared only by a successful write) exposed
+as `hasPending`, plus a best-effort `flushAll()` that writes just the dirty items
+and returns the count — a closed store degrades quietly rather than throwing.
+`MainScaffold`, already the app-wide `WidgetsBindingObserver`, forwards
+`didChangeAppLifecycleState` and calls `flushAll()` on any non-`resumed` state
+when `hasPending`, mirroring how it already routes audio focus; the guard makes
+the boundary write-free when nothing was watched. Reels registers its own
+observer (legitimate because `IndexedStack` keeps it mounted) and calls
+`dropPrewarm()` on `paused`/`hidden`, then re-arms via a new non-destructive
+`ReelsSourcePreloader.peek()` → `prewarm` on `resumed`, so the still-cached
+source feeds the fresh engine without a re-resolve and the upcoming swipe keeps
+finding it. `inactive` and `detached` are no-ops.
+
+**Alternatives considered.** Flush on every tick (rejected: defeats the throttle
+and hammers SQLite). A periodic app-wide timer flush (rejected: extra lifecycle
+surface, still loses the final window on an abrupt reclaim). Have the player /
+Reels screens each flush (rejected: duplicates the policy in every screen and
+puts persistence in widgets — the shell already owns the app-wide observer).
+Reusing `take()` instead of `peek()` for the resume re-warm (rejected: it would
+deplete the cache so the next swipe re-resolves). Acting on `inactive` too
+(rejected: an app-switcher peek or transient dialog would churn the decoder).
+
+**Consequences.** Progress survives backgrounding with at most one extra write
+per boundary and only when something is pending; the spare decoder is never held
+off-screen and gapless swipe resumes cleanly. The cost is a second
+`WidgetsBindingObserver` (Reels) to keep in mind when reasoning about playback
+lifecycle. This is Dart-only — no native change — and guarantees the callbacks
+fire, not that Android reclaims identically across OEMs; the real reclaim /
+codec-loss behaviour is verified in the P13-06 device pass.

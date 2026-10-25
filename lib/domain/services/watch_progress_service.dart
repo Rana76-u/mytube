@@ -69,6 +69,10 @@ class WatchProgressService {
   }) async {
     final state = _states.putIfAbsent(id.value, _ProgressState.new);
     state.lastPositionMs = position.inMilliseconds;
+    // Remember that the newest position has not reached storage, so flushAll
+    // (app-background boundary, P13-05) can tell a pending tick from an item
+    // that is already saved exactly.
+    state.dirty = true;
 
     final now = _clock();
     final lastSaved = state.lastSavedAt;
@@ -87,6 +91,27 @@ class WatchProgressService {
     return _write(id, state, _clock());
   }
 
+  /// Whether any tracked item holds a position that has not been written since
+  /// it was last reported. Lets a lifecycle observer skip [flushAll] entirely
+  /// (no database round-trips) when nothing was watched.
+  bool get hasPending => _states.values.any((s) => s.dirty);
+
+  /// Flushes every tracked item, for the app-background lifecycle boundary
+  /// (P13-05): background audio (P13-02) keeps a screen alive while playing,
+  /// so the OS can reclaim the process with position writes still sitting
+  /// inside their throttle window. Returns the number of items written.
+  Future<int> flushAll() async {
+    var written = 0;
+    // Snapshot the ids: each await below hands control back, and a concurrent
+    // report/forget could mutate the map mid-flush.
+    for (final id in _states.keys.toList()) {
+      final state = _states[id];
+      if (state == null || !state.dirty) continue;
+      if (await flush(VideoItemId(id))) written++;
+    }
+    return written;
+  }
+
   /// Drops the in-memory state for [id] without saving — used when playback of
   /// an item ends and its progress is no longer relevant (e.g. the user seeks
   /// away or the screen disposes).
@@ -101,6 +126,9 @@ class WatchProgressService {
     switch (result) {
       case Ok():
         state.lastSavedAt = at;
+        // The write persisted exactly `lastPositionMs`, so nothing reported so
+        // far is pending any more; a later report re-dirties the state.
+        state.dirty = false;
         return true;
       case Err(:final error):
         debugPrint(
@@ -121,4 +149,8 @@ class WatchProgressService {
 class _ProgressState {
   int lastPositionMs = 0;
   DateTime? lastSavedAt;
+
+  /// True while [lastPositionMs] has not been written to storage yet. Set by
+  /// `reportPosition`, cleared by a successful `_write` of that same position.
+  bool dirty = false;
 }

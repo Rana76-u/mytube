@@ -123,6 +123,12 @@ class _FakeWatchProgress implements WatchProgressService {
   }
 
   @override
+  bool get hasPending => false;
+
+  @override
+  Future<int> flushAll() async => 0;
+
+  @override
   void forget(VideoItemId id) {}
 }
 

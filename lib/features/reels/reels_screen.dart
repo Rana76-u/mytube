@@ -20,6 +20,7 @@ import 'package:mytube/features/reels/reels_queue_controller.dart';
 import 'package:mytube/features/reels/reels_source_preloader.dart';
 import 'package:mytube/features/reels/reels_video_surface.dart';
 import 'package:mytube/playback/now_playing.dart';
+import 'package:mytube/playback/pip_coordinator.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/playback_provider.dart';
 import 'package:mytube/sources/source_adapter.dart';
@@ -74,7 +75,8 @@ class ReelsScreen extends ConsumerStatefulWidget {
   ConsumerState<ReelsScreen> createState() => _ReelsScreenState();
 }
 
-class _ReelsScreenState extends ConsumerState<ReelsScreen> {
+class _ReelsScreenState extends ConsumerState<ReelsScreen>
+    with WidgetsBindingObserver {
   final PageController _pageController = PageController();
 
   /// The app-owned controller, captured once while mounted. `dispose()` cannot
@@ -86,6 +88,17 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
   /// (PLAY-008). Also created in `initState` so `dispose()` can clear it without
   /// touching `ref`.
   late final ReelsSourcePreloader _preloader;
+
+  /// App-owned PiP coordinator (P13-04, PLAY-010). Captured in `initState` so
+  /// `dispose()` can detach its listeners without touching `ref`.
+  late final PipCoordinator _pip;
+
+  /// Mirrors [_pip.inPip] / [_pip.supported] into widget state so the reel hides
+  /// its overlay chrome while floating and only offers a PiP control where the
+  /// host supports it. A [ValueNotifier] fires only on an actual change, so an
+  /// unsupported host leaves these false and the existing tests are unaffected.
+  bool _inPip = false;
+  bool _pipSupported = false;
 
   /// Bumped on every navigation/dispose so an in-flight source resolution that
   /// finishes after a swipe or teardown is discarded instead of playing.
@@ -199,6 +212,10 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
   void initState() {
     super.initState();
     _controller = ref.read(playbackControllerProvider);
+    _pip = ref.read(pipCoordinatorProvider);
+    _pip.inPip.addListener(_onPipChanged);
+    _pip.supported.addListener(_onPipChanged);
+    _onPipChanged();
     _coordinator = ReelGestureCoordinator(
       config: const ReelGestureConfig(),
       onAction: _onGestureAction,
@@ -214,6 +231,10 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
       // so schedule the first autoplay once the frame is up.
       WidgetsBinding.instance.addPostFrameCallback((_) => _syncPlayback());
     }
+    // Observe app lifecycle in its own right (P13-05): the Reels tab is kept
+    // alive by the shell's IndexedStack, so it can release / re-arm its spare
+    // decoder on background / resume without the shell knowing about playback.
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -233,16 +254,74 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
     // never keeps playing under another tab. `ref` is unsafe here (the element
     // is already deactivated), so the captured references are used directly.
     _playToken++;
+    WidgetsBinding.instance.removeObserver(this);
     _controlsHideTimer?.cancel();
     _clearGestureUi();
     _coordinator.dispose();
     _controller.state.removeListener(_syncGestureContext);
+    _pip.inPip.removeListener(_onPipChanged);
+    _pip.supported.removeListener(_onPipChanged);
     _preloader.clear();
     _controller.setLooping(false);
     _controller.stop();
     unawaited(_controller.dropPrewarm());
     _pageController.dispose();
     super.dispose();
+  }
+
+  /// Mirrors the coordinator's PiP listenables into widget state. Called from
+  /// `initState` for the initial values and on every subsequent change so the
+  /// reel can hide chrome while floating and gate the PiP control on support.
+  void _onPipChanged() {
+    if (!mounted) return;
+    setState(() {
+      _inPip = _pip.inPip.value;
+      _pipSupported = _pip.supported.value;
+    });
+  }
+
+  // --- App lifecycle: resource disposal + resume parity (P13-05) ------------
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The live reel deliberately keeps playing into the background (P13-02
+    // background audio), but the single idle prewarmed *next-reel engine* is a
+    // spare decoder that should not be held while the app is off-screen —
+    // Android can reclaim background decoders anyway. Releasing it on the way
+    // out frees the codec, and re-arming it on resume restores the gapless
+    // swipe the user expects next (PLAY-012). `inactive` (app-switcher peek /
+    // transient dialog) and `detached` (process ending) stay no-ops so a quick
+    // glance never churns the decoder.
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        unawaited(_controller.dropPrewarm());
+      case AppLifecycleState.resumed:
+        _rewarmNextEngine();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  /// Re-opens a background engine for the reel after the current one when the
+  /// app returns to the foreground after [didChangeAppLifecycleState] released
+  /// it. The resolved source is usually still cached, so no re-resolve is
+  /// needed; a missing entry just restarts the warm, whose `onWarmed` callback
+  /// re-prewarms the engine when it lands.
+  void _rewarmNextEngine() {
+    if (!mounted || !widget.active) return;
+    final queue = ref.read(reelsQueueProvider).value;
+    if (queue == null || queue.isEmpty) return;
+    final nextIndex = queue.index + 1;
+    if (nextIndex >= queue.length) return;
+    final next = queue.items[nextIndex];
+    final cached = _preloader.peek(next);
+    if (cached != null) {
+      unawaited(_controller.prewarm(cached));
+    } else {
+      _preloader.preload(next);
+    }
   }
 
   /// Mirrors a settled swipe into the queue state.
@@ -775,10 +854,14 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
               onPointerUp: _onPointerUp,
               onPointerCancel: _onPointerCancel,
               error: isCurrent ? _reelError : null,
+              hideChrome: _inPip,
             );
           },
         ),
-        if (widget.active && queue.isNotEmpty) ..._buildControllerLayer(),
+        // The controller / feedback overlay is chrome: it must vanish while
+        // floating so the PiP window shows only the video (PLAY-010).
+        if (widget.active && !_inPip && queue.isNotEmpty)
+          ..._buildControllerLayer(),
       ],
     );
   }
@@ -956,6 +1039,18 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen> {
                 onPressed: _toggleControls,
                 icon: const Icon(Icons.tune, color: Colors.white),
               ),
+              // PiP is offered only where the host supports it (feature-detected
+              // through the coordinator), so no dead button appears otherwise.
+              if (_pipSupported)
+                IconButton(
+                  key: const ValueKey('reels_pip_button'),
+                  tooltip: 'Picture-in-picture',
+                  onPressed: () => unawaited(_pip.enter()),
+                  icon: const Icon(
+                    Icons.picture_in_picture_alt,
+                    color: Colors.white,
+                  ),
+                ),
             ],
           ),
         ),
@@ -990,6 +1085,7 @@ class _ReelPage extends StatelessWidget {
     required this.onPointerUp,
     required this.onPointerCancel,
     this.error,
+    this.hideChrome = false,
   });
 
   final VideoItemSummary item;
@@ -1014,6 +1110,11 @@ class _ReelPage extends StatelessWidget {
 
   final String? error;
 
+  /// Hides the title caption while the app floats in a PiP window (P13-04,
+  /// PLAY-010): the OS captures the whole Flutter window, so overlay chrome
+  /// must be removed in Dart to leave only the video.
+  final bool hideChrome;
+
   @override
   Widget build(BuildContext context) {
     final caption = _Caption(
@@ -1035,8 +1136,10 @@ class _ReelPage extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             ReelsVideoSurface(item: item, fitOverride: fitOverride),
-            // Keep the title/position readable over the playing video.
-            Positioned(left: 0, right: 0, bottom: 0, child: caption),
+            // Keep the title/position readable over the playing video, unless
+            // floating in PiP where the caption is chrome that must hide.
+            if (!hideChrome)
+              Positioned(left: 0, right: 0, bottom: 0, child: caption),
           ],
         ),
       );

@@ -160,29 +160,62 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen> {
     // flush at state boundaries (pause/error) so a short watch persists.
     final controller = ref.watch(playbackControllerProvider);
     _attachProgressListener(controller);
+    final pip = ref.watch(pipCoordinatorProvider);
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(
-          widget.item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // The surface expands into the whole area itself, so a clip is
-            // scaled to the largest aspect-true size the screen allows; Fit
-            // (the default) still letterboxes rather than cropping.
-            const Expanded(child: VideoSurface()),
-            // Error text and the gated Retry affordance already live inside
-            // PlaybackControls (P4-07/AVAIL-002/PLAY-009) — no duplication.
-            const PlaybackControls(),
-          ],
-        ),
-      ),
+    // Android PiP captures the whole Flutter window, so every overlay chrome —
+    // the app bar and the playback controls — must disappear while floating
+    // (PLAY-010). A chrome-less body leaves only the video for the float window.
+    return ValueListenableBuilder<bool>(
+      valueListenable: pip.inPip,
+      builder: (context, inPip, _) {
+        if (inPip) {
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: SafeArea(child: VideoSurface()),
+          );
+        }
+        return Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            title: Text(
+              widget.item.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            actions: [
+              // Offered only where the host supports PiP (feature-detected via
+              // the coordinator, so no dead button on unsupported devices).
+              ValueListenableBuilder<bool>(
+                valueListenable: pip.supported,
+                builder: (context, supported, _) {
+                  if (!supported) {
+                    return const SizedBox.shrink();
+                  }
+                  return IconButton(
+                    key: const ValueKey('player_pip_button'),
+                    tooltip: 'Picture-in-picture',
+                    onPressed: () => unawaited(pip.enter()),
+                    icon: const Icon(Icons.picture_in_picture_alt),
+                  );
+                },
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: Column(
+              children: [
+                // The surface expands into the whole area itself, so a clip is
+                // scaled to the largest aspect-true size the screen allows; Fit
+                // (the default) still letterboxes rather than cropping.
+                const Expanded(child: VideoSurface()),
+                // Error text and the gated Retry affordance already live inside
+                // PlaybackControls (P4-07/AVAIL-002/PLAY-009) — no duplication.
+                const PlaybackControls(),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

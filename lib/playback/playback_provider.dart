@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/playback/app_playback_controller.dart';
 import 'package:mytube/playback/audio_focus_coordinator.dart';
 import 'package:mytube/playback/media_session_coordinator.dart';
+import 'package:mytube/playback/pip_coordinator.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/playback/video_player_handle.dart';
@@ -59,6 +60,22 @@ final mediaSessionCoordinatorProvider = Provider<MediaSessionCoordinator>((
   final coordinator = MediaSessionCoordinator(
     controller: ref.watch(playbackControllerProvider),
     bridge: ref.watch(mediaSessionBridgeProvider),
+  );
+  ref.onDispose(coordinator.dispose);
+  return coordinator;
+});
+
+/// App-owned Picture-in-Picture coordinator (P13-04, PLAY-010).
+///
+/// Drives Android PiP from the shared [PlaybackController]: it publishes whether
+/// the host supports PiP, mirrors enter / leave transitions so surfaces can hide
+/// overlay chrome, and keeps auto-enter-on-leave enabled only while a live video
+/// session is on screen. One instance lives for the app's lifetime; the app shell
+/// keeps it alive. Tests override [pipBridgeProvider] with a fake bridge.
+final pipCoordinatorProvider = Provider<PipCoordinator>((ref) {
+  final coordinator = PipCoordinator(
+    controller: ref.watch(playbackControllerProvider),
+    bridge: ref.watch(pipBridgeProvider),
   );
   ref.onDispose(coordinator.dispose);
   return coordinator;

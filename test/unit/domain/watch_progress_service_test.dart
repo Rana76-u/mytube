@@ -184,4 +184,117 @@ void main() {
       },
     );
   });
+
+  group('WatchProgressService bulk flush (P13-05, PLAY-012)', () {
+    test('hasPending tracks unsaved positions across report / flush', () async {
+      await seedItem('p1');
+      final now = DateTime.fromMillisecondsSinceEpoch(createdAt);
+      final service = WatchProgressService(
+        repository: repository,
+        throttle: const Duration(seconds: 5),
+        clock: () => now,
+      );
+
+      // Nothing watched yet → nothing pending, so a background flush is skipped.
+      expect(service.hasPending, isFalse);
+
+      // The first report saves immediately, clearing the dirty flag.
+      await service.reportPosition(
+        id: VideoItemId('p1'),
+        position: const Duration(seconds: 1),
+      );
+      expect(service.hasPending, isFalse);
+
+      // A throttled report stays in memory only → pending.
+      expect(
+        await service.reportPosition(
+          id: VideoItemId('p1'),
+          position: const Duration(seconds: 3),
+        ),
+        isFalse,
+      );
+      expect(service.hasPending, isTrue);
+
+      // flush() persists the pending position and clears the flag.
+      await service.flush(VideoItemId('p1'));
+      expect(service.hasPending, isFalse);
+    });
+
+    test('flushAll writes every dirty item and returns the count', () async {
+      await seedItem('p2');
+      await seedItem('p3');
+      var now = DateTime.fromMillisecondsSinceEpoch(createdAt);
+      final service = WatchProgressService(
+        repository: repository,
+        throttle: const Duration(seconds: 5),
+        clock: () => now,
+      );
+
+      // p2: first report saves (1s), second is throttled → pending at 30s.
+      await service.reportPosition(
+        id: VideoItemId('p2'),
+        position: const Duration(seconds: 1),
+      );
+      await service.reportPosition(
+        id: VideoItemId('p2'),
+        position: const Duration(seconds: 30),
+      );
+      // p3: never reported → not tracked, must not be written.
+      expect(service.hasPending, isTrue);
+
+      // Advance the clock so flushAll's own writes would not be blocked (they
+      // ignore the window anyway, but this keeps lastSavedAt realistic).
+      now = now.add(const Duration(seconds: 1));
+      expect(await service.flushAll(), equals(1));
+      expect(service.hasPending, isFalse);
+
+      // The newest in-memory position reached storage, not the earlier one.
+      expect(
+        await service.resumePosition(VideoItemId('p2')),
+        equals(const Duration(seconds: 30)),
+      );
+      // p3 was never watched → still has no stored progress.
+      expect(await service.resumePosition(VideoItemId('p3')), isNull);
+    });
+
+    test('flushAll is a no-op (returns 0) when nothing is pending', () async {
+      await seedItem('p4');
+      final service = WatchProgressService(repository: repository);
+
+      await service.reportPosition(
+        id: VideoItemId('p4'),
+        position: const Duration(seconds: 2),
+      );
+      // The first report already saved, so nothing remains dirty.
+      expect(service.hasPending, isFalse);
+      expect(await service.flushAll(), equals(0));
+    });
+
+    test('flushAll swallows a save failure instead of throwing', () async {
+      await seedItem('p5');
+      final now = DateTime.fromMillisecondsSinceEpoch(createdAt);
+      final service = WatchProgressService(
+        repository: repository,
+        throttle: const Duration(seconds: 5),
+        clock: () => now,
+      );
+
+      // First report saves; second is throttled and stays pending (dirty).
+      await service.reportPosition(
+        id: VideoItemId('p5'),
+        position: const Duration(seconds: 1),
+      );
+      await service.reportPosition(
+        id: VideoItemId('p5'),
+        position: const Duration(seconds: 10),
+      );
+      expect(service.hasPending, isTrue);
+
+      // Closing the store makes the flush write fail. Bulk flush must degrade
+      // quietly (best-effort) — return a count, never throw to the lifecycle
+      // observer that calls it during backgrounding.
+      await database.close();
+      expect(await service.flushAll(), equals(0));
+    });
+  });
 }

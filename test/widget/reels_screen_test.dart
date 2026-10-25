@@ -523,6 +523,45 @@ void main() {
       expect(spare.disposeCalls, 1);
     });
 
+    testWidgets(
+      'backgrounding releases the spare decoder; resume re-arms it (P13-05)',
+      (tester) async {
+        await pumpReels(
+          tester,
+          _FakeRepository(items: [_item('a'), _item('b')]),
+        );
+
+        // Live reel 'a' is playing; 'b' is prewarmed as the unplayed spare.
+        final live = handles.firstWhere((h) => _idOf(h) == 'a');
+        final spare = handles.firstWhere((h) => _idOf(h) == 'b');
+        expect(spare.disposeCalls, 0);
+
+        // App leaves the foreground: the idle spare decoder is released while
+        // the live reel deliberately keeps playing (P13-02 background audio).
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pumpAndSettle();
+        expect(spare.disposeCalls, 1);
+        expect(live.disposeCalls, 0);
+        expect(handles.where((h) => _idOf(h) == 'b'), hasLength(1));
+
+        // App returns: the next-reel engine is re-armed from the still-cached
+        // source, so a fresh spare exists again — no additional resolve, no
+        // decoder held through the background (PLAY-012).
+        final resolvedBefore = resolver.resolvedItemIds.length;
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await tester.pumpAndSettle();
+
+        final rearmed = handles.where((h) => _idOf(h) == 'b').toList();
+        expect(rearmed, hasLength(2)); // old disposed spare + new warm engine
+        expect(rearmed.last.disposeCalls, 0);
+        expect(rearmed.last.initializeCalls, greaterThanOrEqualTo(1));
+        expect(rearmed.last.playCalls, 0); // still an unplayed spare
+        expect(resolver.resolvedItemIds.length, resolvedBefore);
+      },
+    );
+
     testWidgets('shows a user-safe message when a reel cannot be resolved', (
       tester,
     ) async {

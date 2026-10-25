@@ -10,6 +10,9 @@ import 'package:mytube/core/errors/app_exception.dart';
 import 'package:mytube/core/logging/privacy_safe_logger.dart';
 import 'package:mytube/data/database/app_database.dart';
 import 'package:mytube/data/database/database_provider.dart';
+import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/watch_progress_service.dart';
+import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 
 /// Builds the app root inside a [ProviderScope] whose `databaseProvider` is
 /// overridden with the in-memory database. The now-live Discover tab reads the
@@ -91,6 +94,79 @@ void main() {
       ErrorWidget.builder = previousBuilder;
     }
   });
+
+  testWidgets('backgrounding flushes pending watch progress (P13-05)', (
+    tester,
+  ) async {
+    final db = AppDatabase.inMemory();
+    addTearDown(db.close);
+    final progress = _FakeWatchProgress(pending: true);
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+        watchProgressServiceProvider.overrideWithValue(progress),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(PersonalVideoHubApp(container: container));
+    await tester.pump();
+
+    // Leaving the foreground with a pending position performs a bulk flush so
+    // the in-throttle-window progress survives a possible process reclaim.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(progress.flushAllCalls, 1);
+
+    // Nothing pending → the boundary stays write-free.
+    progress.pending = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump();
+    expect(progress.flushAllCalls, 1);
+
+    // Resume never flushes, even with something pending — playback is live.
+    progress.pending = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(progress.flushAllCalls, 1);
+  });
+}
+
+/// Records [flushAll] calls and reports a configurable [hasPending], so the
+/// shell's background-flush policy is observable without a real database
+/// (house style — no mocking package). Unused [WatchProgressService] members
+/// are unreachable in this test and throw to catch accidental wiring.
+class _FakeWatchProgress implements WatchProgressService {
+  _FakeWatchProgress({required this.pending});
+
+  bool pending;
+  int flushAllCalls = 0;
+
+  @override
+  bool get hasPending => pending;
+
+  @override
+  Future<int> flushAll() async {
+    flushAllCalls++;
+    pending = false;
+    return 0;
+  }
+
+  @override
+  Future<bool> reportPosition({
+    required VideoItemId id,
+    required Duration position,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<bool> flush(VideoItemId id) => throw UnimplementedError();
+
+  @override
+  Future<Duration?> resumePosition(VideoItemId id) =>
+      throw UnimplementedError();
+
+  @override
+  void forget(VideoItemId id) => throw UnimplementedError();
 }
 
 class _ThrowingBody extends StatelessWidget {
