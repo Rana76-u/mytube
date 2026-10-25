@@ -1,8 +1,10 @@
 package com.example.mytube
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -181,9 +183,23 @@ class SaffBridgePlugin :
         // blocking for seconds on large SD cards or deeply nested trees.
         ioScope.launch {
             try {
-                val docFile = DocumentFile.fromTreeUri(context, Uri.parse(uriString))
+                val treeUri = Uri.parse(uriString)
                 val videoList = mutableListOf<Map<String, Any?>>()
-                collectVideoFiles(docFile, videoList, depth = 0)
+                try {
+                    collectVideosViaCursor(context.contentResolver, treeUri, videoList)
+                } catch (e: SecurityException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Some providers do not implement child-document queries.
+                    // Fall back to the DocumentFile walk, which is universal
+                    // but issues several IPC calls per file.
+                    videoList.clear()
+                    collectVideoFiles(
+                        DocumentFile.fromTreeUri(context, treeUri),
+                        videoList,
+                        depth = 0,
+                    )
+                }
                 withContext(Dispatchers.Main) {
                     result.success(videoList)
                 }
@@ -197,6 +213,82 @@ class SaffBridgePlugin :
                 }
             }
         }
+    }
+
+    /**
+     * Collects video documents with one `ContentResolver.query` per directory.
+     *
+     * `DocumentFile` resolves each property (`name`, `type`, `length`, …)
+     * through its own provider query, so walking a large folder with it costs
+     * several IPC round trips per file. Querying the child documents directly
+     * with a projection returns everything for a directory in a single call.
+     */
+    private fun collectVideosViaCursor(
+        resolver: ContentResolver,
+        treeUri: Uri,
+        results: MutableList<Map<String, Any?>>,
+    ) {
+        val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+        collectChildVideos(resolver, treeUri, rootId, results, depth = 0)
+    }
+
+    private fun collectChildVideos(
+        resolver: ContentResolver,
+        treeUri: Uri,
+        parentDocumentId: String,
+        results: MutableList<Map<String, Any?>>,
+        depth: Int,
+    ) {
+        if (results.size >= MAX_VIDEO_FILES || depth >= MAX_DEPTH) return
+        val childrenUri =
+            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocumentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        val directories = mutableListOf<String>()
+        resolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext() && results.size < MAX_VIDEO_FILES) {
+                val documentId = cursor.getString(0) ?: continue
+                val displayName = cursor.getString(1) ?: ""
+                val mimeType = cursor.getString(2)
+                val sizeBytes = if (cursor.isNull(3)) 0L else cursor.getLong(3)
+                val lastModifiedMs = if (cursor.isNull(4)) 0L else cursor.getLong(4)
+
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    directories.add(documentId)
+                } else if (isVideoDocument(mimeType, displayName)) {
+                    results.add(
+                        mapOf(
+                            "uri" to
+                                DocumentsContract
+                                    .buildDocumentUriUsingTree(treeUri, documentId)
+                                    .toString(),
+                            "displayName" to displayName,
+                            "mimeType" to mimeType,
+                            "sizeBytes" to sizeBytes.takeIf { it > 0L },
+                            "lastModifiedMs" to lastModifiedMs.takeIf { it > 0L },
+                        ),
+                    )
+                }
+            }
+        }
+        // Recurse after the cursor is closed so no provider cursor stays open.
+        for (childId in directories) {
+            if (results.size >= MAX_VIDEO_FILES) return
+            collectChildVideos(resolver, treeUri, childId, results, depth + 1)
+        }
+    }
+
+    private fun isVideoDocument(mimeType: String?, displayName: String): Boolean {
+        if (mimeType != null) return mimeType.startsWith("video/")
+        val ext = displayName.substringAfterLast('.', "").lowercase()
+        return ext in listOf(
+            "mp4", "mkv", "avi", "mov", "webm", "3gp", "ts", "m4v", "wmv", "flv",
+        )
     }
 
     private fun collectVideoFiles(

@@ -174,8 +174,12 @@ class _CollectionScreenState extends ConsumerState<CollectionScreen> {
               ),
             );
           }
-          return ListView.builder(
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             itemCount: items.length,
+            // Flat tiles carry no surface of their own, so the list supplies
+            // the separation between them (ADR-009).
+            separatorBuilder: (_, _) => const SizedBox(height: 16),
             itemBuilder: (context, index) {
               final item = items[index];
               return VideoItemCard(

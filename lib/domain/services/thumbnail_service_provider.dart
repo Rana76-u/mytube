@@ -1,20 +1,23 @@
 import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mytube/data/cache/cache_providers.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/services/thumbnail_service.dart';
 import 'package:mytube/platform/platform_providers.dart';
 
-/// Riverpod provider for [ThumbnailService] (P7-01/P7-02).
+/// Riverpod provider for [ThumbnailService] (P7-01/P7-02, P8-01).
 ///
-/// Depends on [videoRepositoryProvider], [thumbnailBridgeProvider], and
-/// [remoteThumbnailFetcherProvider]. The service owns the session thumbnail
-/// cache, so it is a singleton for the app lifetime.
+/// Depends on [videoRepositoryProvider], [thumbnailBridgeProvider],
+/// [remoteThumbnailFetcherProvider], and the persistent preview cache. The
+/// service owns the session thumbnail cache, so it is a singleton for the app
+/// lifetime.
 final thumbnailServiceProvider = Provider<ThumbnailService>(
   (ref) => ThumbnailService(
     repository: ref.watch(videoRepositoryProvider),
     bridge: ref.watch(thumbnailBridgeProvider),
     remoteFetcher: ref.watch(remoteThumbnailFetcherProvider),
+    diskCache: ref.watch(thumbnailDiskCacheProvider),
   ),
 );
 

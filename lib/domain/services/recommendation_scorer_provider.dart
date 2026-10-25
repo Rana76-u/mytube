@@ -220,14 +220,36 @@ class RecommendationsController extends AsyncNotifier<List<VideoItemSummary>> {
     }
   }
 
-  /// Reads each item's source locations once and reduces them to a single
-  /// "is this reachable?" signal for the scorer (DISC-002). A failed lookup is
-  /// treated as available so a transient repository error never silently
-  /// buries an item.
+  /// Reads each item's source locations and reduces them to a single "is this
+  /// reachable?" signal for the scorer (DISC-002). A failed lookup is treated as
+  /// available so a transient repository error never silently buries an item.
+  ///
+  /// Goes through [BatchSourceLocationReader] when the repository advertises it:
+  /// this runs over the *whole* library on the launch tab, so the per-item form
+  /// used to issue one database-isolate round trip per video — hundreds of
+  /// sequential awaits whose results all land on the UI isolate inside the first
+  /// seconds after cold start. A repository without the capability (a test fake)
+  /// keeps the per-item path.
   Future<Map<String, bool>> _readAvailability(
     VideoRepository repository,
     List<VideoItemSummary> items,
   ) async {
+    if (repository case BatchSourceLocationReader batched) {
+      final result = await batched.getSourceLocationsForVideos(
+        items.map((item) => item.id),
+      );
+      // An Err leaves every item optimistic, matching the per-item fallback.
+      final grouped = switch (result) {
+        Ok(:final value) => value,
+        Err() => const <String, List<SourceLocation>>{},
+      };
+      return {
+        for (final item in items)
+          item.id.value: _primaryIsAvailable(
+            grouped[item.id.value] ?? const [],
+          ),
+      };
+    }
     final availability = <String, bool>{};
     for (final item in items) {
       final result = await repository.getSourceLocationsForVideo(item.id);

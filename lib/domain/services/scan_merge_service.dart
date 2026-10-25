@@ -229,12 +229,48 @@ class ScanMergeService {
     }
 
     // --- 3. Mark unseen existing URIs as missing -----------------------------
+    // A run interrupted mid-loop only observed part of the scan, so "not
+    // seen" does not mean "not present": skip the missing sweep for
+    // cancelled runs. This also keeps the SET-002 scope-change de-index from
+    // deleting rows a partial scan never had a chance to observe.
+    if (cancellationToken.isCancelled) {
+      return Result.ok(
+        ScanMergeResult(
+          added: added,
+          updated: updated,
+          markedMissing: 0,
+          mergedIntoExisting: mergedIntoExisting,
+        ),
+      );
+    }
+
     int markedMissing = 0;
     final nowDt = DateTime.now();
+    final unseen = [
+      for (final loc in existing)
+        if (!seenUris.contains(loc.sourceUri)) loc,
+    ];
 
-    for (final loc in existing) {
-      if (!seenUris.contains(loc.sourceUri)) {
-        final markResult = await _repository.updateSourceLocationAvailability(
+    // Prefer the bulk marker: a scope-limiting scan can leave thousands of
+    // rows unseen, and one chunked write beats a round trip per row (SET-002
+    // rescan responsiveness). Repositories without the capability fall back
+    // to the per-row contract below.
+    final repository = _repository;
+    if (repository case final SourceLocationBulkMarker marker) {
+      final bulkResult = await marker.markSourceLocationsAvailability(
+        [for (final loc in unseen) loc.id],
+        AvailabilityState.missing,
+        nowDt,
+      );
+      switch (bulkResult) {
+        case Err<int>(:final error):
+          return Result.err(error);
+        case Ok<int>(:final value):
+          markedMissing = value;
+      }
+    } else {
+      for (final loc in unseen) {
+        final markResult = await repository.updateSourceLocationAvailability(
           loc.id,
           AvailabilityState.missing,
           nowDt,

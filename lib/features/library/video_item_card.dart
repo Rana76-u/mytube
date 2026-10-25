@@ -3,15 +3,21 @@ import 'package:mytube/core/util/relative_time.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/library/video_thumbnail.dart';
 
-/// Card widget for a single video item (P5-01), restyled to the YouTube-like
-/// feed layout from the Discover redesign (UI-1). It is used app-wide — the
-/// Library grid, Saved/Favorites, collection detail, Discover search, and the
-/// Discover feed/horizontal rows — so one component keeps the look consistent
-/// (ADR-006).
+/// Card widget for a single video item (P5-01), styled as the flat
+/// YouTube-feed tile from the Discover redesign (UI-1, ADR-009). It is used
+/// app-wide — the Library list, Saved/Favorites, collection detail, Discover
+/// search, and the Discover feed/horizontal rows — so one component keeps the
+/// look consistent (ADR-006).
 ///
-/// Layout: a full-width 16:9 thumbnail with a duration badge (bottom-right) and
-/// a thin progress bar when the item is partially watched, then the title (max
-/// two lines), then a metadata line of `provider · relative date`.
+/// Layout mirrors a YouTube home-feed item: a full-width 16:9 thumbnail with a
+/// duration badge (bottom-right) and a thin progress overlay when the item is
+/// partially watched, then a metadata row of a circular source-provider avatar,
+/// the title (max two lines), and a `provider · age` line below it.
+///
+/// The tile is deliberately **flat**: no [Card], no elevation, no surface tint
+/// and no outer margin. It paints straight onto the page background so the feed
+/// reads as one continuous list, and each parent supplies its own card spacing
+/// (ADR-009).
 ///
 /// When [onToggleFavourite]/[onManageTags]/[onManageSources] are supplied they
 /// collapse into a `⋮` overflow menu (matching the reference image); the menu
@@ -20,7 +26,8 @@ import 'package:mytube/features/library/video_thumbnail.dart';
 /// detail screen, P5-07). With no callbacks the card is read-only.
 ///
 /// Pass [width] to constrain the card inside a horizontal carousel; otherwise
-/// it fills the available width.
+/// it fills the available width. [showSourceAvatar] is turned off by the narrow
+/// carousel cards, where a 32dp avatar would squeeze the title.
 class VideoItemCard extends StatelessWidget {
   const VideoItemCard({
     super.key,
@@ -31,6 +38,7 @@ class VideoItemCard extends StatelessWidget {
     this.onManageSources,
     this.trailing,
     this.width,
+    this.showSourceAvatar = true,
   });
 
   final VideoItemSummary item;
@@ -49,6 +57,10 @@ class VideoItemCard extends StatelessWidget {
   /// Fixed width for horizontal rows; `null` fills the parent width.
   final double? width;
 
+  /// Whether the circular provider avatar leads the metadata row. Defaults to
+  /// true for full-width cards; narrow carousel cards opt out.
+  final bool showSourceAvatar;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -66,19 +78,18 @@ class VideoItemCard extends StatelessWidget {
         onManageTags != null ||
         onManageSources != null;
 
-    final meta = _metadataLine(item);
-
-    final card = Card(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Thumbnail with duration badge + watched-progress overlay.
-            AspectRatio(
+    final card = InkWell(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Thumbnail with duration badge + watched-progress overlay. The whole
+          // 16:9 box is rounded once, so the badges and the progress bar are
+          // clipped to the same corner radius as the image (ADR-009).
+          ClipRRect(
+            borderRadius: BorderRadius.circular(VideoThumbnail.radius),
+            child: AspectRatio(
               aspectRatio: 16 / 9,
               child: Stack(
                 fit: StackFit.expand,
@@ -86,19 +97,21 @@ class VideoItemCard extends StatelessWidget {
                   VideoThumbnail(item: item),
                   if (item.isFavourite)
                     Positioned(
-                      top: 6,
-                      left: 6,
-                      child: Icon(
-                        Icons.favorite,
+                      top: 8,
+                      left: 8,
+                      child: _ThumbBadge(
                         key: ValueKey('fav_badge_$id'),
-                        size: 18,
-                        color: colorScheme.error,
+                        child: Icon(
+                          Icons.favorite,
+                          size: 14,
+                          color: colorScheme.error,
+                        ),
                       ),
                     ),
                   if (duration != null)
                     Positioned(
-                      right: 6,
-                      bottom: 6,
+                      right: 8,
+                      bottom: 8,
                       child: _DurationBadge(
                         key: ValueKey('duration_$id'),
                         text: _formatDuration(duration),
@@ -120,50 +133,68 @@ class VideoItemCard extends StatelessWidget {
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+          ),
+          const SizedBox(height: 8),
+          // Metadata row: source avatar, then title + `provider · age`.
+          Padding(
+            padding: const EdgeInsets.only(left: 2, right: 2),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (showSourceAvatar) ...[
+                  _SourceAvatar(
+                    key: ValueKey('source_avatar_$id'),
+                    provider: item.primaryProvider,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: Text(
-                          item.title,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                height: 1.35,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                          if (hasActions)
+                            _ActionMenu(
+                              item: item,
+                              onToggleFavourite: onToggleFavourite,
+                              onManageTags: onManageTags,
+                              onManageSources: onManageSources,
+                            ),
+                          ?trailing,
+                        ],
                       ),
-                      if (hasActions)
-                        _ActionMenu(
-                          item: item,
-                          onToggleFavourite: onToggleFavourite,
-                          onManageTags: onManageTags,
-                          onManageSources: onManageSources,
+                      Text(
+                        _metadataLine(item),
+                        key: ValueKey('meta_$id'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontSize: 12,
+                          color: colorScheme.onSurfaceVariant,
                         ),
-                      ?trailing,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    meta,
-                    key: ValueKey('meta_$id'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
 
@@ -175,7 +206,7 @@ class VideoItemCard extends StatelessWidget {
   static String _metadataLine(VideoItemSummary item) {
     final date = item.lastPlayedAt != null
         ? 'Watched ${formatRelativeDate(item.lastPlayedAt!)}'
-        : 'Added ${formatRelativeDate(item.createdAt)}';
+        : formatRelativeDate(item.createdAt);
     final provider = item.primaryProvider;
     return provider == null ? date : '${_providerLabel(provider)} · $date';
   }
@@ -189,6 +220,17 @@ class VideoItemCard extends StatelessWidget {
     ProviderType.cloudflareR2 => 'R2',
   };
 
+  /// Glyph shown in the card's circular source avatar — the substitute for a
+  /// channel avatar in a personal library (ADR-009).
+  static IconData _providerIcon(ProviderType type) => switch (type) {
+    ProviderType.localMediaStore => Icons.smartphone,
+    ProviderType.selectedFolder => Icons.folder_outlined,
+    ProviderType.directUrl => Icons.link,
+    ProviderType.oneDrive => Icons.cloud_outlined,
+    ProviderType.googleDrive => Icons.cloud,
+    ProviderType.cloudflareR2 => Icons.cloud_circle_outlined,
+  };
+
   /// Formats duration in milliseconds as `m:ss` or `h:mm:ss`.
   static String _formatDuration(int ms) {
     final duration = Duration(milliseconds: ms);
@@ -198,6 +240,63 @@ class VideoItemCard extends StatelessWidget {
     return hours > 0
         ? '$hours:${minutes.toString().padLeft(2, '0')}:$seconds'
         : '$minutes:$seconds';
+  }
+}
+
+/// The circular source-provider badge that leads the metadata row, standing in
+/// for YouTube's channel avatar (ADR-009).
+class _SourceAvatar extends StatelessWidget {
+  const _SourceAvatar({super.key, required this.provider});
+
+  /// Diameter of the avatar, matching YouTube's channel-avatar slot.
+  static const double size = 32;
+
+  final ProviderType? provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final provider = this.provider;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainer,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        provider == null
+            ? Icons.videocam_outlined
+            : VideoItemCard._providerIcon(provider),
+        size: size * 0.5,
+        color: colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+/// A small circular scrim badge overlaid on the thumbnail (favourite marker).
+/// The scrim keeps the glyph legible on bright previews.
+class _ThumbBadge extends StatelessWidget {
+  const _ThumbBadge({super.key, required this.child});
+
+  /// Diameter of the scrim circle.
+  static const double size = 22;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colorScheme.scrim.withValues(alpha: 0.6),
+        shape: BoxShape.circle,
+      ),
+      child: Center(child: child),
+    );
   }
 }
 

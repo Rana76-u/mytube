@@ -15,7 +15,12 @@ import 'package:mytube/domain/repositories/video_repository.dart';
 /// exceptions into widget code.
 ///
 /// ARCHITECTURE §3 — Data layer.
-class DriftVideoRepository implements VideoRepository {
+class DriftVideoRepository
+    implements
+        VideoRepository,
+        BatchSourceLocationReader,
+        LocalSourceSweeper,
+        SourceLocationBulkMarker {
   DriftVideoRepository(db_lib.AppDatabase db)
     : _dao = db.videoItemsDao,
       _sourceLocationsDao = db.sourceLocationsDao,
@@ -268,6 +273,55 @@ class DriftVideoRepository implements VideoRepository {
 
   // ── Source-location queries (P3-04) ───────────────────────────────────────
 
+  /// Marks [ids] with [availability] in one (internally chunked) write
+  /// (SET-002 scope-change rescans; see [SourceLocationBulkMarker]).
+  @override
+  Future<Result<int>> markSourceLocationsAvailability(
+    Iterable<String> ids,
+    AvailabilityState availability,
+    DateTime checkedAt,
+  ) async {
+    try {
+      final changed = await _sourceLocationsDao.markAvailabilityByIds(
+        ids: ids.toList(growable: false),
+        availability: availability.name,
+        checkedAt: checkedAt.millisecondsSinceEpoch,
+      );
+      return Result.ok(changed);
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'markSourceLocationsAvailability failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  /// Removes local source rows the current scan scope no longer reaches and
+  /// the video items left without any source (SET-002 scan-location changes;
+  /// see [LocalSourceSweeper]). Scoped to `localMediaStore`/`selectedFolder`
+  /// rows so direct-URL and cloud locations are never touched.
+  @override
+  Future<Result<int>> deindexMissingLocalSources() async {
+    try {
+      final removed = await _sourceLocationsDao.deindexMissingLocalSources(
+        providerTypeNames: const [
+          'localMediaStore', // ProviderType.localMediaStore.name
+          'selectedFolder', // ProviderType.selectedFolder.name
+        ],
+      );
+      return Result.ok(removed);
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'deindexMissingLocalSources failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
   @override
   Future<Result<List<SourceLocation>>> getSourceLocationsByProvider(
     ProviderType providerType,
@@ -300,6 +354,29 @@ class DriftVideoRepository implements VideoRepository {
         UnexpectedError(
           diagnosticMessage:
               'getSourceLocationsForVideo(${id.value}) failed: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<Result<Map<String, List<SourceLocation>>>> getSourceLocationsForVideos(
+    Iterable<VideoItemId> ids,
+  ) async {
+    try {
+      final grouped = await _sourceLocationsDao.locationsForItems(
+        ids.map((id) => id.value).toList(),
+      );
+      return Result.ok(
+        grouped.map(
+          (key, rows) => MapEntry(key, rows.map(_toSourceLocation).toList()),
+        ),
+      );
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'getSourceLocationsForVideos failed: $e',
           cause: e,
         ),
       );

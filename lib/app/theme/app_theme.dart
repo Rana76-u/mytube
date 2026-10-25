@@ -35,6 +35,43 @@ abstract final class AppTheme {
   /// derived tone stays on-brand.
   static const Color seedColor = primary;
 
+  /// YouTube-style filter pills, shared by every chip in the app (ADR-009).
+  ///
+  /// A pill is a borderless [StadiumBorder] resting on the medium charcoal
+  /// ([ColorScheme.surfaceContainer], `#272727` dark) and inverting to a solid
+  /// `onSurface` fill with a dark label when selected — the reference home
+  /// feed's `All / Podcasts / Shark Tank` row. Keeping this in the theme means
+  /// the Discover chip row, the search suggestion chips and any future chip
+  /// share one shape, and no widget passes a colour of its own.
+  ///
+  /// `ChoiceChip` resolves `secondaryLabelStyle` for the selected state, so the
+  /// label colour flips without a per-chip style (see `_Chip` in
+  /// `discover_sections.dart`).
+  static ChipThemeData chipThemeFor(ColorScheme scheme) => ChipThemeData(
+    backgroundColor: scheme.surfaceContainer,
+    selectedColor: scheme.onSurface,
+    secondarySelectedColor: scheme.onSurface,
+    disabledColor: scheme.surfaceContainer,
+    side: BorderSide.none,
+    shape: const StadiumBorder(),
+    showCheckmark: false,
+    labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+    padding: EdgeInsets.zero,
+    labelStyle: TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+      color: scheme.onSurface,
+    ),
+    secondaryLabelStyle: TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+      color: scheme.surface,
+    ),
+    brightness: scheme.brightness,
+    elevation: 0,
+    pressElevation: 0,
+  );
+
   /// [ThemeData] for [ThemeMode.dark] — the default launch experience, built
   /// directly from the palette in `Color Pallet.csv`.
   static ThemeData get dark {
@@ -61,17 +98,22 @@ abstract final class AppTheme {
       colorScheme: scheme,
       useMaterial3: true,
       scaffoldBackgroundColor: backgroundDark,
+      chipTheme: chipThemeFor(scheme),
     );
   }
 
   /// [ThemeData] for [ThemeMode.light] — used when the system chooses light
   /// or when the user has not overridden to dark. Derives the brand red from
   /// the same seed so accents match the dark theme.
-  static ThemeData get light => ThemeData(
-    colorScheme: ColorScheme.fromSeed(
+  static ThemeData get light {
+    final scheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: Brightness.light,
-    ),
-    useMaterial3: true,
-  );
+    );
+    return ThemeData(
+      colorScheme: scheme,
+      useMaterial3: true,
+      chipTheme: chipThemeFor(scheme),
+    );
+  }
 }

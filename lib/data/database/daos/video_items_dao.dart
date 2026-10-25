@@ -143,6 +143,14 @@ class VideoItemsDao extends DatabaseAccessor<AppDatabase>
         stmt.orderBy([(t) => OrderingTerm.random()]);
     }
 
+    // Glance surfaces ask for a bounded page (LibraryQuery.limit): applying it
+    // in SQL after the ORDER BY means SQLite stops at N rows instead of
+    // materialising and copying the whole library back across the database
+    // isolate for the caller to truncate in Dart.
+    if (query.limit case final limit?) {
+      stmt.limit(limit);
+    }
+
     return stmt.get();
   }
 

@@ -20,6 +20,11 @@ class VideoThumbnail extends ConsumerWidget {
     this.height,
   });
 
+  /// Corner radius shared by the decoded image and the [placeholder] so a
+  /// thumbnail never pops its corners when the bytes arrive (ADR-009 — the
+  /// flat feed tile rounds its whole 16:9 box to the same value).
+  static const double radius = 12;
+
   final VideoItemSummary item;
 
   /// Explicit tile size. When both are `null` the thumbnail fills its parent's
@@ -37,13 +42,17 @@ class VideoThumbnail extends ConsumerWidget {
     final content = bytes == null
         ? placeholder(context)
         : ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(radius),
             child: Image.memory(
               bytes,
               key: ValueKey('thumbnail_${item.id.value}'),
               fit: BoxFit.cover,
               width: width,
               height: height,
+              // Medium uses mipmaps, so a full-width card and a small carousel
+              // tile both sample the same high-resolution preview cleanly
+              // instead of aliasing it.
+              filterQuality: FilterQuality.medium,
               // Decoded previews may legitimately disappear from the
               // in-memory cache; fall back instead of throwing.
               errorBuilder: (_, _, _) => placeholder(context),
@@ -63,7 +72,7 @@ class VideoThumbnail extends ConsumerWidget {
       key: const ValueKey('thumbnail_placeholder'),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(radius),
       ),
       child: Icon(
         Icons.play_circle_outline,

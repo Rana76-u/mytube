@@ -66,6 +66,18 @@ class AppPreferencesDao extends DatabaseAccessor<AppDatabase>
   Future<void> setDouble(String key, double value) =>
       setString(key, value.toString());
 
+  /// Returns the stored int for [key], or [defaultValue] if absent or
+  /// unparseable.
+  Future<int> getInt(String key, {int defaultValue = 0}) async {
+    final raw = await getString(key);
+    if (raw == null) return defaultValue;
+    return int.tryParse(raw) ?? defaultValue;
+  }
+
+  /// Persists an int [value] for [key].
+  Future<void> setInt(String key, int value) =>
+      setString(key, value.toString());
+
   /// Watches a single preference key for changes.  Emits `null` when absent.
   Stream<String?> watchString(String key) =>
       (select(appPreferences)..where((t) => t.key.equals(key)))

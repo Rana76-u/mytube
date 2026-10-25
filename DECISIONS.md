@@ -403,13 +403,14 @@ thumbnail/error logic per section invites inconsistency.
 **Decision.** Reuse the existing `VideoThumbnail` / `VideoItemCard`
 components for the Discover main feed and add small, purposeful
 Discover widgets (`DiscoverCarousel`, `ContinueWatchingTile`,
-`DiscoverFilterChips`, `FeedModeControl`, `DiscoverBrowseRows`) for the
+`DiscoverFilterChips`, `DiscoverBrowseRows`) for the
 horizontal/presentation variants. Source resolution, thumbnail caching,
 and playback navigation stay in their existing layers; the new widgets
 hold no database, recommendation, or playback business logic. (The
 earlier folder-style `CollectionChip` was retired by the YouTube-style
 redesign in favour of collection filter chips plus per-collection video
-card rows — see ADR-007.)
+card rows — see ADR-007; the separate mode control it once listed was
+later folded into the chip row — see ADR-012.)
 
 **Alternatives considered.** A separate unrelated thumbnail/cards
 per section. Rejected for duplicated rendering and error handling.
@@ -460,7 +461,9 @@ one join in the summary query and no new package. The app-wide card keeps
 Library/Saved/Favorites/search visually consistent. The cost is a taller
 card that shifts lazy-viewport behaviour, so widget tests that assert on
 content below the shelves opt into a larger test surface rather than
-relying on the default viewport.
+relying on the default viewport. (The card's `Card` chrome and the
+separate mode control described here were superseded by ADR-012; the
+app-wide shared-card decision and the chip/shelf vocabulary still stand.)
 
 ## ADR-008 --- YouTube colour palette as the app-wide theme
 
@@ -639,3 +642,84 @@ off-screen and gapless swipe resumes cleanly. The cost is a second
 lifecycle. This is Dart-only — no native change — and guarantees the callbacks
 fire, not that Android reclaims identically across OEMs; the real reclaim /
 codec-loss behaviour is verified in the P13-06 device pass.
+
+## ADR-012 --- Flat YouTube-style feed composition
+
+**Status:** Accepted (implemented). Supersedes the card-chrome and
+mode-control parts of ADR-007.
+
+**Context and problem.** ADR-007 gave Discover a cohesive identity, but the
+result still read as an archive rather than a home feed. Three problems
+compounded. First, chrome: every tile was a Material `Card` with elevation
+and an outer margin, so a list of tiles looked like a stack of boxes on a
+flat page instead of the reference's edge-to-edge tiles. Second, controls:
+the page exposed the *same* state twice — a `SegmentedButton`
+(`FeedModeControl`) chose the feed mode and a heading underneath repeated it
+— and the chip row's `All` chip was a third way to say "Recommended". A
+third of the vertical space above the feed was consumed by horizontally
+stacked browse shelves (up to 13 rows, ≈2,900dp) before the user reached the
+main feed, which was itself built as a non-lazy `Column` inside a
+`ListView` — every card in page 1 was constructed even when off-screen, and
+appending a page laid out the whole feed again.
+
+**Decision.** Recompose the page as one `CustomScrollView` and keep every
+domain behaviour (ranking, exposure, filters, pagination, pull-to-refresh)
+untouched.
+
+-   **Tiles carry no Material surface.** `VideoItemCard`'s root is an
+    `InkWell` over a `Column` painted directly on
+    `scaffoldBackgroundColor`; the 16:9 thumbnail is clipped to a shared
+    `VideoThumbnail.radius` (12dp) so the duration badge, favourite badge and
+    progress overlay clip with it, and the metadata is a YouTube row (32dp
+    source avatar, two-line title, `provider · age`). The card owns no outer
+    margins — the parent supplies separation. Because the card is shared
+    (ADR-006), the same edit restyles Library, Saved, Favorites, collection
+    detail and search; those lists therefore gain explicit 16dp spacing and a
+    12dp inset instead of inheriting it from `Card` margins.
+-   **Pills come from the theme, never per widget.**
+    `AppTheme.chipThemeFor(scheme)` (stadium, `BorderSide.none`, no
+    checkmark, `surfaceContainer` resting → `onSurface` selected, 13sp
+    labels, `shrinkWrap` tap target) is wired into both brightnesses, so no
+    chip hard-codes a colour and large text scales grow instead of clipping.
+-   **The chip row is the single control surface.** It carries the modes
+    *and* the filters: `Recommended` / `Recently added` / `Unwatched` followed
+    by collections and tags. `Recommended` *is* the `All` state, so no
+    separate `All` chip remains, `FeedModeControl` and the duplicated heading
+    are deleted, and a mode chip is selected only while the filter is `All`.
+    Tapping a mode chip resets any narrowed filter; tapping a filter chip
+    keeps the existing `toggle`. The row is a pinned
+    `SliverPersistentHeader` over an opaque `scheme.surface` background with a
+    `PageStorageKey`, so it stays on screen while the feed scrolls without
+    losing its horizontal offset.
+-   **Shelves interleave instead of stacking.** The feed is a `SliverList`
+    and the browse rows are inserted at `min(6, items.length)` — after the
+    sixth card, always inside page 1's 20 entries, so appending pages never
+    shifts them. The feed gets a real lazy viewport and the page reaches
+    content immediately.
+-   **The loading placeholder is static.** `DiscoverFeedSkeleton` renders
+    three grey tiles with no shimmer and no animation controller, because an
+    infinitely repeating animation makes `pumpAndSettle` time out.
+
+**Alternatives considered.** Keep the boxed card for non-Discover surfaces
+and fork a flat variant (rejected: two tiles to maintain, and the surfaces
+would drift — ADR-006 exists to prevent exactly that). Keep the segmented
+control as a second, "explicit" mode switch (rejected: two controls for one
+piece of state, and the chip row already has to show filters). Keep the
+shelves above the feed but collapse them (rejected: still an accordion the
+user must negotiate before the feed; interleaving costs nothing because the
+shelves are already lazy family providers). Keep the non-lazy `Column`
+(rejected: it builds and lays out every card on the page, and grows with the
+feed). An animated shimmer skeleton (rejected: un-settleable widget tests,
+for a placeholder the user sees for a frame or two).
+
+**Consequences.** Discover reads like the reference home feed — content
+first, one control surface, flat continuous tiles — and the whole app gets
+the same tile geometry and pill styling for free. Scrolling is now genuinely
+lazy, which is a behavioural change widget tests must respect: a card below
+the fold is no longer built, so tests that assert on feed order opt into a
+taller surface. The shelves still cost their own lazy queries, but only when
+their row builds, and the interleave index is deliberately inside page 1 —
+moving it past the page size would make shelves jump as pages append. The
+cost is that the app bar and tab tap remain "stock" Material: this decision
+covers the feed surface only, not brand chrome or scroll-to-top, which were
+explicitly declined.

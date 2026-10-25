@@ -30,7 +30,9 @@ abstract interface class ThumbnailBridge {
     int maxSidePx = defaultMaxSidePx,
   });
 
-  /// Default decode size — good enough for grid cards while staying cheap
-  /// to transfer over the method channel (LIB-007, NFR-001).
-  static const int defaultMaxSidePx = 256;
+  /// Default decode size — the longest side of a full-width 16:9 card on a
+  /// high-density phone (~1100 physical px). Decoding smaller makes the grid
+  /// upscale and read as blurry (LIB-007, NFR-001). Kept in sync with
+  /// `ThumbnailPlugin.DEFAULT_MAX_SIDE_PX` on the Android side.
+  static const int defaultMaxSidePx = 1080;
 }

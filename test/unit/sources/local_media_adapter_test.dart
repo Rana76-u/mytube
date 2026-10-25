@@ -16,8 +16,15 @@ class FakeMediaStoreBridge implements MediaStoreBridge {
   Result<List<MediaStoreVideo>> videosResult = const Ok([]);
   MediaStorePermissionStatus permStatus = MediaStorePermissionStatus.granted;
 
+  /// How many times [queryVideos] was invoked — scan-scope tests assert on
+  /// this to prove whole-device enumeration is skipped when disabled.
+  int queryVideosCalls = 0;
+
   @override
-  Future<Result<List<MediaStoreVideo>>> queryVideos() async => videosResult;
+  Future<Result<List<MediaStoreVideo>>> queryVideos() async {
+    queryVideosCalls++;
+    return videosResult;
+  }
 
   @override
   Future<MediaStorePermissionStatus> checkPermission() async => permStatus;
@@ -420,6 +427,63 @@ void main() {
 
       expect(result.isOk, isTrue);
       expect((result as Ok<SourceVideo?>).value, isNull);
+    });
+
+    // ── 18 ────────────────────────────────────────────────────────────────
+    // Scan-location setting (SET-002): folders-only scope skips the
+    // whole-device MediaStore enumeration in listVideos.
+    test('listVideos() folders-only scope skips MediaStore and returns SAF '
+        'videos only', () async {
+      final scoped = LocalMediaAdapter(
+        mediaStoreBridge: fakeMs,
+        safBridge: fakeSaf,
+        fullDeviceScan: () => false,
+      );
+      fakeMs.videosResult = Ok([_msVideo(id: '1')]);
+      fakeSaf.persistedUrisResult = const Ok(['content://folder1']);
+      fakeSaf.folderResults['content://folder1'] = Ok([
+        _safVideo(uri: 'content://folder1/video/a.mp4'),
+      ]);
+
+      final result = await scoped.listVideos(
+        cancellationToken: CancellationToken(),
+      );
+
+      expect(result.isOk, isTrue);
+      final page = (result as Ok<SourcePage>).value;
+      expect(fakeMs.queryVideosCalls, 0);
+      expect(page.videos.length, 1);
+      expect(page.videos.first.sourceType, ProviderType.selectedFolder);
+    });
+
+    // ── 19 ────────────────────────────────────────────────────────────────
+    test('listVideos() default scope queries MediaStore once', () async {
+      fakeMs.videosResult = Ok([_msVideo(id: '1')]);
+
+      await adapter.listVideos(cancellationToken: CancellationToken());
+
+      expect(fakeMs.queryVideosCalls, 1);
+    });
+
+    // ── 20 ────────────────────────────────────────────────────────────────
+    test('getVideo() still resolves MediaStore ids in folders-only scope '
+        '(previously indexed items stay playable)', () async {
+      final scoped = LocalMediaAdapter(
+        mediaStoreBridge: fakeMs,
+        safBridge: fakeSaf,
+        fullDeviceScan: () => false,
+      );
+      fakeMs.videosResult = Ok([_msVideo(id: '42', displayName: 'old.mp4')]);
+
+      final result = await scoped.getVideo(
+        'content://media/external/video/media/42',
+      );
+
+      expect(result.isOk, isTrue);
+      final video = (result as Ok<SourceVideo?>).value;
+      expect(video, isNotNull);
+      expect(video!.displayName, 'old.mp4');
+      expect(fakeMs.queryVideosCalls, 1);
     });
   });
 }

@@ -229,7 +229,7 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
     if (widget.active) {
       // Queue data may already be loaded (tab kept alive in the IndexedStack),
       // so schedule the first autoplay once the frame is up.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _syncPlayback());
+      _syncPlayback();
     }
     // Observe app lifecycle in its own right (P13-05): the Reels tab is kept
     // alive by the shell's IndexedStack, so it can release / re-arm its spare
@@ -347,7 +347,30 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
 
   /// Starts playback of the current reel when the tab is active and the page
   /// changed since the last start. No-op while loading, empty, or inactive.
+  ///
+  /// Deferred to the end of the frame on purpose. This runs from `initState`,
+  /// from `didUpdateWidget` when the shell switches to the Reels tab, and from
+  /// the `ref.listen` callback registered in [build] — all inside a widget
+  /// lifecycle. [_playItem] publishes the now-playing label, which writes a
+  /// provider, and Riverpod refuses provider mutations while the tree is
+  /// building (they can leave two listeners of the same provider with
+  /// different states). One coalesced post-frame callback keeps every entry
+  /// point legal without scheduling the same start twice.
   void _syncPlayback() {
+    if (!widget.active || _syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (!mounted) return;
+      _startCurrentReel();
+    });
+  }
+
+  /// Whether a [_syncPlayback] deferral is already queued for this element.
+  bool _syncScheduled = false;
+
+  /// The actual autoplay decision, run after the current frame is built.
+  void _startCurrentReel() {
     if (!widget.active) return;
     final queue = ref.read(reelsQueueProvider).value;
     final item = queue?.current;

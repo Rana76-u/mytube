@@ -922,6 +922,58 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
     `ARCHITECTURE.md` §8 documents the card + chips + shelves, `REQUIREMENTS.md`
     adds DISC-008/009, CW-005, LIB-011, and `PROJECT_BRIEF.md` describes the new
     Discover experience.
+-   [x] **DR-08** Flat app-wide card + theme-owned pill chips (ADR-012). --- Done.
+    `VideoItemCard` lost its `Card`: the tile paints straight onto the page
+    background (`InkWell` → `Column`), the thumbnail is clipped to 12dp by a
+    shared `VideoThumbnail.radius` so the duration badge, favourite badge and
+    progress overlay clip with it, and the metadata block became the YouTube
+    row — a 32dp source avatar (new `showSourceAvatar`, default `true`, with a
+    per-provider glyph) beside a 15sp two-line title, a 12sp `provider · age`
+    line (the old `Added ` prefix is gone; `Watched ` stays) and the `⋮` menu at
+    the trailing edge. Every existing `ValueKey` survived. Pill styling moved
+    into the theme: `AppTheme.chipThemeFor(scheme)` (stadium, borderless, no
+    checkmark, `surfaceContainer` → `onSurface`) is wired into both
+    brightnesses, so `DiscoverFilterChips` and the search `ActionChip`s carry no
+    hard-coded colours. Because the card is app-wide (ADR-006), one edit
+    reaches Library, Saved, Favorites, collection detail and search at once;
+    those lists moved to `ListView.separated` with 16dp gaps and a 12dp inset so
+    flat cards keep their separation. Tests: no `Card` in the tree, avatar
+    present/absent via `showSourceAvatar`, the new meta string, and no overflow
+    at text scale 1.3.
+-   [x] **DR-09** Chip row absorbs the feed modes behind a pinned header. ---
+    Done. `FeedModeControl` (and its `SegmentedButton`) is deleted, together
+    with the `discover_feed_header` title that duplicated it.
+    `DiscoverFilterChips` now takes `mode` + `onModeSelected` and renders
+    `Recommended` / `Recently added` / `Unwatched` before the collections and
+    tags; `Recommended` *is* the `All` state, so `discover_chip_all` is gone,
+    and a mode chip reads as selected only while the filter is `All`. Tapping a
+    mode chip sets the mode **and** resets the filter to
+    `DiscoverFeedNoFilter`; a collection/tag chip keeps today's `toggle`. The
+    row lives in a `SliverPersistentHeader(pinned: true)` over an opaque
+    `scheme.surface` background (no divider — same colour as the page), with a
+    `PageStorageKey` so its horizontal offset survives parent rebuilds and an
+    extent that grows with the text scaler instead of clipping.
+-   [x] **DR-10** Sliver feed, interleaved shelves, static skeleton. --- Done.
+    `DiscoverScreen` is one `CustomScrollView` (`discover_feed_list`): pinned
+    chip row → Continue Watching → `_FeedSliver` → pagination footer. The feed
+    is a `SliverList` — a real lazy viewport, unlike the old non-lazy `Column`
+    — with loading → static `DiscoverFeedSkeleton`, error → `ErrorState`,
+    empty → `SliverFillRemaining` + `EmptyState`, and the
+    `discover_recommendations` key preserved on every state. The browse shelves
+    moved from *in front of* the feed to `min(6, len)` — after the sixth card,
+    which is always inside page 1, so appending pages never shifts them — and
+    the stacked shelf wall (up to 13 rows, ≈2,900dp) is gone. Row geometry was
+    retuned for the flat card (176dp browse rows, 160×90 Continue Watching
+    tiles, 12dp carousel gaps) and made text-scale aware. The skeleton is
+    deliberately static — a repeating animation would make `pumpAndSettle` time
+    out. Tests: the chip/heading assertions moved onto
+    `ChoiceChip.selected`, and a new
+    `Discover YouTube feed composition (ADR-012)` group covers the interleave
+    order, short-feed placement, mode-clears-filter, the loading skeleton and
+    the pinned row. Two tests that assert on content below the fold opt into a
+    taller surface, because a lazy sliver no longer builds every card.
+    Verification (`lib` + `test`): `dart format` clean, `flutter analyze lib
+    test` no issues, `flutter test` **1016 passing, 0 failing**.
 
 ## Reel playback controller (Reel_Video_Controller.md)
 
@@ -1036,13 +1088,162 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
 
 ## Phase 8 --- Cache
 
--   [ ] **P8-01** Separate cache storage from download storage. --- Todo
--   [ ] **P8-02** Display cache size in Settings. --- Todo
--   [ ] **P8-03** Add configurable cache limit. --- Todo
--   [ ] **P8-04** Implement safe automatic cache eviction. --- Todo
--   [ ] **P8-05** Implement Clear Cache. --- Todo
--   [ ] **P8-06** Test Clear Cache never removes downloads, originals,
-    or user metadata. --- Todo
+-   [x] **P8-01** Separate cache storage from download storage. --- Done
+    (`lib/platform/storage_paths.dart` is now the single place the app's
+    disposable and durable storage are defined: `StorageRoots` normalises a
+    `cacheRoot` (OS temporary dir → `mytube_cache`) and a `downloadsRoot`
+    (app support dir → `mytube_downloads`) and exposes `isSeparated` /
+    `isInCache` / `isInDownloads`. `PathProviderStoragePaths` resolves both via
+    `path_provider` and **fails closed** when the layout overlaps, so cache
+    cleanup can never be pointed at downloads (ARCHITECTURE §10, CACHE-006).
+    A new `DiskCacheStore` (`lib/data/cache/disk_cache_store.dart`) confines all
+    cache I/O to that root: entries are keyed by a 128-bit FNV-1a hash, so URLs
+    and signed query strings never reach a filename (SEC-005); writes go through
+    a temp file and an atomic rename; only files carrying the store's own
+    `thumb_` prefix are visible to usage/clear/eviction, and subdirectories or
+    foreign files are never touched. `ThumbnailDiskCache` wraps it with lazy,
+    failure-tolerant resolution (a missing/broken store just disables
+    persistence), and `ThumbnailService` now reads through it before the
+    network/native decode and writes every successful preview, so previews
+    survive a restart. New deps: `path_provider` (already resolved transitively)
+    and `path`, both direct-owned now. Checks: `dart format` clean;
+    `flutter analyze lib test` no issues; full `flutter test` suite 944 passed
+    (new: 8 storage-root/path tests, 15 store tests, 8 disk-cache tests, 4
+    ThumbnailService persistence tests). Device verification pending: real
+    Android cache-directory behaviour (OS reclaiming `cacheDir`) on CPH2719.)
+-   [x] **P8-02** Display cache size in Settings. --- Done
+    (Settings now ends with a **Storage & cache** section (CACHE-003).
+    `CacheController` (`lib/domain/services/cache_controller.dart`) owns the
+    measurement: a value-equal `CacheState` holds `CacheUsage` plus
+    `measuring`, `build()` defers a best-effort measure by one microtask so the
+    first frame paints immediately, and an `_alive` guard drops the result if
+    the provider is disposed mid-measure. The row shows `Measuring…` with a
+    small spinner while the first pass runs, `Nothing cached yet.` at zero
+    entries, or `<size> · N cached preview(s)` otherwise, with a re-measure
+    action (`Icons.refresh`, tooltip `Measure cache again`). A footnote states
+    that cache is disposable, safe to clear, and never contains downloads or
+    originals (CACHE-006). Sizes are formatted by a new integer-only
+    `formatBytes` (`lib/core/util/format_bytes.dart`) that rounds to one
+    decimal and promotes units instead of printing `1024.0 KB`.
+    Checks: `dart format` clean; `flutter analyze lib test` no issues; full
+    `flutter test` suite 959 passed (new: 10 `formatBytes` tests, 7
+    `CacheController`/`CacheState` tests, 3 Settings widget tests). The widget
+    tests drive the row through a stub controller plus an inert disk cache
+    because widget tests run in a fake-async zone where real `dart:io` work and
+    the `path_provider` channel never complete — actual on-device measurement
+    is covered by the controller's own tests and still needs a device pass.
+    Re-measurement is manual (first build, pull of the refresh action);
+    automatic refresh after eviction/clearing arrives with P8-04/P8-05.)
+-   [x] **P8-03** Add configurable cache limit. --- Done
+    (`CacheLimit` (`lib/domain/models/cache_limit.dart`) is the budget type:
+    a closed preset list (100 MB, 250 MB, 500 MB, 1.0 GB, 2.0 GB), default
+    500 MB, with `label`, `isExceededBy(usage)` and `overflowOf(usage)` ready
+    for the eviction pass. `sanitize` normalises whatever was persisted —
+    absent, non-positive, and out-of-range values become the default or clamp
+    into the supported range, so a corrupt row can never leave the cache
+    unbounded or disable cleanup. The choice persists through a new
+    `AppPreferenceKeys.cacheLimitBytes` key and new typed
+    `AppPreferencesDao.getInt`/`setInt` accessors (unparseable values fall
+    back to the caller's default). `CacheController` now restores the limit
+    before measuring, exposes `CacheState.limit`/`overLimit`,
+    `setLimit` persists the choice (session-authoritative if the write fails,
+    matching the scan-scope toggle), and overlapping load passes share one
+    in-flight future so a slow restore cannot publish a stale budget over a
+    newer choice. Settings gained a **Cache limit** row: a dropdown of the
+    presets, including a legacy persisted value that is not in the current
+    list so the control never throws.
+    Checks: `dart format` clean; `flutter analyze lib test` no issues; full
+    `flutter test` suite 981 passed (new: 11 `CacheLimit` tests, 7
+    controller/state tests, 3 DAO `getInt`/`setInt` tests, 1 Settings widget
+    test). Limitation: the limit is recorded here but not yet enforced —
+    trimming to budget, and re-measuring after a lower limit is chosen, is
+    P8-04.)
+-   [x] **P8-04** Implement safe automatic cache eviction. --- Done
+    (Trimming now runs on three triggers, all through
+    `ThumbnailDiskCache.enforceBudget`, which hands the work to
+    `FileDiskCacheStore.evictToBudget` — least-recently-used first (file mtime,
+    refreshed on every read), only files carrying this store's own prefix and
+    suffix inside the cache root, nothing else on disk is reachable
+    (ARCHITECTURE §10, CACHE-006)):
+    1. **On write, amortised.** `ThumbnailDiskCache.write` counts new bytes and
+       only re-reads the budget and scans once 256 KiB (or a sixteenth of a
+       large budget) has landed, so scrolling a grid does not turn every
+       preview into a directory listing. The budget is re-read at that moment
+       from `AppPreferenceKeys.cacheLimitBytes`, so a changed limit applies
+       without rebuilding the provider.
+    2. **On startup.** `CacheController.load` measures, and trims only when the
+       cache is actually over the persisted budget, then republishes the
+       smaller size.
+    3. **On a limit change.** `setLimit` persists and immediately trims, so
+       lowering the limit takes effect without waiting for the next thumbnail
+       write and the row stops claiming a size that no longer exists.
+    Re-measuring on demand deliberately does **not** evict: the refresh action
+    only reports. A non-positive budget is treated as a no-op rather than
+    "delete everything", and a failed trim leaves the measured size untouched
+    so the row still tells the truth. The amortised check means the cache may
+    briefly overshoot by up to one check interval between scans.
+    Checks: `dart format` clean; `flutter analyze lib test` no issues; full
+    `flutter test` suite 992 passed (new: 6 `ThumbnailDiskCache` budget tests
+    incl. LRU order and write-triggered trimming over a real temp directory, 5
+    controller eviction tests using a recording fake store — startup trim,
+    within-budget no-op, lowering/raising the limit, and refresh-never-evicts).
+    Device verification pending: eviction cost on a real cache directory with a
+    few thousand previews, and OS-initiated reclamation of `cacheDir`.)
+-   [x] **P8-05** Implement Clear Cache. --- Done
+    (Settings → Storage & cache now ends with a **Clear cache** row: it names
+    the scope up front ("Cached previews only — your downloads and original
+    videos stay"), only enables itself once something is stored, and asks for
+    confirmation in an `AlertDialog` before deleting anything
+    (`cache_clear_confirm` key, Cancel/"Clear", matching the collection-delete
+    dialog). `CacheController.clearCache` calls
+    `ThumbnailDiskCache.clear`, which delegates to
+    `FileDiskCacheStore.clear` — only files carrying this store's own prefix
+    inside the cache root are removed, plus interrupted `.part` temp files;
+    nothing outside that root is reachable (ARCHITECTURE §10, CACHE-006). On
+    success the row is re-measured immediately, so the size drops to
+    `Nothing cached yet.` instead of showing a figure that no longer exists;
+    the freed bytes are reported in a snackbar (`Cache cleared — 4.0 KB
+    freed.`). A failed clear surfaces `error.userMessage` and deliberately
+    leaves the measured size untouched rather than claiming an empty cache.
+    Previews already decoded into the session LRU stay in memory; they are not
+    part of the reported cache size and die with the process, so clearing does
+    not trigger a refetch storm for tiles that are already on screen.
+    Checks: `dart format` clean; `flutter analyze lib test` no issues; full
+    `flutter test` suite 998 passed (new: 3 controller tests — clear reports
+    freed bytes and re-measures, clearing an empty cache is a no-op, a failed
+    clear keeps the size and returns the error; 3 Settings widget tests —
+    confirm-then-clear with the snackbar, cancel deletes nothing, and the row
+    is disabled while the cache is empty). Deletion safety against downloads
+    and originals is proven at the store level in P8-06.)
+-   [x] **P8-06** Test Clear Cache never removes downloads, originals,
+    or user metadata. --- Done
+    (`test/unit/cache/clear_cache_safety_test.dart` proves CACHE-006 against a
+    real directory tree through the production wiring
+    (`storagePathsProvider` → `thumbnailDiskCacheProvider` →
+    `CacheController.clearCache`), so the guarantee rests on what survives on
+    disk rather than on a mocked deletion. Eight tests: cached previews are
+    deleted while a download and a download deliberately named
+    `thumb_<32 hex>.bin` survive byte-for-byte; an original video in a normal
+    media folder, a `mytube.sqlite`-shaped file in the support directory, a
+    sibling `mytube_cache_backup/` folder, and an unmanaged `.nomedia` inside
+    the cache root all survive; a fresh install's clear is a no-op; a missing
+    cache root deletes nothing; `enforceBudget(1)` (eviction, P8-04) removes
+    every managed entry yet leaves a `thumb_aaa.bin` in the downloads folder;
+    trimming leaves a nested subdirectory and unmanaged files inside the cache
+    root alone; and after a clear the `videoItems` row, its favourite flag, the
+    source location's durable `thumbnailUri`, `cacheLimitBytes`, and
+    `scanEntireDevice` are all unchanged while the reported size becomes
+    `CacheUsage.empty`.
+    Checks: `dart format` clean; `flutter analyze lib test` no issues; full
+    `flutter test` suite 1006 passed (8 new). Device verification is written up
+    in the new `docs/device_testing_p8.md` and is still **pending** on CPH2719 —
+    in particular real Android cache-directory placement, OS-initiated
+    reclamation of `cache/`, trim cost over a genuinely populated cache, and the
+    adb probe that a real download file survives a clear.
+
+    **Phase 8 status:** automated coverage is complete and green; on-device
+    confirmation of the items listed in `docs/device_testing_p8.md` is the only
+    remaining step before the phase can be called verified on hardware.)
 
 ## Phase 9 --- OneDrive (first cloud provider)
 
@@ -1260,6 +1461,135 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
     (API 36) plus at least one lower-API check for PiP degradation; results
     recorded per-scenario. Awaiting owner physical-device run.)
 
+## Launch-path read hardening (device ANR investigation)
+
+-   [x] **PERF-01** Cut the UI-isolate work the cold start fires. --- Done
+    Investigated the `Skipped 126 frames` / `dumpMsgWhenAnr` main-thread stall
+    reported from a debug run on CPH2719. Findings: the coordinators built in
+    `MainScaffold.initState` do no blocking work (listeners plus unawaited
+    bridge calls), Drift already runs behind `NativeDatabase.createBackgroundConnection`
+    via `drift_flutter` (so no SQLite executes on the UI isolate), and
+    `ThumbnailPlugin` decodes on `Dispatchers.IO`. The stall is work
+    *amplification* on the launch tab, fixed at the source:
+    *   `RecommendationsController._readAvailability` issued one
+            `getSourceLocationsForVideo` round trip per library item (N+1) while
+            Discover, Reels and the queue all wait on it. New
+            `BatchSourceLocationReader` capability (declared in the domain layer,
+            implemented by `DriftVideoRepository` over
+            `SourceLocationsDao.locationsForItems`) collapses it to one query,
+            preserving primary-first ordering per item. Repositories without the
+            capability (the 13 test fakes) keep the per-item path.
+    *   The Discover glance rows read the whole library and truncated to 10 in
+            Dart (`recentlyAddedRowProvider`, `tagRowProvider` — up to 14 such
+            reads at launch). `LibraryQuery` gained an optional `limit`, applied
+            in SQL after the existing `ORDER BY`, so SQLite stops at the rows the
+            row would have kept.
+    *   `NowPlayingInfo` gained value equality, so an identical re-publish no
+            longer notifies `MainScaffold`'s `ref.listen` / re-enters the
+            media-session sync.
+    Tests: batched-read and SQL-limit cases in `drift_video_repository_test`, a
+    new `now_playing_test` for the equality/notification behaviour, and
+    `_FakeRepository` in `discover_screen_test` now honours `limit` so the
+    bounding tests verify the plumbing. `dart format`, `flutter analyze`
+    (no issues) and the full `flutter test` suite (868 passed) run clean.
+    **Remaining:** device re-run of the debug build to confirm the ANR is gone;
+    still open by choice — the shell's `IndexedStack` builds all five tabs at
+    launch (Library/Saved query eagerly too) and `_MainFeed` builds its whole
+    page in a `Column`. Deferring hidden tabs would change the documented
+    keep-alive behaviour, so that needs a decision before it is attempted.
+
+-   [x] **FIX-01** Reels tab entry wrote a provider during the build pass. ---
+    Done
+    A debug run raised `FlutterError: Tried to modify a provider while the
+    widget tree was building`. Cause: `ReelsScreen._syncPlayback()` reached
+    `_playItem()`, which publishes the now-playing label via
+    `nowPlayingProvider.notifier.setTitle` with no `await` in between, and it
+    was invoked from two lifecycle contexts — `didUpdateWidget` (firing the
+    moment the shell switched to the Reels tab) and the `ref.listen`
+    `reelsQueueProvider` callback registered in `build`. Only the `initState`
+    entry had been deferred to a post-frame callback.
+    Fix: `_syncPlayback()` now coalesces into a single scheduled
+    `addPostFrameCallback` and the autoplay decision moved to
+    `_startCurrentReel()`, so every entry point is legal; `video_player_screen`
+    already deferred and needed no change. Regression test
+    `entering the tab from inactive publishes its label without writing a
+    provider during the build pass` reproduces the identical error message when
+    the deferral is removed (verified by temporarily bypassing it), and passes
+    with it. `dart format` and `flutter analyze` clean; full `flutter test`
+    suite 869 passed.
+
+## Settings --- scan locations (SET-002 folder management)
+
+-   [x] **SET-A** Device-wide scan confirmed as current behavior:
+    `LocalMediaAdapter.listVideos` enumerates every MediaStore-indexed video
+    plus SAF-persisted folders. A `scan_entire_device` typed preference
+    (`app_preferences`, default `true`) now limits local scans to the
+    user-selected folders; `listVideos` skips the MediaStore enumeration in
+    folders-only mode while `getVideo`/`checkAvailability` still resolve
+    previously indexed `content://media/` items so they stay playable.
+    `LibraryRefreshService` receives a null MediaStore seam in folders-only
+    mode, avoiding an unnecessary permission prompt. --- Done
+-   [x] **SET-B** `ScanSettingsNotifier` (domain/services) owns the toggle
+    (persisted via `AppPreferencesDao`, graceful fallback when the database
+    is unavailable) and the SAF folder list (`openFolderPicker` /
+    `releasePersistedUri` through the bridge seam; grants persist natively on
+    pick). SettingsScreen replaced its placeholder with a "Video scanning"
+    section: whole-device switch, folder list with decoded names, and add/remove
+    actions. Widget tests pump the documented in-memory `databaseProvider`
+    override. --- Done
+    Checks: `dart format` clean; `flutter analyze` no issues; full
+    `flutter test` suite 890 passed (new: 3 scan-scope adapter tests, 13
+    notifier/helper tests, 5 settings-screen widget tests; remaining drift
+    multi-instance warnings are pre-existing harness noise also present in
+    the baseline `test_log.txt`). Device verification pending: real folder
+    picker round-trip and folders-only scan on CPH2719.
+-   [x] **SET-C** Scope changes apply immediately: every Settings action
+    (toggle, add folder, remove folder) is followed by
+    `LibraryRefreshNotifier.rescanAndDeindex()` — a full library refresh with
+    the new scope plus a de-index of local entries the scan proved absent.
+    The orchestration lives on the refresh notifier (invoked from the
+    Settings handlers), not on `ScanSettingsNotifier`: the refresh provider
+    already watches `scanEntireDeviceProvider`, and reading back from the
+    settings notifier produced a Riverpod 3 `CircularDependencyError` at
+    runtime. `SourceLocationsDao.deindexMissingLocalSources` (exposed via the
+    new `LocalSourceSweeper` capability implemented by `DriftVideoRepository`)
+    deletes `localMediaStore`/`selectedFolder` rows marked `missing`/
+    `permissionRevoked` in one transaction plus video items left without any
+    source; other providers' rows, items with surviving duplicate sources,
+    and original files are never touched. `ScanMergeService` no longer marks
+    unseen URIs missing when a run is cancelled mid-loop, so a partial scan
+    can neither hide nor de-index entries it never observed. SettingsScreen
+    shows a progress row while the rescan runs, skips it on picker cancel,
+    and states the new effect in its footnote. --- Done
+    Checks: `dart format` clean; `flutter analyze` no issues; full
+    `flutter test` suite 903 passed (new: 8 de-index database tests, 4
+    rescanAndDeindex wiring tests incl. failed-rescan-keeps-rows guard and a
+    circular-dependency regression guard, 1 picker-cancel widget test, 3
+    added widget rescan assertions). Device verification pending:
+    end-to-end toggle-off with real MediaStore library de-indexing on
+    CPH2719.
+-   [x] **SET-D** Scope-change rescans stay responsive and observable.
+    A folder-only scan can leave thousands of device rows unseen, so both
+    post-scan writes are now batched instead of per-row: `ScanMergeService`
+    marks unseen locations through the new `SourceLocationBulkMarker`
+    capability (chunked `UPDATE`s, with a per-row fallback for repositories
+    without it), and `SourceLocationsDao.deindexMissingLocalSources`
+    processes ids in 400-row chunks (delete / survivor lookup / orphan
+    delete) so no statement exceeds the 999-parameter cap of older Android
+    SQLite builds. The native SAF walk no longer uses `DocumentFile`
+    per-property IPC: `SaffBridgePlugin` queries each directory once with a
+    projection and keeps the old walk only as a provider fallback. The
+    Settings progress row now shows the live scan phase and adapter count,
+    ticks elapsed seconds, offers Cancel while a scan runs, and no longer
+    stays stuck after removing a folder (the tile's own unmount used to skip
+    the parent's busy reset). --- Done
+    Checks: `dart format` clean; `flutter analyze` no issues;
+    `gradlew :app:compileDebugKotlin` BUILD SUCCESSFUL; full `flutter test`
+    suite 909 passed (new: 1200-row chunked sweep, 1200-row bulk marking,
+    empty-list no-op, capability advertisement, per-row marking fallback,
+    progress/cancel widget test). Device verification pending: perceived
+    scan duration on a large folder on CPH2719.
+
 ## Phase 14 --- Backup and restore
 
 -   [ ] **P14-01** Define a versioned backup format. --- Todo
@@ -1285,3 +1615,24 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
 -   [ ] **P15-05** Document codec/server/provider limitations. --- Todo
 -   [ ] **P15-06** Prepare Android release build/signing only when
     distribution is planned. --- Todo
+
+## Thumbnail preview quality (defect fix)
+
+-   [x] **P7-01a** Fix blurry library previews. --- Done. Cause: the
+    native decode was capped at a 256 px longest side
+    (`ThumbnailBridge.defaultMaxSidePx` / `ThumbnailPlugin.DEFAULT_MAX_SIDE_PX`)
+    while a full-width 16:9 card is ~1100 physical px wide, so every tile was
+    upscaled ~4x; the fallback encode also used RGB_565 and JPEG q85. Now: the
+    decoder target is 1080 px and is passed explicitly by
+    `ThumbnailService.decodeMaxSidePx`; `ThumbnailPlugin` decodes a real frame
+    first with `getScaledFrameAtTime` (API 27+, no full-resolution intermediate),
+    applies container rotation, bounds concurrent decodes to two, and only falls
+    back to `loadThumbnail` (which is capped at MediaStore's pre-generated
+    ~512 px) when the frame cannot be decoded; JPEG quality is 90 and alpha is
+    flattened onto ARGB_8888. Local preview cache keys carry the decode size
+    (`uri@1080px`), so previews persisted by the old tier are re-decoded exactly
+    once instead of being served forever; remote preview keys are unchanged.
+    `VideoThumbnail` samples with `FilterQuality.medium`. Covered by
+    `thumbnail_service_test.dart` (tier requested, stale-size entry not reused).
+    Requires an APK build to compile the Kotlin; on-device sharpness not yet
+    verified in this environment.

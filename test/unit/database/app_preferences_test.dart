@@ -110,6 +110,40 @@ void main() {
       expect(v, equals(1.5));
     });
 
+    // ── getInt / setInt ────────────────────────────────────────────────────
+
+    test('getInt returns defaultValue when absent', () async {
+      final v = await db.appPreferencesDao.getInt(
+        AppPreferenceKeys.cacheLimitBytes,
+        defaultValue: 42,
+      );
+      expect(v, equals(42));
+    });
+
+    test('setInt and getInt round-trip a byte budget', () async {
+      await db.appPreferencesDao.setInt(
+        AppPreferenceKeys.cacheLimitBytes,
+        500 * 1024 * 1024,
+      );
+      final v = await db.appPreferencesDao.getInt(
+        AppPreferenceKeys.cacheLimitBytes,
+      );
+      expect(v, equals(524288000));
+    });
+
+    test('getInt falls back when the stored value is unparseable', () async {
+      // A corrupt/reverted row must not crash the Settings screen.
+      await db.appPreferencesDao.setString(
+        AppPreferenceKeys.cacheLimitBytes,
+        'not-a-number',
+      );
+      final v = await db.appPreferencesDao.getInt(
+        AppPreferenceKeys.cacheLimitBytes,
+        defaultValue: 7,
+      );
+      expect(v, equals(7));
+    });
+
     // ── watchString ───────────────────────────────────────────────────────
 
     test('watchString emits null then value as preference is set', () async {

@@ -63,7 +63,7 @@ class AsyncValueWidget<T> extends StatelessWidget {
     return value.when(
       loading: () => onLoading ?? LoadingIndicator(message: loadingMessage),
       error: (err, _) {
-        final safeMessage = _safeMessage(err);
+        final safeMessage = AsyncValueWidget.safeMessage(err);
         final retry = onRetry;
         if (onError case final customError?) {
           return customError(safeMessage, retry);
@@ -75,7 +75,11 @@ class AsyncValueWidget<T> extends StatelessWidget {
   }
 
   /// Converts an error to a user-facing message, never exposing internals.
-  static String _safeMessage(Object error) {
+  ///
+  /// Public so sliver-based surfaces that cannot use this widget's box layout
+  /// (the Discover feed is a `SliverList`, see ADR-009) still render an
+  /// identical, equally safe [ErrorState] message.
+  static String safeMessage(Object error) {
     if (error is AppException) return error.userMessage;
     return UncaughtAppErrorNotifier.fallbackUserMessage;
   }

@@ -14,6 +14,17 @@ class NowPlayingInfo {
   /// Display label for the current item, or null when nothing has been played.
   final String? title;
 
+  /// Value equality so publishing the same label twice is a no-op for Riverpod:
+  /// a [Notifier] only notifies when `oldValue != newValue`, so an identical
+  /// re-publish never reaches the app shell's `ref.listen` / the media-session
+  /// re-sync.
+  @override
+  bool operator ==(Object other) =>
+      other is NowPlayingInfo && other.title == title;
+
+  @override
+  int get hashCode => title.hashCode;
+
   /// Fallback used when a session is live but no title was published.
   static const String unlabeled = 'Video';
 }

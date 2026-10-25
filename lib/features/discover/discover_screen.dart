@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/core/ui/async_value_widget.dart';
 import 'package:mytube/core/ui/empty_state.dart';
+import 'package:mytube/core/ui/error_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/continue_watching.dart';
 import 'package:mytube/domain/services/discover_feed_filter.dart';
-import "package:mytube/domain/services/discover_feed_mode.dart";
 import "package:mytube/domain/services/discover_feed_provider.dart";
 import "package:mytube/domain/services/recommendation_scorer_provider.dart";
 import 'package:mytube/features/discover/discover_browse_rows.dart';
@@ -18,20 +18,22 @@ import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/saved_providers.dart';
 
 /// Discover tab (NAV-002, P6-07) — redesigned per the Discover Page Redesign
-/// (§16–§19).
+/// (§16–§19) and composed as a YouTube-style home feed (ADR-009).
 ///
-/// The page is now composed of independently stateful sections over a single
-/// shared pipeline:
-///  * a horizontally scrollable **Continue Watching** strip, shown only when the
-///    user has partially watched something (§16),
-///  * a **filter-chip row** (All + saved collections pinned-first + tags) that
-///    repopulates the main feed with the selected group's items (UI-2),
-///  * capped horizontal **browse rows** — Recently Added, one row per collection
-///    (pinned-first) and one per tag — surfaced as glanceable video cards (UI-3),
-///  * a compact **feed-mode control** (Recommended / Recently Added / Unwatched)
-///    that repopulates one main feed rather than spawning separate feeds (§17),
-///  * the main **vertical** feed, lazily paged as the user scrolls toward the
-///    bottom (ADR-005) — the Library tab owns the complete list.
+/// The page is one lazy [CustomScrollView] over a single shared pipeline:
+///  * a **pinned filter-chip row** that carries everything the page needs:
+///    the feed modes (Recommended / Recently Added / Unwatched), then the
+///    user's collections (pinned-first) and tags (UI-2, ADR-009). Selecting a
+///    mode chip is the `All` state; selecting a collection/tag chip narrows
+///    the same feed to that group,
+///  * a horizontally scrollable **Continue Watching** strip, shown only when
+///    the user has partially watched something (§16),
+///  * the **main vertical feed**, lazily paged as the user scrolls toward the
+///    bottom (ADR-005) — the Library tab owns the complete list,
+///  * capped horizontal **browse rows** — Recently Added, one row per
+///    collection (pinned-first) and one per tag — interleaved *into* the first
+///    page rather than stacked in front of the feed, so the first screen of
+///    real content is never buried (ADR-009).
 ///
 /// Empty and error states are handled per section. Refreshing goes through the
 /// body's pull-to-refresh so a glance screen can redraw without leaving it, and
@@ -47,6 +49,10 @@ class DiscoverScreen extends ConsumerStatefulWidget {
 class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// How close to the bottom (in pixels) triggers a lazy page request.
   static const double _loadMoreOffset = 400;
+
+  /// Height of the pinned chip row at the default text scale. It grows with
+  /// the text scaler so the pills never clip (see [_chipRowExtent]).
+  static const double _chipRowBaseHeight = 44;
 
   late final ScrollController _scrollController;
 
@@ -107,22 +113,28 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     );
   }
 
+  /// Pinned header extent: the base row plus whatever the text scaler adds to a
+  /// 13sp pill label, so larger accessibility text never clips the chips.
+  double _chipRowExtent(BuildContext context) {
+    final scaledLabel = MediaQuery.textScalerOf(context).scale(13);
+    return _chipRowBaseHeight + (scaledLabel - 13);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Watching the feed provider subscribes this surface to mode changes (which
-    // repopulate the list), so the control and header rebuild in lock-step. The
+    // repopulate the list), so the chips and header rebuild in lock-step. The
     // notifier is then *read* purely for the current selection label — watching
     // a plain getter would not emit.
     ref.watch(recommendationsProvider);
     final mode = ref.read(recommendationsProvider.notifier).mode;
     // The active chip drives both the feed contents (via [discoverFeedProvider]
-    // watching the same filter) and this surface's heading + mode-control
-    // visibility. Collections/tags feed the chip row through their existing
-    // providers; while they load the row just shows the `All` chip.
+    // watching the same filter) and this surface's chip selection. Collections/
+    // tags feed the chip row through their existing providers; while they load
+    // the row just shows the three mode chips.
     final filter = ref.watch(discoverFeedFilterProvider);
     final collections = ref.watch(savedCollectionsProvider).value ?? const [];
     final tags = ref.watch(libraryTagsProvider).value ?? const [];
-    final heading = filter.heading ?? mode.label;
 
     return Scaffold(
       appBar: AppBar(
@@ -139,52 +151,83 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
       body: RefreshIndicator(
         key: const ValueKey('discover_refresh_indicator'),
         onRefresh: _refresh,
-        child: ListView(
+        child: CustomScrollView(
           key: const ValueKey('discover_feed_list'),
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          children: [
-            _ContinueWatchingSection(onTap: _openItem),
-            const SizedBox(height: 8),
-            DiscoverFilterChips(
-              collections: collections,
-              tags: tags,
-              selected: filter,
-              onSelected: (next) =>
-                  ref.read(discoverFeedFilterProvider.notifier).toggle(next),
-            ),
-            const SizedBox(height: 8),
-            // Capped horizontal browse rows (Recently Added + one per pinned-
-            // first collection + one per tag), UI-3. Each row collapses when it
-            // has nothing to show, so an empty library stays clean.
-            const DiscoverBrowseRows(),
-            // The mode control only applies to the `All` feed; a collection/tag
-            // chip already fixes the ordering, so it is hidden while filtered.
-            if (filter.isAll)
-              FeedModeControl(
-                mode: mode,
-                onChanged: (next) =>
-                    ref.read(recommendationsProvider.notifier).setMode(next),
+          slivers: [
+            // Chips stay pinned under the app bar: the row *is* the page's only
+            // active-state indicator (the old duplicated feed heading is gone),
+            // so it has to remain visible while the feed scrolls.
+            SliverPersistentHeader(
+              pinned: true,
+              delegate: _ChipRowHeaderDelegate(
+                height: _chipRowExtent(context),
+                child: DiscoverFilterChips(
+                  mode: mode,
+                  onModeSelected: (next) {
+                    // A mode chip is the `All` state, so it also clears any
+                    // active collection/tag filter (ADR-009).
+                    ref.read(recommendationsProvider.notifier).setMode(next);
+                    ref.read(discoverFeedFilterProvider.notifier).clear();
+                  },
+                  collections: collections,
+                  tags: tags,
+                  selected: filter,
+                  onSelected: (next) => ref
+                      .read(discoverFeedFilterProvider.notifier)
+                      .toggle(next),
+                ),
               ),
-            if (filter.isAll) const SizedBox(height: 8),
-            _SectionHeader(
-              heading,
-              key: const ValueKey('discover_feed_header'),
             ),
-            AsyncValueWidget<DiscoverFeedState>(
-              key: const ValueKey('discover_recommendations'),
-              value: ref.watch(discoverFeedProvider),
-              loadingMessage: 'Thinking...',
-              onRetry: () => ref.invalidate(discoverFeedProvider),
-              onData: (feed) => _MainFeed(items: feed.items, onTap: _openItem),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: _ContinueWatchingSection(onTap: _openItem),
+              ),
             ),
-            const _FeedPaginationFooter(),
+            _FeedSliver(onTap: _openItem),
+            const SliverToBoxAdapter(child: _FeedPaginationFooter()),
           ],
         ),
       ),
     );
   }
+}
+
+/// The pinned chip-row sliver. Rendered over an opaque page-coloured box so
+/// scrolling feed content never shows through the pinned row.
+class _ChipRowHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _ChipRowHeaderDelegate({required this.height, required this.child});
+
+  /// Row extent at the current text scale.
+  final double height;
+
+  final Widget child;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: SizedBox.expand(child: child),
+    );
+  }
+
+  /// The row is cheap (a handful of pills) and its selection is parent state,
+  /// so a rebuild on every parent pass is both correct and negligible. This is
+  /// consulted when the parent rebuilds — never per scroll frame.
+  @override
+  bool shouldRebuild(covariant _ChipRowHeaderDelegate oldDelegate) => true;
 }
 
 /// Continue Watching strip (§16). Hidden entirely when nothing is partially
@@ -205,81 +248,112 @@ class _ContinueWatchingSection extends ConsumerWidget {
       onError: (_, _) => const SizedBox.shrink(),
       onData: (items) {
         if (items.isEmpty) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: DiscoverCarousel(
-            title: 'Continue watching',
-            height: _kContinueWatchingHeight,
-            children: [
-              for (final item in items)
-                ContinueWatchingTile(item: item, onTap: () => onTap(item)),
-            ],
-          ),
+        return DiscoverCarousel(
+          title: 'Continue watching',
+          height: ContinueWatchingTile.heightFor(context),
+          children: [
+            for (final item in items)
+              ContinueWatchingTile(item: item, onTap: () => onTap(item)),
+          ],
         );
       },
     );
   }
 }
 
-/// Cross-axis extent for the Continue Watching strip, shared with the tile
-/// proportions in [discover_sections.dart].
-const double _kContinueWatchingHeight = 210;
+/// The main feed as a lazy sliver, with the capped browse rows interleaved
+/// after the first [_shelfInsertIndex] cards (ADR-009).
+///
+/// Interleaving inside page one is deliberate: the first page holds
+/// [DiscoverFeedState]'s page size (20), so the shelves are always placed
+/// within it and appending later pages never shifts their position.
+///
+/// Pagination itself lives in [discoverFeedProvider]; this widget only renders
+/// the current slice. The subtree is keyed `discover_recommendations` in every
+/// state so tests and callers address the feed surface, not a particular
+/// branch.
+class _FeedSliver extends ConsumerWidget {
+  const _FeedSliver({required this.onTap});
 
-/// A small section heading used between Discover's content blocks.
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title, {super.key});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
-      child: Text(
-        title,
-        style: theme.textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-}
-
-/// The main feed body: a vertical list of [VideoItemCard]s for the currently
-/// revealed pages, or a helpful empty state when the selected mode has no
-/// eligible results (§17.2). Pagination itself lives in [discoverFeedProvider];
-/// this widget only renders the current slice.
-class _MainFeed extends StatelessWidget {
-  const _MainFeed({required this.items, required this.onTap});
-
-  final List<VideoItemSummary> items;
   final void Function(VideoItemSummary item) onTap;
 
+  /// How many feed cards precede the browse-row block.
+  static const int _shelfInsertIndex = 6;
+
+  /// Horizontal inset shared by the feed and its skeleton, matching the app's
+  /// 12dp page gutter.
+  static const EdgeInsets _gutter = EdgeInsets.symmetric(horizontal: 12);
+
   @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return const EmptyState(
-        title: 'No videos yet',
-        message:
-            'Videos you add from the Library tab, or import from a '
-            'source, will show up here.',
-        icon: Icons.video_library_outlined,
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final item in items)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: VideoItemCard(
-              key: ValueKey('discover_item_${item.id.value}'),
-              item: item,
-              onTap: () => onTap(item),
+  Widget build(BuildContext context, WidgetRef ref) {
+    // `when` keeps the previous data visible during a refresh (only the initial
+    // load shows the skeleton), matching [AsyncValueWidget]'s behaviour.
+    return ref
+        .watch(discoverFeedProvider)
+        .when(
+          loading: () => const SliverToBoxAdapter(
+            key: ValueKey('discover_recommendations'),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: DiscoverFeedSkeleton(),
             ),
           ),
-      ],
+          error: (error, _) => SliverToBoxAdapter(
+            key: const ValueKey('discover_recommendations'),
+            child: ErrorState(
+              message: AsyncValueWidget.safeMessage(error),
+              onRetry: () => ref.invalidate(discoverFeedProvider),
+            ),
+          ),
+          data: (feed) {
+            if (feed.items.isEmpty) {
+              return const SliverFillRemaining(
+                key: ValueKey('discover_recommendations'),
+                hasScrollBody: false,
+                child: EmptyState(
+                  title: 'No videos yet',
+                  message:
+                      'Videos you add from the Library tab, or import from a '
+                      'source, will show up here.',
+                  icon: Icons.video_library_outlined,
+                ),
+              );
+            }
+            return _buildFeed(feed.items);
+          },
+        );
+  }
+
+  /// Flattens cards and the single browse-row block into one slot list. Only
+  /// visible slots are mounted by [SliverList], so this stays lazy even though
+  /// the widgets themselves are constructed eagerly (page size is 20).
+  Widget _buildFeed(List<VideoItemSummary> items) {
+    final insertAt = items.length < _shelfInsertIndex
+        ? items.length
+        : _shelfInsertIndex;
+    final slots = <Widget>[];
+    for (var i = 0; i <= items.length; i++) {
+      if (i == insertAt) slots.add(const DiscoverBrowseRows());
+      if (i == items.length) break;
+      final item = items[i];
+      slots.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: VideoItemCard(
+            key: ValueKey('discover_item_${item.id.value}'),
+            item: item,
+            onTap: () => onTap(item),
+          ),
+        ),
+      );
+    }
+    return SliverPadding(
+      key: const ValueKey('discover_recommendations'),
+      padding: _gutter,
+      sliver: SliverList.builder(
+        itemCount: slots.length,
+        itemBuilder: (_, index) => slots[index],
+      ),
     );
   }
 }

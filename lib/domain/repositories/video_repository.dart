@@ -375,6 +375,63 @@ class VideoFilter {
   }
 }
 
+/// Optional capability of a [VideoRepository] that can read the source
+/// locations of many items in one round trip.
+///
+/// Declared separately rather than added to [VideoRepository] because the
+/// interface already has many test fakes, and the batch read is a performance
+/// concern of list surfaces, not a domain requirement. Callers pattern-match
+/// on it and fall back to [VideoRepository.getSourceLocationsForVideo] when a
+/// repository does not advertise it — the same capability-declaration style the
+/// source adapters use.
+abstract interface class BatchSourceLocationReader {
+  /// Source locations for every id in [ids], keyed by video item id, ordered
+  /// per item exactly as [VideoRepository.getSourceLocationsForVideo] orders
+  /// them (primary first, then earliest-attached).
+  ///
+  /// Items with no recorded location are absent from the map, mirroring the
+  /// empty list the single-item call returns for them.
+  Future<Result<Map<String, List<SourceLocation>>>> getSourceLocationsForVideos(
+    Iterable<VideoItemId> ids,
+  );
+}
+
+/// Optional capability of a [VideoRepository] that can de-index stale local
+/// source rows after a scan-location change (SET-002).
+///
+/// Declared separately rather than added to [VideoRepository] because the
+/// interface already has many test fakes; callers pattern-match on it and
+/// skip the sweep when a repository does not advertise it — the same
+/// capability-declaration style as [BatchSourceLocationReader]. The Drift
+/// repository implements it over the source-locations DAO.
+abstract interface class LocalSourceSweeper {
+  /// Deletes local (`localMediaStore` / `selectedFolder`) source rows
+  /// currently marked `missing` or `permissionRevoked`, plus any video item
+  /// left without a single source location. Never touches other providers'
+  /// rows and never modifies original files. Returns the number of source
+  /// rows removed.
+  Future<Result<int>> deindexMissingLocalSources();
+}
+
+/// Optional capability of a [VideoRepository] that can set availability on
+/// many source locations in one (internally chunked) statement.
+///
+/// Declared separately rather than added to [VideoRepository] because the
+/// interface already has many test fakes and the batch write is a
+/// performance concern of the scan merge: without it, a scan that no longer
+/// reaches N sources issues N separate `UPDATE`s. Callers pattern-match on
+/// it and fall back to per-row updates — the same capability-declaration
+/// style as [BatchSourceLocationReader].
+abstract interface class SourceLocationBulkMarker {
+  /// Marks every location in [ids] with [availability] and [checkedAt].
+  /// Returns the number of rows updated.
+  Future<Result<int>> markSourceLocationsAvailability(
+    Iterable<String> ids,
+    AvailabilityState availability,
+    DateTime checkedAt,
+  );
+}
+
 /// The full Library query: search text + filters + sort (LIB-003/004/005).
 ///
 /// Used as a Riverpod family argument, so it implements value equality.
@@ -383,6 +440,7 @@ class LibraryQuery {
     this.search = '',
     this.filter = const VideoFilter(),
     this.sort = LibrarySort.recentlyAdded,
+    this.limit,
   });
 
   /// Case-insensitive title substring; blank means no text restriction.
@@ -393,6 +451,15 @@ class LibraryQuery {
 
   /// Requested ordering.
   final LibrarySort sort;
+
+  /// Maximum number of rows to return, applied in SQL, or null for no bound.
+  ///
+  /// Glance surfaces (the Discover browse rows) only ever render a handful of
+  /// cards, so they declare their cap here instead of reading the whole library
+  /// and truncating in Dart. That keeps the launch reads bounded — the sort is
+  /// already resolved by SQLite, so the first [limit] rows in [sort] order are
+  /// exactly the ones the surface would have kept.
+  final int? limit;
 
   /// True when the query is equivalent to browsing the whole library.
   bool get isDefault =>
@@ -409,10 +476,11 @@ class LibraryQuery {
       other is LibraryQuery &&
       other.search == search &&
       other.filter == filter &&
-      other.sort == sort;
+      other.sort == sort &&
+      other.limit == limit;
 
   @override
-  int get hashCode => Object.hash(search, filter, sort);
+  int get hashCode => Object.hash(search, filter, sort, limit);
 }
 
 /// A user tag offered as a filter option (id + display name).

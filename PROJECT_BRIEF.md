@@ -53,11 +53,11 @@ personal videos. It is not a social network.
 ## Navigation
 
 Five bottom tabs: 1. **Discover** --- default launch tab; a YouTube-style
-home feed with a Continue Watching strip, a filter-chip row (All /
-collections / tags) that repopulates a single main feed, capped
-horizontal browse shelves, a mode-selected feed (Recommended / Recently
-Added / Unwatched) in the `All` state, and pinned-first collections, all
-backed by rule-based suggestions and one shared video card. 2.
+home feed with a pinned filter-chip row (Recommended / Recently Added /
+Unwatched, then collections and tags) that repopulates a single main feed,
+a Continue Watching strip, capped horizontal browse shelves interleaved
+into the feed, and pinned-first collections, all backed by rule-based
+suggestions and one flat shared video card. 2.
 **Reels** --- full-screen, vertical swipe-first playback. 3. **Library**
 --- searchable and filterable collection (owns the complete list). 4.
 **Saved** --- favorites and custom collections. 5. **Settings** ---
@@ -104,25 +104,29 @@ local.
 
 The Discover experience runs one shared ranking pipeline behind three
 feed modes (Recommended, Recently Added, Unwatched) that repopulate a
-single main feed. It is **session-aware**: a suggestion being *shown*
-is tracked as exposure separately from watch progress, so recently
-surfaced items are de-prioritized without ever faking playback history.
-The feed pages lazily and stably as the user scrolls --- without
+single main feed. The mode is chosen from the feed's own chip row rather
+than a separate control: `Recommended` is the unfiltered state, so an
+active mode chip and an unfiltered feed are the same thing. The chip row
+stays pinned while the feed scrolls. It is **session-aware**: a suggestion
+being *shown* is tracked as exposure separately from watch progress, so
+recently surfaced items are de-prioritized without ever faking playback
+history. The feed pages lazily and stably as the user scrolls --- without
 re-ranking on every scroll --- and stops cleanly at an explicit end of
-feed. A filter-chip row (`All`, then saved collections pinned-first, then
-tags) repopulates that same feed from the selected collection or tag
-through the identical pagination and exposure path, resetting paging the
-way a mode change does. Capped, lazily-built horizontal shelves --- a
+feed. Selecting a saved collection or tag in that same row repopulates the
+feed from that group through the identical pagination and exposure path,
+resetting paging the way a mode change does; tapping a mode chip returns
+to the unfiltered feed. Capped, lazily-built horizontal shelves --- a
 Recently Added strip plus one row per collection and per tag --- sit
-above the feed as glanceable browse content, each bounded in rows and
-cards and hidden when its group has nothing to show. A Continue Watching
-strip surfaces partially-watched videos in most-recent order and resumes
-them, and pinned collections lead both the chip row and the collection
-shelves. Every video uses one shared app-wide card --- a 16:9 thumbnail
-with a duration badge and progress overlay, a title, and a metadata line
-of relative date plus a single source/provider label (from the item's
-primary source location). Pinning is a durable organization preference
-that changes neither membership nor favourites.
+*inside* the feed, after the first few cards, as glanceable browse content
+rather than a wall in front of it, each bounded in rows and cards and
+hidden when its group has nothing to show. A Continue Watching strip
+surfaces partially-watched videos in most-recent order and resumes them,
+and pinned collections lead both the chip row and the collection shelves.
+Every video uses one shared app-wide card --- a flat, borderless 16:9
+thumbnail with a duration badge and progress overlay, a two-line title,
+and a metadata line of relative date plus a single source/provider label
+(from the item's primary source location). Pinning is a durable
+organization preference that changes neither membership nor favourites.
 
 ## Privacy and security
 

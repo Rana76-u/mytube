@@ -87,6 +87,44 @@ Future<void> _insertSourceLocation(
       ),
     );
 
+/// Minimal [VideoRepository] without the [SourceLocationBulkMarker]
+/// capability: only the calls a scope-reducing merge needs are implemented,
+/// everything else throws so a stray call fails loudly.
+class _PlainRepository implements VideoRepository {
+  _PlainRepository(this._locations);
+
+  final List<SourceLocation> _locations;
+  final List<String> markedIds = [];
+
+  @override
+  Future<Result<List<SourceLocation>>> getSourceLocationsByProvider(
+    ProviderType providerType,
+  ) async => Ok(List.of(_locations));
+
+  @override
+  Future<Result<void>> updateSourceLocationAvailability(
+    String locationId,
+    AvailabilityState availability,
+    DateTime checkedAt,
+  ) async {
+    markedIds.add(locationId);
+    return const Ok(null);
+  }
+
+  @override
+  Future<Result<void>> updateSourceLocationMetadata(
+    String locationId, {
+    AvailabilityState? availability,
+    String? displayName,
+    int? durationMs,
+    DateTime? lastCheckedAt,
+  }) async => const Ok(null);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('unexpected call: ${invocation.memberName}');
+}
+
 // ---------------------------------------------------------------------------
 // Tests — P3-04 ScanMergeService
 // ---------------------------------------------------------------------------
@@ -906,6 +944,45 @@ void main() {
         db.sourceLocations,
       )..where((t) => t.id.equals('sl1'))).getSingle();
       expect(original.isPrimary, isTrue);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Missing-marking fallback (SET-002 rescan responsiveness)
+  // -------------------------------------------------------------------------
+
+  group('ScanMergeService missing-marking without bulk capability', () {
+    test('falls back to one update per unseen row and counts them', () async {
+      // A repository that only contracts [VideoRepository] — no
+      // [SourceLocationBulkMarker] — must still mark every unseen row, which
+      // keeps third-party/test fakes working after the batch optimisation.
+      final repository = _PlainRepository([
+        const SourceLocation(
+          id: 'sl1',
+          videoItemId: 'v1',
+          providerType: ProviderType.localMediaStore,
+          sourceUri: '/a.mp4',
+          availability: AvailabilityState.available,
+        ),
+        const SourceLocation(
+          id: 'sl2',
+          videoItemId: 'v2',
+          providerType: ProviderType.localMediaStore,
+          sourceUri: '/b.mp4',
+          availability: AvailabilityState.available,
+        ),
+      ]);
+
+      final result = await ScanMergeService(repository: repository)
+          .mergeResults(
+            providerType: ProviderType.localMediaStore,
+            scannedVideos: [_video(sourceId: '/a.mp4')],
+            cancellationToken: CancellationToken(),
+          );
+
+      expect(result, isA<Ok<ScanMergeResult>>());
+      expect((result as Ok<ScanMergeResult>).value.markedMissing, 1);
+      expect(repository.markedIds, ['sl2']);
     });
   });
 }

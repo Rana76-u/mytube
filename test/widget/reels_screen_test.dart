@@ -26,6 +26,7 @@ import 'package:mytube/features/reels/reel_gesture_feedback.dart';
 import 'package:mytube/features/reels/reels_queue_controller.dart';
 import 'package:mytube/features/reels/reels_screen.dart';
 import 'package:mytube/features/reels/reels_video_surface.dart';
+import 'package:mytube/playback/now_playing.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/playback_provider.dart';
 import 'package:mytube/playback/player_handle.dart';
@@ -458,6 +459,33 @@ void main() {
       expect(resolver.resolvedItemIds, isEmpty);
       expect(handles, isEmpty);
       expect(find.byType(VideoSurface), findsNothing);
+    });
+
+    testWidgets('entering the tab from inactive publishes its label without '
+        'writing a provider during the build pass', (tester) async {
+      final container = await pumpReels(
+        tester,
+        _FakeRepository(items: [_item('a'), _item('b')]),
+        active: false,
+      );
+      expect(container.read(nowPlayingProvider).title, isNull);
+
+      // Switching to the Reels tab rebuilds the kept-alive element, so
+      // `didUpdateWidget` runs inside the build pass. Autoplay publishes the
+      // now-playing label, which is a provider write — Riverpod refuses it while
+      // the tree is building and raised a runtime FlutterError on device, so the
+      // start must land after the frame instead.
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: ReelsScreen(active: true)),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpAndSettle();
+      expect(container.read(nowPlayingProvider).title, 'Video a');
+      expect(handles, isNotEmpty);
     });
 
     testWidgets('swiping resolves and starts playback of the next reel', (

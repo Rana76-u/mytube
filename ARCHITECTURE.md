@@ -237,7 +237,7 @@ unwatched items, - source preference/availability and recency, -
 controlled randomization, - penalty for recently shown items, - modest
 influence from local viewing history.
 
-Implemented flow (disc redesign §16–§19, ADR-001–ADR-006):
+Implemented flow (disc redesign §16–§19, ADR-001–ADR-006, ADR-012):
 
 -   **One shared pipeline, many modes.** `RecommendationScorer`
     produces a ranked candidate list; `RecommendationsController` (a
@@ -262,39 +262,65 @@ Implemented flow (disc redesign §16–§19, ADR-001–ADR-006):
     items (via the shared playback-completion policy), ordered by
     most-recent activity with a stable id tie-break; the strip hides
     itself entirely when nothing qualifies (§16).
--   **App-wide card.** `VideoItemCard` is the single video tile across
-    Library, Discover, Saved, Favorites and search: a full-width 16:9
-    thumbnail with a duration badge and a thin progress overlay, then the
-    title and a metadata line of *provider label + relative date*. The
-    provider label is `VideoItemSummary.primaryProvider`, resolved in the
-    Drift repository by reading the item's primary (else earliest) source
-    location's `providerType` — one representative provider for
-    multi-source duplicates, with no extra dependency (ADR-006).
--   **Filter chips drive the feed.** `DiscoverFilterChips` renders
-    `All` plus every saved collection (pinned-first) and library tag. The
-    selection lives in a framework-free `discoverFeedFilterProvider` (a
-    sealed `DiscoverFeedFilter` + `Notifier`). `DiscoverFeedController
-    .build` *watches* that filter: `All` follows the ranked mode
-    pipeline; a collection/tag reads that group through the same
-    repository (`getCollectionItems` / `queryItems(tagIds)`). Because the
-    build watches the filter, a chip change re-runs it and the paginator's
-    generation guard resets pagination and dedup exactly like a mode
-    change (UI-2, ADR-005). The mode control only shows in the `All`
-    state.
--   **Capped browse rows.** `DiscoverBrowseRows` stacks a
-    `recentlyAddedRowProvider` strip, one row per collection
+-   **App-wide flat card.** `VideoItemCard` is the single video tile
+    across Library, Discover, Saved, Favorites and search, and it carries
+    no Material surface: an `InkWell` over a `Column` painted straight on
+    the page background, a 16:9 thumbnail clipped to the shared
+    `VideoThumbnail.radius` (12dp) with its duration badge, favourite badge
+    and thin progress overlay, then a YouTube-style metadata row — a 32dp
+    source avatar (`showSourceAvatar`, off inside horizontal rows), a
+    two-line title and a `provider label · relative date` line. The card
+    owns no outer margins, so every list supplies its own separation (16dp
+    between cards, 12dp side inset) with `ListView.separated`. The provider
+    label is `VideoItemSummary.primaryProvider`, resolved in the Drift
+    repository by reading the item's primary (else earliest) source
+    location's `providerType` — one representative provider for multi-source
+    duplicates, with no extra dependency (ADR-006).
+-   **Pinned chip row is the single control surface.**
+    `DiscoverFilterChips` renders the three modes (`Recommended`,
+    `Recently added`, `Unwatched`) followed by every saved collection
+    (pinned-first) and library tag, and lives in a
+    `SliverPersistentHeader(pinned: true)` over an opaque `scheme.surface`
+    background with a `PageStorageKey`, so it stays on screen while the feed
+    scrolls without losing its horizontal offset. `Recommended` *is* the
+    `All` state, so there is no separate `All` chip and no mode control or
+    feed heading — a mode chip reads as selected only while the filter is
+    `All`. The selection lives in a framework-free
+    `discoverFeedFilterProvider` (a sealed `DiscoverFeedFilter` +
+    `Notifier`). `DiscoverFeedController.build` *watches* that filter: `All`
+    follows the ranked mode pipeline; a collection/tag reads that group
+    through the same repository (`getCollectionItems` /
+    `queryItems(tagIds)`). Because the build watches the filter, a chip
+    change re-runs it and the paginator's generation guard resets pagination
+    and dedup exactly like a mode change (ADR-005). Tapping a mode chip
+    resets the filter to `DiscoverFeedNoFilter` and sets the mode; tapping a
+    filter chip keeps the existing `toggle`. Chip styling comes from
+    `AppTheme.chipThemeFor(scheme)` — stadium, borderless, no checkmark — so
+    no widget hard-codes a pill colour (ADR-012).
+-   **One sliver page.** `DiscoverScreen` is a single `CustomScrollView`:
+    pinned chip row → Continue Watching → the feed sliver → the pagination
+    footer. The feed is a `SliverList` (a genuinely lazy viewport), with
+    loading → the static `DiscoverFeedSkeleton`, error → `ErrorState`, and
+    empty → `SliverFillRemaining` + `EmptyState`, all sharing the
+    `discover_recommendations` key.
+-   **Interleaved browse rows.** `DiscoverBrowseRows` build a
+    `recentlyAddedRowProvider` strip plus one row per collection
     (`collectionRowProvider`, pinned-first) and one per tag
-    (`tagRowProvider`) — each bounded to ≈10 cards and ≈6 rows, each
-    fetched lazily by a family provider only when its row builds, and
-    collapsing to nothing when its group is empty/loading/error (UI-3).
-    These sit alongside — not in place of — the `All`-state Recently Added
-    *mode*; the main feed remains the deep-paging surface.
+    (`tagRowProvider`) — each bounded to ≈10 cards and ≈6 rows, each fetched
+    lazily by a family provider only when its row builds, and collapsing to
+    nothing when its group is empty/loading/error (UI-3). The block is one
+    slot inside the feed list, inserted at `min(6, items.length)` — after
+    the sixth card, which is always inside page 1's 20 entries, so
+    appending pages never moves it. It sits *between* cards rather than
+    stacking in front of the feed; the main feed remains the deep-paging
+    surface. Row heights are text-scale aware so the fixed-height carousels
+    never clip (ADR-012).
 -   **Pinned collections.** Both the chip row and the collection browse
     rows inherit the repository's pinned-first ordering (§19, ADR-004).
 -   **Shared presentation.** Reuses `VideoThumbnail`/`VideoItemCard` and
     small Discover-only widgets (`DiscoverCarousel`,
-    `ContinueWatchingTile`, `DiscoverFilterChips`, `FeedModeControl`,
-    `DiscoverBrowseRows`); no database, recommendation, or playback logic
+    `ContinueWatchingTile`, `DiscoverFilterChips`, `DiscoverBrowseRows`,
+    `DiscoverFeedSkeleton`); no database, recommendation, or playback logic
     lives in these widgets (ADR-006).
 
 Do not upload history or build an ML pipeline for MVP.

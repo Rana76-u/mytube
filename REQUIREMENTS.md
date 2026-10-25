@@ -32,9 +32,11 @@ local/direct-URL release.
     Settings.
 -   **NAV-002:** Discover is the default launch screen.
 -   **NAV-003:** Discover presents a single mode-selected feed
-    (Recommended / Recently Added / Unwatched), a Continue Watching
-    strip when items are eligible, and pinned-first collections, backed
-    by rule-based suggestions. Reels remains its own dedicated tab.
+    (Recommended / Recently Added / Unwatched) chosen from the chip row —
+    `Recommended` is the unfiltered state, so no separate feed-mode control
+    exists — a Continue Watching strip when items are eligible, and
+    pinned-first collections, backed by rule-based suggestions. Reels remains
+    its own dedicated tab.
 -   **NAV-004:** Saved contains favorites and custom collections.
 -   **NAV-005:** Settings contains provider connections, folder
     management, playback preferences, downloads, cache, and library

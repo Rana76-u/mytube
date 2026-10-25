@@ -153,10 +153,10 @@ void main() {
 
       final meta = find.byKey(const ValueKey('meta_test-id'));
       expect(meta, findsOneWidget);
-      expect(
-        tester.widget<Text>(meta).data,
-        allOf(contains('OneDrive'), contains('Added')),
-      );
+      // Compact `provider · age` line — the old `Added ` prefix is gone so the
+      // row reads like a YouTube metadata line (ADR-012).
+      expect(tester.widget<Text>(meta).data, contains('OneDrive'));
+      expect(tester.widget<Text>(meta).data, isNot(contains('Added')));
     });
 
     testWidgets('overlays a progress bar for a partially-watched item (UI-1)', (
@@ -178,6 +178,85 @@ void main() {
       );
 
       expect(find.byKey(const ValueKey('progress_test-id')), findsOneWidget);
+    });
+
+    // ── Flat YouTube tile (ADR-012) ─────────────────────────────────────────
+
+    testWidgets('renders flat — no Material Card surface around the tile', (
+      tester,
+    ) async {
+      await _pump(tester, VideoItemCard(item: _item(), onTap: () {}));
+
+      // The tile paints straight onto the page background so the feed reads as
+      // one continuous list (ADR-012).
+      expect(find.byType(Card), findsNothing);
+    });
+
+    testWidgets('leads the metadata row with the source-provider avatar', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        VideoItemCard(
+          item: VideoItemSummary(
+            id: VideoItemId('test-id'),
+            title: 'Test Video',
+            isFavourite: false,
+            watchProgressMs: 0,
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+            primaryProvider: ProviderType.oneDrive,
+          ),
+          onTap: () {},
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('source_avatar_test-id')),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.cloud_outlined), findsOneWidget);
+    });
+
+    testWidgets('drops the source avatar for narrow carousel cards', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        VideoItemCard(
+          item: _item(),
+          width: 168,
+          showSourceAvatar: false,
+          onTap: () {},
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('source_avatar_test-id')), findsNothing);
+    });
+
+    testWidgets('lays out without overflowing at 1.3x text scale', (
+      tester,
+    ) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await _pump(
+        tester,
+        VideoItemCard(
+          item: VideoItemSummary(
+            id: VideoItemId('test-id'),
+            // A long title is what actually stresses the two-line clamp.
+            title: 'A very long video title that has to wrap onto two lines',
+            durationMs: 100000,
+            isFavourite: true,
+            watchProgressMs: 40000,
+            createdAt: DateTime.now().millisecondsSinceEpoch,
+            primaryProvider: ProviderType.directUrl,
+          ),
+          onTap: () {},
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
     });
   });
 }

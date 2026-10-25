@@ -121,6 +121,30 @@ void main() {
       expect(AppTheme.light.colorScheme.primary, lightScheme.primary);
       expect(AppTheme.seedColor, const Color(0xFFFF0000));
     });
+
+    testWidgets('chip pills come from the theme, never per-widget colours '
+        '(ADR-012)', (tester) async {
+      final darkChips = AppTheme.dark.chipTheme;
+
+      // Borderless stadium, no M3 checkmark — the reference home-feed pills.
+      expect(darkChips.shape, isA<StadiumBorder>());
+      expect(darkChips.side, BorderSide.none);
+      expect(darkChips.showCheckmark, isFalse);
+      // Resting on the medium charcoal, inverting to white with a dark label.
+      expect(darkChips.backgroundColor, const Color(0xFF272727));
+      expect(darkChips.selectedColor, const Color(0xFFFFFFFF));
+      expect(darkChips.labelStyle?.color, const Color(0xFFFFFFFF));
+      expect(darkChips.secondaryLabelStyle?.color, const Color(0xFF0F0F0F));
+
+      // The light theme keeps the same relationship with its own scheme.
+      final lightChips = AppTheme.light.chipTheme;
+      expect(lightChips.shape, isA<StadiumBorder>());
+      expect(lightChips.selectedColor, AppTheme.light.colorScheme.onSurface);
+      expect(
+        lightChips.labelStyle?.color,
+        AppTheme.light.colorScheme.onSurface,
+      );
+    });
   });
 
   group('AppErrorSurface theme colours (P1-02)', () {

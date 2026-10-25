@@ -91,6 +91,17 @@ void main() {
     matching: find.byType(VideoItemCard),
   );
 
+  /// Whether the pill rendered under [key] reads as active. The key sits on the
+  /// chip-row wrapper, so the [ChoiceChip] is looked up inside it.
+  bool chipSelected(WidgetTester tester, String key) => tester
+      .widget<ChoiceChip>(
+        find.descendant(
+          of: find.byKey(ValueKey(key)),
+          matching: find.byType(ChoiceChip),
+        ),
+      )
+      .selected;
+
   group('DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign §16–§19)', () {
     testWidgets('shows a useful empty state for an empty library', (
       tester,
@@ -102,8 +113,8 @@ void main() {
       expect(find.byType(VideoItemCard), findsNothing);
     });
 
-    testWidgets('the mode-selected feed lists the library under the '
-        'Recommended heading', (tester) async {
+    testWidgets('the mode-selected feed lists the library under an active '
+        'Recommended chip', (tester) async {
       await pumpDiscover(
         tester,
         _FakeRepository(
@@ -112,15 +123,15 @@ void main() {
             _item(id: 'b'),
           ],
         ),
+        // The feed is a lazy sliver now: a full-width 16:9 tile fills most of
+        // the default viewport, so a taller surface is needed to build both
+        // cards (ADR-012).
+        surface: _tallSurface,
       );
 
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('discover_feed_header')),
-          matching: find.text('Recommended'),
-        ),
-        findsOneWidget,
-      );
+      // The chip row is now the page's only active-state indicator — the old
+      // duplicated feed heading was removed in the YouTube rework (ADR-012).
+      expect(chipSelected(tester, 'discover_chip_mode_recommended'), isTrue);
       expect(find.text('Video a'), findsWidgets);
       expect(find.text('Video b'), findsWidgets);
       // The optional strips stay hidden when there is nothing to show (§16.3).
@@ -173,6 +184,8 @@ void main() {
           ],
           unavailableIds: {'gone'},
         ),
+        // Both cards must be built to assert on the order (lazy sliver).
+        surface: _tallSurface,
       );
 
       await tester.pumpAndSettle();
@@ -221,8 +234,8 @@ void main() {
     });
   });
 
-  // ── Feed-mode control (§17) ──────────────────────────────────────────────
-  group('Discover feed-mode control (§17.1/§17.2)', () {
+  // ── Feed-mode chips (§17, ADR-012) ───────────────────────────────────────
+  group('Discover feed-mode chips (§17.1/§17.2)', () {
     testWidgets('starts on Recommended and switching re-drives the feed', (
       tester,
     ) async {
@@ -238,21 +251,17 @@ void main() {
         container.read(recommendationsProvider.notifier).mode,
         DiscoverFeedMode.recommended,
       );
+      expect(chipSelected(tester, 'discover_chip_mode_recommended'), isTrue);
 
       await tester.tap(
-        find.byKey(const ValueKey('discover_feed_mode_recentlyAdded')),
+        find.byKey(const ValueKey('discover_chip_mode_recentlyAdded')),
       );
       await tester.pumpAndSettle();
 
-      // The main-feed heading reflects the new mode (keyed, so it is not
-      // confused with the segmented control's own 'Recently Added' label).
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('discover_feed_header')),
-          matching: find.text('Recently Added'),
-        ),
-        findsOneWidget,
-      );
+      // The chip row itself shows the active mode — the segmented control and
+      // the duplicated feed heading are both gone (ADR-012).
+      expect(chipSelected(tester, 'discover_chip_mode_recentlyAdded'), isTrue);
+      expect(chipSelected(tester, 'discover_chip_mode_recommended'), isFalse);
       expect(
         container.read(recommendationsProvider.notifier).mode,
         DiscoverFeedMode.recentlyAdded,
@@ -467,11 +476,6 @@ void main() {
 
   // ── Filter chips driving the main feed (UI-2) ────────────────────────────
   group('Discover filter chips (UI-2)', () {
-    Finder feedHeadingText(String text) => find.descendant(
-      of: find.byKey(const ValueKey('discover_feed_header')),
-      matching: find.text(text),
-    );
-
     // Read the feed's current items from the provider rather than counting
     // rendered cards, which the lazy viewport would only partially build.
     List<String> feedIds(ProviderContainer container) => container
@@ -506,12 +510,10 @@ void main() {
           surface: _tallSurface,
         );
 
-        // All state: the mode feed + control are present.
+        // All state: the mode pipeline drives the feed and `Recommended` is the
+        // active pill.
         expect(container.read(discoverFeedFilterProvider).isAll, isTrue);
-        expect(
-          find.byKey(const ValueKey('discover_feed_mode_control')),
-          findsOneWidget,
-        );
+        expect(chipSelected(tester, 'discover_chip_mode_recommended'), isTrue);
         expect(feedIds(container), ['lib1', 'lib2']);
 
         await tester.tap(
@@ -523,14 +525,11 @@ void main() {
           container.read(discoverFeedFilterProvider),
           const DiscoverFeedCollection('c1', 'Travel'),
         );
-        // The main feed now lists only the collection's items and is titled with
-        // the collection name; the mode control is hidden while filtered.
+        // The main feed now lists only the collection's items; the collection
+        // pill is the active one and every mode pill reads unselected.
         expect(feedIds(container), ['a', 'b', 'c']);
-        expect(feedHeadingText('Travel'), findsOneWidget);
-        expect(
-          find.byKey(const ValueKey('discover_feed_mode_control')),
-          findsNothing,
-        );
+        expect(chipSelected(tester, 'discover_chip_collection_c1'), isTrue);
+        expect(chipSelected(tester, 'discover_chip_mode_recommended'), isFalse);
       },
     );
 
@@ -557,10 +556,12 @@ void main() {
         const DiscoverFeedTag('t1', 'cooking'),
       );
       expect(feedIds(container), ['x', 'y']);
-      expect(feedHeadingText('cooking'), findsOneWidget);
+      expect(chipSelected(tester, 'discover_chip_tag_t1'), isTrue);
     });
 
-    testWidgets('the All chip restores the mode-driven feed', (tester) async {
+    testWidgets('the Recommended chip restores the mode-driven feed', (
+      tester,
+    ) async {
       final container = await pumpDiscover(
         tester,
         _FakeRepository(
@@ -589,17 +590,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(feedIds(container), ['a']);
 
-      await tester.tap(find.byKey(const ValueKey('discover_chip_all')));
+      // `Recommended` doubles as the `All` state, so it restores the mode feed
+      // and clears the collection narrowing (ADR-012).
+      await tester.tap(
+        find.byKey(const ValueKey('discover_chip_mode_recommended')),
+      );
       await tester.pumpAndSettle();
 
       expect(container.read(discoverFeedFilterProvider).isAll, isTrue);
       expect(feedIds(container), ['lib1', 'lib2']);
-      // The heading falls back to the active mode label and the control returns.
-      expect(feedHeadingText('Recommended'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('discover_feed_mode_control')),
-        findsOneWidget,
-      );
+      expect(chipSelected(tester, 'discover_chip_mode_recommended'), isTrue);
+      expect(chipSelected(tester, 'discover_chip_collection_c1'), isFalse);
     });
 
     testWidgets('changing the chip resets pagination to the new group', (
@@ -641,6 +642,143 @@ void main() {
       expect(feed.endOfFeed, isTrue);
     });
   });
+
+  // ── YouTube feed composition (ADR-012) ───────────────────────────────────
+  group('Discover YouTube feed composition (ADR-012)', () {
+    /// A phone-width, tall viewport: the feed is several cards high without
+    /// building the whole paged list, so slot order can be measured.
+    const Size phoneTall = Size(400, 3000);
+
+    double topOf(WidgetTester tester, String key) =>
+        tester.getTopLeft(find.byKey(ValueKey(key))).dy;
+
+    testWidgets('interleaves the browse rows after the sixth feed card', (
+      tester,
+    ) async {
+      final items = [for (var i = 0; i < 10; i++) _item(id: 'v$i')];
+      await pumpDiscover(
+        tester,
+        _FakeRepository(items: items),
+        surface: phoneTall,
+      );
+
+      // The Recently Added strip used to sit *in front of* the feed (a wall of
+      // shelves before any content); it now starts after the sixth card.
+      expect(
+        topOf(tester, 'discover_item_v5'),
+        lessThan(topOf(tester, 'browse_Recently Added_v0')),
+      );
+      expect(
+        topOf(tester, 'browse_Recently Added_v0'),
+        lessThan(topOf(tester, 'discover_item_v6')),
+      );
+    });
+
+    testWidgets('places the browse rows after a feed shorter than the insert '
+        'index', (tester) async {
+      await pumpDiscover(
+        tester,
+        _FakeRepository(items: [_item(id: 'only')]),
+        surface: phoneTall,
+      );
+
+      expect(
+        topOf(tester, 'discover_item_only'),
+        lessThan(topOf(tester, 'browse_Recently Added_only')),
+      );
+    });
+
+    testWidgets('choosing a mode chip clears an active collection filter', (
+      tester,
+    ) async {
+      final container = await pumpDiscover(
+        tester,
+        _FakeRepository(
+          items: [_item(id: 'lib1')],
+          collections: [
+            CollectionSummary(
+              id: 'c1',
+              name: 'Travel',
+              itemCount: 1,
+              createdAt: _nowMs,
+            ),
+          ],
+          collectionItems: {
+            'c1': [_item(id: 'a')],
+          },
+        ),
+        surface: _tallSurface,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('discover_chip_collection_c1')),
+      );
+      await tester.pumpAndSettle();
+      expect(container.read(discoverFeedFilterProvider).isAll, isFalse);
+
+      await tester.tap(
+        find.byKey(const ValueKey('discover_chip_mode_unwatched')),
+      );
+      await tester.pumpAndSettle();
+
+      // A mode chip *is* the `All` state, so narrowing is dropped and the mode
+      // pipeline takes over again (ADR-012).
+      expect(container.read(discoverFeedFilterProvider).isAll, isTrue);
+      expect(
+        container.read(recommendationsProvider.notifier).mode,
+        DiscoverFeedMode.unwatched,
+      );
+    });
+
+    testWidgets('shows static skeleton tiles while the first page loads', (
+      tester,
+    ) async {
+      final gate = Completer<void>();
+      await pumpDiscover(
+        tester,
+        _FakeRepository(
+          items: [_item(id: 'a')],
+          gate: gate.future,
+        ),
+      );
+
+      expect(find.byType(DiscoverFeedSkeleton), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('discover_feed_skeleton_tile_0')),
+        findsOneWidget,
+      );
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byType(DiscoverFeedSkeleton), findsNothing);
+    });
+
+    testWidgets('keeps the chip row pinned while the feed scrolls', (
+      tester,
+    ) async {
+      await pumpDiscover(
+        tester,
+        _FakeRepository(items: [for (var i = 0; i < 20; i++) _item(id: 'v$i')]),
+      );
+      expect(
+        find.byKey(const ValueKey('discover_chip_mode_recommended')),
+        findsOneWidget,
+      );
+
+      await tester.drag(
+        find.byKey(const ValueKey('discover_feed_list')),
+        const Offset(0, -900),
+      );
+      await tester.pumpAndSettle();
+
+      // Pinned: the row (the page's only active-state indicator) survives the
+      // scroll instead of being disposed above the viewport.
+      expect(
+        find.byKey(const ValueKey('discover_chip_mode_recommended')),
+        findsOneWidget,
+      );
+    });
+  });
 }
 
 class _FakeRepository implements VideoRepository {
@@ -651,6 +789,7 @@ class _FakeRepository implements VideoRepository {
     this.collectionItems = const {},
     this.tags = const [],
     this.tagItems = const {},
+    this.gate,
   });
 
   final List<VideoItemSummary> items;
@@ -666,14 +805,22 @@ class _FakeRepository implements VideoRepository {
   /// Items returned by [queryItems] when the query narrows to a single tag id.
   final Map<String, List<VideoItemSummary>> tagItems;
 
+  /// When supplied, [queryItems] waits on it before answering — used to hold
+  /// the feed in its loading state and assert the skeleton.
+  final Future<void>? gate;
+
   @override
   Future<Result<List<VideoItemSummary>>> queryItems(LibraryQuery query) async {
+    if (gate != null) await gate;
     // A tag chip filters through the same query entry point the Library uses.
     final tagIds = query.filter.tagIds;
-    if (tagIds.length == 1 && tagItems.containsKey(tagIds.first)) {
-      return Ok(tagItems[tagIds.first]!);
-    }
-    return Ok(items);
+    final rows = tagIds.length == 1 && tagItems.containsKey(tagIds.first)
+        ? tagItems[tagIds.first]!
+        : items;
+    // Honours the bound the way the Drift repository does — the browse rows
+    // rely on it, so a fake that ignored `limit` would hide an unbounded read.
+    final limit = query.limit;
+    return Ok(limit == null ? rows : rows.take(limit).toList());
   }
 
   @override

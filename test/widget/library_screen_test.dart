@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/error_state.dart';
+import 'package:mytube/data/database/app_database.dart' show AppDatabase;
+import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
@@ -20,8 +22,14 @@ import 'package:mytube/sources/source_adapter.dart';
 void main() {
   group('LibraryScreen (P5-01)', () {
     testWidgets('shows empty state when library is empty', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith((ref) => _FakeEmptyRepository()),
         ],
       );
@@ -59,8 +67,14 @@ void main() {
         ),
       ];
 
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: items),
           ),
@@ -82,8 +96,14 @@ void main() {
     });
 
     testWidgets('shows error state when repository fails', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith((ref) => _FakeErrorRepository()),
         ],
       );
@@ -101,8 +121,14 @@ void main() {
     });
 
     testWidgets('displays search button in app bar', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith((ref) => _FakeEmptyRepository()),
         ],
       );
@@ -122,8 +148,14 @@ void main() {
     testWidgets('tapping search reveals the title search field', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -147,8 +179,14 @@ void main() {
     });
 
     testWidgets('search filters the list to matching titles', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -177,8 +215,14 @@ void main() {
     testWidgets('search with no matches shows the no-results state', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -207,8 +251,14 @@ void main() {
     testWidgets('closing search restores the full library list', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -242,8 +292,14 @@ void main() {
     testWidgets('sort menu opens with the four LIB-005 options', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -270,8 +326,14 @@ void main() {
     testWidgets('selecting the Duration sort reorders the list', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -302,8 +364,14 @@ void main() {
     // ── Filter sheet (P5-03, LIB-004) ────────────────────────────
 
     testWidgets('filter button opens the filter sheet', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -331,8 +399,14 @@ void main() {
     });
 
     testWidgets('filter sheet lists available tags as options', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(
               items: _sampleItems,
@@ -363,8 +437,14 @@ void main() {
     testWidgets('applying the favourites filter narrows the list', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -395,8 +475,14 @@ void main() {
     testWidgets('filtering everything out shows the No Matches state', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -425,8 +511,14 @@ void main() {
     // ── Favourite toggle (P5-05, LIB-002) ────────────────────────
 
     testWidgets('tapping the heart favourite a video', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -460,8 +552,14 @@ void main() {
 
     testWidgets('un-favouriting while the favourites filter is active drops '
         'the item from the list', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -496,8 +594,14 @@ void main() {
     // ── Manage tags (P5-06, LIB-009) ─────────────────────────────
 
     testWidgets('the tag button opens the manage-tags sheet', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -525,8 +629,14 @@ void main() {
     testWidgets('creating a tag in the sheet assigns it to the video', (
       tester,
     ) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -599,8 +709,14 @@ void main() {
           diagnosticMessage: 'test: gate denied',
         ),
       );
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),
@@ -624,8 +740,14 @@ void main() {
 
     testWidgets('the empty state offers a Scan device action', (tester) async {
       final refresh = _FakeRefreshNotifier(addedOnRefresh: 0);
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith((ref) => _FakeEmptyRepository()),
           libraryRefreshServiceProvider.overrideWith(() => refresh),
         ],
@@ -648,8 +770,14 @@ void main() {
     });
 
     testWidgets('tapping a video card opens the player screen', (tester) async {
+      // The scan-settings notifier reads the typed preferences table, so the
+      // documented in-memory database override keeps these harnesses
+      // platform-free (avoids opening the real on-disk AppDatabase twice).
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
       final container = ProviderContainer(
         overrides: [
+          databaseProvider.overrideWithValue(db),
           videoRepositoryProvider.overrideWith(
             (ref) => _FakeRepository(items: _sampleItems),
           ),

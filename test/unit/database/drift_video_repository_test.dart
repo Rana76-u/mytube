@@ -458,6 +458,28 @@ void main() {
       expect(items.map((i) => i.id.value).toSet(), equals({'x', 'y', 'z'}));
     });
 
+    test('queryItems applies limit in SQL after the sort', () async {
+      // Newest-first ordering must survive the bound: the row SQLite stops at
+      // is the one a glance row would have kept.
+      for (var i = 0; i < 5; i++) {
+        await _insertFullItem(db, 'v$i', createdAt: _now + i * 1000);
+      }
+
+      final items =
+          (await repo.queryItems(const LibraryQuery(limit: 2))
+                  as Ok<List<VideoItemSummary>>)
+              .value;
+      expect(items.map((i) => i.id.value).toList(), equals(['v4', 'v3']));
+
+      // A bound larger than the library returns everything, and no bound is
+      // unchanged behaviour.
+      final all =
+          (await repo.queryItems(const LibraryQuery(limit: 99))
+                  as Ok<List<VideoItemSummary>>)
+              .value;
+      expect(all, hasLength(5));
+    });
+
     // ── getTags (P5-03 tag-filter options) ────────────────────────────
 
     test('getTags returns tags ordered by name', () async {
@@ -1129,6 +1151,44 @@ void main() {
               .value;
       expect(locs.first.id, 'sl-b');
       expect(locs.first.isPrimary, isTrue);
+    });
+
+    test('getSourceLocationsForVideos batches per-item ordering and grouping '
+        'into one read', () async {
+      await _insertItem(db, 'v1');
+      await _insertItem(db, 'v2');
+      await _insertItem(db, 'v3');
+      // v3 has no location at all; v1 mirrors the primary-not-first case the
+      // single-item read orders away.
+      await insertSource('sl-a', 'v1');
+      await insertSource('sl-b', 'v1', isPrimary: true);
+      await insertSource('sl-c', 'v2');
+
+      final grouped =
+          (await repo.getSourceLocationsForVideos([
+                    VideoItemId('v1'),
+                    VideoItemId('v2'),
+                    VideoItemId('v3'),
+                  ])
+                  as Ok<Map<String, List<SourceLocation>>>)
+              .value;
+
+      // Primary first, exactly like getSourceLocationsForVideo.
+      expect(grouped['v1']!.map((l) => l.id), ['sl-b', 'sl-a']);
+      expect(grouped['v2']!.single.id, 'sl-c');
+      // An item with no location is absent, not an empty entry.
+      expect(grouped.containsKey('v3'), isFalse);
+    });
+
+    test('getSourceLocationsForVideos with no ids reads nothing', () async {
+      await _insertItem(db, 'v1');
+      await insertSource('sl-a', 'v1');
+
+      final grouped =
+          (await repo.getSourceLocationsForVideos(const [])
+                  as Ok<Map<String, List<SourceLocation>>>)
+              .value;
+      expect(grouped, isEmpty);
     });
 
     test(

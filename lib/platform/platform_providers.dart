@@ -11,6 +11,7 @@ import 'package:mytube/platform/pip_bridge_impl.dart';
 import 'package:mytube/platform/remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/saf_bridge.dart';
 import 'package:mytube/platform/saf_bridge_impl.dart';
+import 'package:mytube/platform/storage_paths.dart';
 import 'package:mytube/platform/thumbnail_bridge.dart';
 import 'package:mytube/platform/thumbnail_bridge_impl.dart';
 
@@ -42,6 +43,15 @@ final thumbnailBridgeProvider = Provider<ThumbnailBridge>(
 /// [ProviderContainer(overrides: [...])].
 final remoteThumbnailFetcherProvider = Provider<RemoteThumbnailFetcher>(
   (ref) => HttpRemoteThumbnailFetcher(),
+);
+
+/// Riverpod provider for the app's storage roots (P8-01).
+///
+/// Cache and download directories are resolved through `path_provider` and
+/// verified to be non-overlapping before cache code may use them. Override
+/// with a fake to point tests at a temporary directory.
+final storagePathsProvider = Provider<StoragePaths>(
+  (ref) => PathProviderStoragePaths(),
 );
 
 /// Riverpod provider for the Android audio-focus bridge (P13-01).

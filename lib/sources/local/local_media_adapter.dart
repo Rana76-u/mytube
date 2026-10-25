@@ -14,6 +14,13 @@ import 'package:mytube/sources/source_adapter.dart';
 /// exactly matches a MediaStore [contentUri] (conservative rule — ambiguous
 /// matches stay separate, see ARCHITECTURE §5).
 ///
+/// The scan scope is controlled by [fullDeviceScan]: when it returns `false`
+/// (folders-only mode, the SET-002 scan-location setting) [listVideos] skips the
+/// whole-device MediaStore enumeration and returns only SAF-persisted folder
+/// videos. Single-item lookups ([getVideo] / [checkAvailability]) still route
+/// `content://media/` ids to MediaStore so items indexed before the mode
+/// change remain resolvable and playable.
+///
 /// No [package:flutter] import — this class is a plain Dart object so it
 /// can be tested with [FakeMediaStoreBridge] / [FakeSafBridge] without
 /// initialising [TestWidgetsFlutterBinding].
@@ -21,11 +28,17 @@ class LocalMediaAdapter implements VideoSourceAdapter {
   LocalMediaAdapter({
     required MediaStoreBridge mediaStoreBridge,
     required SafBridge safBridge,
+    bool Function() fullDeviceScan = _scanEntireDeviceByDefault,
   }) : _mediaStore = mediaStoreBridge,
-       _saf = safBridge;
+       _saf = safBridge,
+       // ignore: prefer_initializing_formals
+       _fullDeviceScan = fullDeviceScan;
 
   final MediaStoreBridge _mediaStore;
   final SafBridge _saf;
+  final bool Function() _fullDeviceScan;
+
+  static bool _scanEntireDeviceByDefault() => true;
 
   // The primary type exposed by this adapter.  Videos from SAF-selected
   // folders are tagged [ProviderType.selectedFolder] in their individual
@@ -60,19 +73,22 @@ class LocalMediaAdapter implements VideoSourceAdapter {
     }
 
     // --- MediaStore ---
-    final msResult = await _mediaStore.queryVideos();
-    List<MediaStoreVideo> msVideos;
-    switch (msResult) {
-      case Ok(:final value):
-        msVideos = value;
-      case Err(:final error):
-        if (error is PermissionDeniedError) {
-          // Permission absent: silently proceed with an empty MediaStore list.
-          msVideos = [];
-        } else {
-          // Propagate unexpected errors.
-          return Err(error);
-        }
+    // Folders-only mode skips the whole-device enumeration entirely.
+    List<MediaStoreVideo> msVideos = const [];
+    if (_fullDeviceScan()) {
+      final msResult = await _mediaStore.queryVideos();
+      switch (msResult) {
+        case Ok(:final value):
+          msVideos = value;
+        case Err(:final error):
+          if (error is PermissionDeniedError) {
+            // Permission absent: silently proceed with an empty MediaStore list.
+            msVideos = const [];
+          } else {
+            // Propagate unexpected errors.
+            return Err(error);
+          }
+      }
     }
 
     // Build a fast lookup set of MediaStore content URIs for deduplication.

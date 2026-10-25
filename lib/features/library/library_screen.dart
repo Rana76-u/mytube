@@ -369,10 +369,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   /// Builds a scrollable list of video items with lazy loading.
   ///
   /// ListView.builder naturally provides lazy loading — only visible items
-  /// are built and rendered (NFR-003).
+  /// are built and rendered (NFR-003). The tiles themselves are flat, so this
+  /// list supplies the 16dp separation and the 12dp page gutter (ADR-009).
   Widget _buildVideoList(List<VideoItemSummary> items) {
-    return ListView.builder(
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
       itemCount: items.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final item = items[index];
         return VideoItemCard(

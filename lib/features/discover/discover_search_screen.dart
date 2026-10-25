@@ -139,7 +139,9 @@ class _DiscoverSearchScreenState extends ConsumerState<DiscoverSearchScreen> {
           const _Header('Videos'),
           for (final item in data.videos.take(_videoLimit))
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              // Flat tiles carry no surface of their own, so the list supplies
+              // the separation between them (ADR-009).
+              padding: const EdgeInsets.only(bottom: 16),
               child: VideoItemCard(
                 key: ValueKey('discover_search_item_${item.id.value}'),
                 item: item,

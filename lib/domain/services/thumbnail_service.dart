@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show Uint8List;
 
 import 'package:mytube/core/result.dart';
+import 'package:mytube/data/cache/thumbnail_disk_cache.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/platform/remote_thumbnail_fetcher.dart';
@@ -19,16 +20,21 @@ import 'package:mytube/platform/thumbnail_bridge.dart';
 ///
 /// Thumbnails are SOFT-FAIL data: every failure path (missing grant, deleted
 /// file, network error, unsupported scheme) returns `null` so the UI shows
-/// its placeholder (P7-03) rather than an error dialog. The service also
-/// keeps a small in-memory LRU so scrolling a grid does not re-decode or
-/// re-download visible tiles. A disk cache is deliberately deferred to the
-/// Phase 8 cache work (ARCHITECTURE §10) — in-memory only never touches
-/// downloads and cannot grow unbounded.
+/// its placeholder (P7-03) rather than an error dialog. Two disposable caches
+/// sit in front of the fetch: a small in-memory LRU so scrolling a grid does
+/// not re-decode or re-download visible tiles, and (from Phase 8) the
+/// [ThumbnailDiskCache] so previews survive a restart without a network round
+/// trip (CACHE-001).
+///
+/// Local previews are decoded at [decodeMaxSidePx] — the size a full-width
+/// card actually needs — because a smaller native decode is upscaled by the
+/// grid and reads as blurry.
 class ThumbnailService {
   ThumbnailService({
     required VideoRepository repository,
     required ThumbnailBridge bridge,
     required RemoteThumbnailFetcher remoteFetcher,
+    ThumbnailDiskCache? diskCache,
     int cacheLimit = defaultCacheLimit,
   }) : _repository = repository, // ignore: prefer_initializing_formals
        // ignore: prefer_initializing_formals
@@ -36,16 +42,30 @@ class ThumbnailService {
        // ignore: prefer_initializing_formals
        _remoteFetcher = remoteFetcher,
        // ignore: prefer_initializing_formals
+       _diskCache = diskCache,
+       // ignore: prefer_initializing_formals
        _cacheLimit = cacheLimit;
 
   final VideoRepository _repository;
   final ThumbnailBridge _bridge;
   final RemoteThumbnailFetcher _remoteFetcher;
+
+  /// Optional persistent preview cache; `null` keeps thumbnails session-only
+  /// (non-Android hosts, tests that do not exercise persistence).
+  final ThumbnailDiskCache? _diskCache;
+
   final int _cacheLimit;
 
   /// Default number of decoded previews kept for the session — roughly a
   /// few screenfuls of grid tiles.
   static const int defaultCacheLimit = 64;
+
+  /// Longest side requested from the native decoder for a local preview.
+  ///
+  /// A full-width 16:9 card is ~1100 physical px wide on a high-density
+  /// phone, so anything smaller is upscaled by the grid. The bridge constant
+  /// is the single source of truth (it mirrors the Kotlin default).
+  static const int decodeMaxSidePx = ThumbnailBridge.defaultMaxSidePx;
 
   /// key → bytes, ordered oldest→newest; re-inserted on every hit (LRU).
   final _cache = <String, Uint8List>{};
@@ -82,32 +102,41 @@ class ThumbnailService {
     final ref = _resolveRef(location);
     if (ref == null) return null;
 
-    final cached = _cache[ref.key];
+    final key = ref.cacheKey(decodeMaxSidePx);
+    final cached = _cache[key];
     if (cached != null) {
       // Touch for LRU recency.
       _cache
-        ..remove(ref.key)
-        ..[ref.key] = cached;
+        ..remove(key)
+        ..[key] = cached;
       return cached;
     }
 
-    final pending = _inFlight[ref.key];
+    final pending = _inFlight[key];
     if (pending != null) return pending;
 
     Future<Uint8List?> run() async {
+      // Persistent previews first: surviving a restart avoids a network fetch
+      // for remote previews and a native decode for local ones.
+      final persisted = await _diskCache?.read(key);
+      if (persisted != null) {
+        _store(key, persisted);
+        return persisted;
+      }
       final bytes = await _fetch(ref);
-      _store(ref.key, bytes);
+      _store(key, bytes);
+      await _persist(key, bytes);
       return bytes;
     }
 
     final fetch = run();
-    _inFlight[ref.key] = fetch;
+    _inFlight[key] = fetch;
     try {
       return await fetch;
     } finally {
       // removeWhere (not remove) so the discarded Future value does not read
       // as an unawaited future.
-      _inFlight.removeWhere((key, _) => key == ref.key);
+      _inFlight.removeWhere((entryKey, _) => entryKey == key);
     }
   }
 
@@ -120,6 +149,12 @@ class ThumbnailService {
   // Internals
   // ---------------------------------------------------------------------------
 
+  /// Best-effort disk persistence; a disposable cache never fails the caller.
+  Future<void> _persist(String key, Uint8List? bytes) async {
+    if (bytes == null || _diskCache == null) return;
+    await _diskCache.write(key, bytes);
+  }
+
   Future<Uint8List?> _fetch(_ThumbnailRef ref) async {
     if (ref.isRemote) {
       final uri = Uri.tryParse(ref.key);
@@ -130,7 +165,10 @@ class ThumbnailService {
         Err() => null,
       };
     }
-    final result = await _bridge.getThumbnail(ref.key);
+    final result = await _bridge.getThumbnail(
+      ref.key,
+      maxSidePx: decodeMaxSidePx,
+    );
     return switch (result) {
       Ok(:final value) => value,
       Err() => null,
@@ -187,6 +225,15 @@ class _ThumbnailRef {
 
   final String key;
   final bool isRemote;
+
+  /// Key for the in-memory and on-disk preview caches.
+  ///
+  /// A local preview is an image this app produced, so its decode size is part
+  /// of its identity: changing the tier must not keep serving previews encoded
+  /// at the old size for the life of the install. A remote preview is the
+  /// provider's own image, so its key stays the plain URL (which is also how
+  /// earlier releases cached it).
+  String cacheKey(int maxSidePx) => isRemote ? key : '$key@${maxSidePx}px';
 
   static _ThumbnailRef? of(String uri) {
     final lowered = uri.toLowerCase();
