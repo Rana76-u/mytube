@@ -118,6 +118,7 @@ PlayerSnapshot _snapshot({
   bool completed = false,
   Duration position = Duration.zero,
   Duration duration = const Duration(seconds: 90),
+  Duration buffered = Duration.zero,
   double speed = 1.0,
   String? errorText,
 }) => PlayerSnapshot(
@@ -127,6 +128,7 @@ PlayerSnapshot _snapshot({
   completed: completed,
   position: position,
   duration: duration,
+  buffered: buffered,
   speed: speed,
   volume: 1.0,
   errorText: errorText,
@@ -247,6 +249,29 @@ void main() {
 
       expect(controller.state.value.status, PlaybackStatus.error);
       expect(controller.state.value.error, 'Could not load this video.');
+    });
+
+    test('a second play releases the previous engine (VP7.2)', () async {
+      final created = <FakePlayerHandle>[];
+      final controller = AppPlaybackController(
+        handleFactory: (source) {
+          final handle = FakePlayerHandle()..snapshot = playing;
+          created.add(handle);
+          return handle;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source(uri: 'https://example.com/a.mp4'));
+      await controller.play(_source(uri: 'https://example.com/b.mp4'));
+
+      // Switching items, never stacking them: the outgoing engine and its
+      // change listener are torn down as the new one starts.
+      expect(created, hasLength(2));
+      expect(created[0].disposeCalls, 1);
+      expect(created[1].disposeCalls, 0);
+      expect(created[1].playCalls, 1);
+      expect(controller.state.value.status, PlaybackStatus.playing);
     });
   });
 
@@ -992,6 +1017,135 @@ void main() {
 
       expect(factoryCalls, 0);
       expect(controller.state.value.status, PlaybackStatus.idle);
+    });
+  });
+
+  group('AppPlaybackController buffered progress (VP1.3)', () {
+    test('maps the engine buffer onto the state and its fraction', () async {
+      final controller = AppPlaybackController(
+        handleFactory: (source) => FakePlayerHandle()
+          ..snapshot = _snapshot(
+            playing: true,
+            position: const Duration(seconds: 10),
+            buffered: const Duration(seconds: 45),
+          ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+
+      final state = controller.state.value;
+      expect(state.buffered, const Duration(seconds: 45));
+      expect(state.bufferedFraction, closeTo(0.5, 0.001));
+    });
+
+    test('clamps a buffer that trails the playhead to the position', () async {
+      final handle = FakePlayerHandle()
+        ..snapshot = _snapshot(
+          playing: true,
+          position: const Duration(seconds: 30),
+        );
+      final controller = AppPlaybackController(
+        handleFactory: (source) => handle,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+      // Played media is downloaded by definition, so an engine that reports no
+      // buffer at all still says "everything up to the thumb is available".
+      expect(controller.state.value.buffered, const Duration(seconds: 30));
+
+      // A backward seek can leave the engine reporting a buffer behind the
+      // thumb; the state must never show buffered progress regressing.
+      handle.snapshot = _snapshot(
+        playing: true,
+        position: const Duration(seconds: 30),
+        buffered: const Duration(seconds: 12),
+      );
+      handle.emitChange();
+      await pumpEventQueue();
+
+      expect(controller.state.value.buffered, const Duration(seconds: 30));
+      expect(
+        controller.state.value.buffered,
+        greaterThanOrEqualTo(controller.state.value.position),
+      );
+    });
+
+    test('clamps a buffer beyond the duration to the media end', () async {
+      final controller = AppPlaybackController(
+        handleFactory: (source) => FakePlayerHandle()
+          ..snapshot = _snapshot(
+            playing: true,
+            position: const Duration(seconds: 5),
+            duration: const Duration(seconds: 90),
+            buffered: const Duration(seconds: 500),
+          ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+
+      expect(controller.state.value.buffered, const Duration(seconds: 90));
+      expect(controller.state.value.bufferedFraction, 1.0);
+    });
+
+    test('resets buffered progress on stop and on load', () async {
+      final handle = FakePlayerHandle()
+        ..snapshot = _snapshot(
+          playing: true,
+          position: const Duration(seconds: 10),
+          buffered: const Duration(seconds: 60),
+        );
+      final controller = AppPlaybackController(
+        handleFactory: (source) => handle,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+      expect(controller.state.value.buffered, const Duration(seconds: 60));
+
+      await controller.stop();
+      expect(controller.state.value.buffered, Duration.zero);
+      expect(controller.state.value.bufferedFraction, 0);
+
+      // The next load starts from an empty timeline rather than inheriting the
+      // previous video's buffer.
+      final loading = controller.play(
+        _source(uri: 'https://example.com/b.mp4'),
+      );
+      expect(controller.state.value.buffered, Duration.zero);
+      await loading;
+    });
+
+    test('carries buffered progress across speed and volume changes', () async {
+      final handle = FakePlayerHandle()
+        ..snapshot = _snapshot(
+          playing: true,
+          position: const Duration(seconds: 10),
+          buffered: const Duration(seconds: 40),
+        );
+      final controller = AppPlaybackController(
+        handleFactory: (source) => handle,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.play(_source());
+      await controller.setSpeed(1.5);
+      expect(controller.state.value.buffered, const Duration(seconds: 40));
+
+      await controller.setVolume(0.4);
+      expect(controller.state.value.buffered, const Duration(seconds: 40));
+    });
+
+    test('PlaybackState equality includes the buffered point', () {
+      const a = PlaybackState(buffered: Duration(seconds: 20));
+      const b = PlaybackState(buffered: Duration(seconds: 20));
+      const c = PlaybackState(buffered: Duration(seconds: 21));
+
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(c));
     });
   });
 

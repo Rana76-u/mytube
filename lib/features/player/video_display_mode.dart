@@ -16,15 +16,40 @@ enum VideoDisplayMode {
   fill(BoxFit.cover, 'Fill / Crop'),
 
   /// Distort the picture to fill the frame exactly, ignoring aspect ratio.
-  stretch(BoxFit.fill, 'Stretch');
+  stretch(BoxFit.fill, 'Stretch'),
 
-  const VideoDisplayMode(this.boxFit, this.label);
+  /// Contain the picture inside a 16:9 window (design §7, VP4.4): a source
+  /// keeps its own ratio but is framed as widescreen instead of in whatever box
+  /// the page gave it.
+  widescreen(BoxFit.contain, '16:9', windowRatio: 16 / 9),
+
+  /// The same window at 4:3 (design §7, VP4.4).
+  standard(BoxFit.contain, '4:3', windowRatio: 4 / 3),
+
+  /// Grow the picture until it spans the frame's width, cropping whatever falls
+  /// outside top and bottom. Distinct from [fill], which crops the longer axis:
+  /// this is the design's "Zoom" for a tall source in a wide box.
+  zoom(BoxFit.fitWidth, 'Zoom');
+
+  const VideoDisplayMode(this.boxFit, this.label, {this.windowRatio});
 
   /// The layout rule [VideoSurface] hands to a `FittedBox`.
   final BoxFit boxFit;
 
   /// Human-readable name shown in the control surface.
   final String label;
+
+  /// The fixed picture window this mode draws inside, or null when the mode
+  /// uses the whole frame.
+  ///
+  /// Non-null only for the ratio entries (VP4.4); [VideoSurface] is the only
+  /// consumer, so the sheet and the render rule can never disagree about what
+  /// a mode means.
+  final double? windowRatio;
+
+  /// Whether this mode crops the picture instead of letterboxing it, so a host
+  /// knows whether the bars it leaves empty are intentional.
+  bool get cropsToFit => this == fill || this == zoom;
 
   /// Fit is the default display mode (PLAY-006).
   static const VideoDisplayMode defaultMode = VideoDisplayMode.fit;
@@ -35,6 +60,11 @@ enum VideoDisplayMode {
     VideoDisplayMode.fit => VideoDisplayMode.fill,
     VideoDisplayMode.fill => VideoDisplayMode.stretch,
     VideoDisplayMode.stretch => VideoDisplayMode.fit,
+    // A ratio or zoom choice is one tap from the plain letterbox layout, so
+    // the pill never walks the six-entry list (VP4.4).
+    VideoDisplayMode.widescreen ||
+    VideoDisplayMode.standard ||
+    VideoDisplayMode.zoom => VideoDisplayMode.fit,
   };
 
   /// Decodes a persisted [name] back to a mode, falling back to

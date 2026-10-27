@@ -54,14 +54,16 @@ void main() {
       expect(adapter.sourceType, ProviderType.directUrl);
     });
 
-    test('getCapabilities() streams and seeks, claims nothing else', () async {
+    test('getCapabilities() streams, seeks and claims download', () async {
       final caps = await adapter.getCapabilities();
 
       expect(caps.canStream, isTrue);
       expect(caps.canSeek, isTrue);
       expect(caps.canProvideThumbnail, isFalse);
       expect(caps.canSearch, isFalse);
-      expect(caps.canDownload, isFalse);
+      // P12-01: a direct URL is a remote, fetchable file, so download is
+      // offered. The per-source policy is still decided by the probe.
+      expect(caps.canDownload, isTrue);
       expect(caps.supportsPagination, isFalse);
     });
 
@@ -210,16 +212,66 @@ void main() {
     });
 
     test(
-      'checkDownloadEligibility() stays unclassified until P12-01',
+      'checkDownloadEligibility() is eligible when the server is reachable',
       () async {
+        fakeProber.outcome = _success();
         final result = await adapter.checkDownloadEligibility(
           'https://example.com/v.mp4',
         );
 
         expect(
           (result as Ok<DownloadEligibility>).value,
-          DownloadEligibility.unknown,
+          DownloadEligibility.eligible,
         );
+        expect(
+          fakeProber.probed,
+          isNotEmpty,
+          reason: 'eligibility is a deliberate, probing check',
+        );
+      },
+    );
+
+    test('checkDownloadEligibility() is unknown on a transient failure, '
+        'never prohibited', () async {
+      fakeProber.outcome = const UrlProbeFailure(
+        error: NetworkUnavailableError(diagnosticMessage: 'socket'),
+        isTransient: true,
+      );
+
+      final result = await adapter.checkDownloadEligibility(
+        'https://example.com/v.mp4',
+      );
+
+      expect(
+        (result as Ok<DownloadEligibility>).value,
+        DownloadEligibility.unknown,
+      );
+    });
+
+    test('checkDownloadEligibility() is unknown on a definitive failure too '
+        '(direct URLs forbid nothing)', () async {
+      fakeProber.outcome = const UrlProbeFailure(
+        error: PermissionDeniedError(diagnosticMessage: '403'),
+        isTransient: false,
+      );
+
+      final result = await adapter.checkDownloadEligibility(
+        'https://example.com/v.mp4',
+      );
+
+      expect(
+        (result as Ok<DownloadEligibility>).value,
+        DownloadEligibility.unknown,
+      );
+    });
+
+    test(
+      'checkDownloadEligibility() rejects unsupported schemes with an Err',
+      () async {
+        final result = await adapter.checkDownloadEligibility('rtsp://x/y');
+
+        expect(result, isA<Err<DownloadEligibility>>());
+        expect(fakeProber.probed, isEmpty, reason: 'invalid URLs never probe');
       },
     );
   });

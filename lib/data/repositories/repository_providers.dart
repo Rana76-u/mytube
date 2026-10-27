@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/data/database/database_provider.dart';
+import 'package:mytube/data/repositories/drift_download_repository.dart';
 import 'package:mytube/data/repositories/drift_recommendation_history_repository.dart';
 import 'package:mytube/data/repositories/drift_video_repository.dart';
+import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/recommendation_history_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 
@@ -38,3 +40,14 @@ final recommendationHistoryRepositoryProvider =
       ref.onDispose(repo.dispose);
       return repo;
     });
+
+/// Riverpod provider for [DownloadRepository] (P12-02, VP6.2).
+///
+/// Shares [databaseProvider] with the library repository, so a test that
+/// overrides it with an in-memory database drives download persistence too.
+final downloadRepositoryProvider = Provider<DownloadRepository>((ref) {
+  final db = ref.watch(databaseProvider);
+  final repo = DriftDownloadRepository(db);
+  ref.onDispose(repo.dispose);
+  return repo;
+});

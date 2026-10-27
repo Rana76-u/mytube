@@ -20,12 +20,12 @@ void main() {
       expect(result, isNotEmpty);
     });
 
-    test('schema version is 6', () async {
+    test('schema version is 7', () async {
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(6));
+      expect(version, equals(7));
     });
 
     test('closes without error', () async {

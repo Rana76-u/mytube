@@ -38,8 +38,11 @@ class DirectUrlAdapter implements VideoSourceAdapter {
       canSeek: true,
       canProvideThumbnail: false,
       canSearch: false,
-      // Eligibility is a Phase 12 decision (P12-01); it is not claimed here.
-      canDownload: false,
+      // A direct URL is a remote, fetchable file, so an app-managed copy is
+      // offered (DL-001, P12-01). The claim is capability only; the per-source
+      // policy lives in [checkDownloadEligibility], which probes reachability
+      // before the UI commits to a transfer.
+      canDownload: true,
       supportsPagination: false,
     );
   }
@@ -120,9 +123,24 @@ class DirectUrlAdapter implements VideoSourceAdapter {
   Future<Result<DownloadEligibility>> checkDownloadEligibility(
     String sourceId,
   ) async {
-    // P12-01 defines per-provider download eligibility; until then direct
-    // URLs stay unclassified instead of silently permitted.
-    return const Ok(DownloadEligibility.unknown);
+    // P12-01 policy for direct URLs: *eligible if fetchable*. A reachable
+    // server (a successful probe) permits an app-managed copy; anything that
+    // does not confirm reachability is *unknown* rather than a guess. Direct
+    // URLs carry no provider terms or DRM that could forbid a copy, so this
+    // adapter never reports [DownloadEligibility.prohibited].
+    final Uri uri;
+    switch (validateDirectUrl(sourceId)) {
+      case Ok<Uri>(:final value):
+        uri = value;
+      case Err<Uri>(:final error):
+        return Err(error);
+    }
+
+    final outcome = await _prober.probe(uri);
+    return Ok(switch (outcome) {
+      UrlProbeSuccess() => DownloadEligibility.eligible,
+      UrlProbeFailure() => DownloadEligibility.unknown,
+    });
   }
 
   // ---------------------------------------------------------------------------

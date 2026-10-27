@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show Widget;
+import 'package:mytube/domain/services/caption_parser.dart' show CaptionCue;
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/sources/source_adapter.dart';
@@ -25,7 +26,7 @@ import 'package:mytube/sources/source_adapter.dart';
 ///   messages.  Raw engine error text and source URIs never enter the state or
 ///   logs (SEC-005; URL-006 redaction is a later, broader task).
 class AppPlaybackController extends ValueNotifier<PlaybackState>
-    implements PlaybackController {
+    implements PlaybackController, CaptionCapableController {
   AppPlaybackController({required PlayerHandleFactory handleFactory})
     : _handleFactory = handleFactory, // ignore: prefer_initializing_formals
       super(PlaybackState.idle);
@@ -70,6 +71,13 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
   double _volume = 1.0;
   double _speed = 1.0;
   bool _looping = false;
+
+  /// The cues handed to [setCaptions], replayed onto every later engine (VP4.3).
+  ///
+  /// The player clears this on an item change, so it is only ever the current
+  /// video's sidecar text; carrying it across a `retry()` reload keeps a
+  /// subtitle on after a transient error the same way speed and volume persist.
+  List<CaptionCue>? _captions;
 
   @override
   ValueListenable<PlaybackState> get state => this;
@@ -198,6 +206,14 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       if (_looping) {
         await handle.setLooping(true);
       }
+      // Re-apply the current sidecar cues to the fresh engine when it can carry
+      // them; engines that cannot leave the overlay to the app renderer (VP4.3).
+      final captions = _captions;
+      if (captions != null) {
+        if (handle case final CaptionCapableHandle captionHandle) {
+          await captionHandle.setCaptions(captions);
+        }
+      }
       await handle.play();
     } catch (error) {
       if (_isStale(generation)) {
@@ -229,6 +245,11 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
   PlaybackState _reduce(PlayerSnapshot snapshot) {
     final position = snapshot.position;
     final duration = snapshot.duration;
+    final buffered = _clampBuffered(
+      snapshot.buffered,
+      position: position,
+      duration: duration,
+    );
 
     if (snapshot.errorText != null) {
       return _errorState(
@@ -245,6 +266,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
         speed: _speed,
         volume: _volume,
         canSeek: _canSeek,
+        buffered: buffered,
         videoSize: snapshot.videoSize,
       );
     }
@@ -256,6 +278,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
         speed: _speed,
         volume: _volume,
         canSeek: _canSeek,
+        buffered: buffered,
         videoSize: snapshot.videoSize,
       );
     }
@@ -267,6 +290,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
         speed: _speed,
         volume: _volume,
         canSeek: _canSeek,
+        buffered: buffered,
         videoSize: snapshot.videoSize,
       );
     }
@@ -278,6 +302,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
         speed: _speed,
         volume: _volume,
         canSeek: _canSeek,
+        buffered: buffered,
         videoSize: snapshot.videoSize,
       );
     }
@@ -288,8 +313,26 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       speed: _speed,
       volume: _volume,
       canSeek: _canSeek,
+      buffered: buffered,
       videoSize: snapshot.videoSize,
     );
+  }
+
+  /// Keeps buffered progress on the timeline (VP1.3).
+  ///
+  /// Engines can report a buffer that trails the playhead (after a backward
+  /// seek) or overruns the media; neither may reach the seek bar, or it would
+  /// paint a regression or a bar wider than the video.
+  static Duration _clampBuffered(
+    Duration buffered, {
+    required Duration position,
+    required Duration duration,
+  }) {
+    var end = buffered < position ? position : buffered;
+    if (duration > Duration.zero && end > duration) {
+      end = duration;
+    }
+    return end.isNegative ? Duration.zero : end;
   }
 
   // ---------------------------------------------------------------------------
@@ -394,6 +437,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       speed: _speed,
       volume: _volume,
       canSeek: value.canSeek,
+      buffered: value.buffered,
       videoSize: value.videoSize,
       error: value.error,
     );
@@ -419,6 +463,7 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
       volume: _volume,
       canSeek: value.canSeek,
       canRetry: value.canRetry,
+      buffered: value.buffered,
       videoSize: value.videoSize,
       error: value.error,
     );
@@ -439,6 +484,23 @@ class AppPlaybackController extends ValueNotifier<PlaybackState>
     final handle = _handle;
     if (handle != null) {
       await _runCommand(() => handle.setLooping(looping));
+    }
+  }
+
+  /// Hands parsed caption [cues] to the engine, or clears them when null
+  /// (VP4.3).
+  ///
+  /// Stored as a carried preference so a `retry()` reload re-applies them, and
+  /// forwarded only when the live engine declares [CaptionCapableHandle] — an
+  /// engine that cannot carry timed text is left untouched rather than errored.
+  @override
+  Future<void> setCaptions(List<CaptionCue>? cues) async {
+    if (_disposed) {
+      return;
+    }
+    _captions = cues;
+    if (_handle case final CaptionCapableHandle captionHandle) {
+      await _runCommand(() => captionHandle.setCaptions(cues));
     }
   }
 

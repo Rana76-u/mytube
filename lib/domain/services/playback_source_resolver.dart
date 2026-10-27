@@ -4,6 +4,21 @@ import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/sources/source_adapter.dart';
 
+/// Looks for a completed, present on-disk offline copy of a library item and
+/// returns it as a [PlayableSource] (P12-03 / VP6.3).
+///
+/// The seam keeps the resolver free of storage and `dart:io` concerns: the
+/// downloads implementation answers `null` whenever there is no *usable*
+/// offline file — no completed record, the record's file was deleted, or the
+/// downloads root is unavailable — so the caller transparently falls back to
+/// the network source. The returned URI always points at the app's own
+/// downloaded file, never a persisted signed URL (ARCHITECTURE §4).
+abstract interface class OfflineDownloadResolver {
+  /// A local-file [PlayableSource] for [item], or `null` to fall back to the
+  /// item's remote source.
+  Future<PlayableSource?> resolveOfflineSource(VideoItemId item);
+}
+
 /// Turns a library item into an immediately-playable [PlayableSource]
 /// (PLAY-002, ARCHITECTURE §6/§7).
 ///
@@ -32,16 +47,24 @@ abstract interface class PlaybackSourceResolver {
 /// failures and `AppPlaybackController` turns them into retry states (P4-07).
 class DefaultPlaybackSourceResolver implements PlaybackSourceResolver {
   DefaultPlaybackSourceResolver({
-    required VideoRepository repository,
-    required List<VideoSourceAdapter> adapters,
-  }) : _repository = repository, // ignore: prefer_initializing_formals
-       _adapters = adapters; // ignore: prefer_initializing_formals
+    required this._repository,
+    required this._adapters,
+    this._offlineDownload,
+  });
 
   final VideoRepository _repository;
   final List<VideoSourceAdapter> _adapters;
+  final OfflineDownloadResolver? _offlineDownload;
 
   @override
   Future<Result<PlayableSource>> resolveForItem(VideoItemSummary item) async {
+    // Offline-first (P12-03 / VP6.3): when the item has a completed download
+    // whose file is present, play that local copy instead of re-streaming. A
+    // `null` here means there is nothing usable offline, so we fall through to
+    // the remote source unchanged.
+    final offline = await _offlineDownload?.resolveOfflineSource(item.id);
+    if (offline != null) return Ok(offline);
+
     final locationsResult = await _repository.getSourceLocationsForVideo(
       item.id,
     );

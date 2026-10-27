@@ -32,18 +32,18 @@ void main() {
     test('minutes bucket', () {
       expect(
         formatRelativeDate(ms(const Duration(minutes: 1)), now: now),
-        '1 min ago',
+        '1 minute ago',
       );
       expect(
         formatRelativeDate(ms(const Duration(minutes: 45)), now: now),
-        '45 min ago',
+        '45 minutes ago',
       );
     });
 
     test('hours bucket', () {
       expect(
         formatRelativeDate(ms(const Duration(hours: 1)), now: now),
-        '1 hours ago',
+        '1 hour ago',
       );
       expect(
         formatRelativeDate(ms(const Duration(hours: 23)), now: now),
@@ -52,9 +52,10 @@ void main() {
     });
 
     test('days bucket', () {
+      // The shipped copy read "1 days ago" (VP1.5 regression).
       expect(
         formatRelativeDate(ms(const Duration(days: 1)), now: now),
-        '1 days ago',
+        '1 day ago',
       );
       expect(
         formatRelativeDate(ms(const Duration(days: 6)), now: now),
@@ -87,7 +88,7 @@ void main() {
     test('months bucket', () {
       expect(
         formatRelativeDate(ms(const Duration(days: 30)), now: now),
-        '1 months ago',
+        '1 month ago',
       );
       expect(
         formatRelativeDate(ms(const Duration(days: 364)), now: now),
@@ -111,7 +112,27 @@ void main() {
       final oneMinuteAgo = DateTime.now()
           .subtract(const Duration(minutes: 1))
           .millisecondsSinceEpoch;
-      expect(formatRelativeDate(oneMinuteAgo), '1 min ago');
+      expect(formatRelativeDate(oneMinuteAgo), '1 minute ago');
+    });
+
+    test('no bucket ever reads "1 <plural>" (VP1.5)', () {
+      // Every boundary a user can hit, checked for the shipped bug: a bucket
+      // that forgot to singularise its unit.
+      for (final delta in const <Duration>[
+        Duration(minutes: 1),
+        Duration(hours: 1),
+        Duration(days: 1),
+        Duration(days: 14),
+        Duration(days: 30),
+        Duration(days: 365),
+      ]) {
+        final label = formatRelativeDate(ms(delta), now: now);
+        expect(
+          RegExp(r'^1 [a-z]+s ago$').hasMatch(label),
+          isFalse,
+          reason: '$delta rendered as "$label"',
+        );
+      }
     });
   });
 }

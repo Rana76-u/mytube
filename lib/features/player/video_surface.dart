@@ -1,3 +1,5 @@
+import 'dart:math' show min;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/features/player/video_display_mode.dart';
@@ -15,13 +17,16 @@ import 'package:mytube/playback/playback_provider.dart';
 /// screen allows instead of staying at its intrinsic pixel size:
 ///  * Fit → contain (letterbox, whole frame, aspect preserved — the default),
 ///  * Fill/Crop → cover (fill frame, crop overflow, aspect preserved),
-///  * Stretch → fill (distort to the frame).
+///  * Stretch → fill (distort to the frame),
+///  * 16:9 / 4:3 → contain inside a window of that ratio (VP4.4),
+///  * Zoom → fitWidth (span the width, crop top and bottom; VP4.4).
 ///
 /// [fit] lets a host pin an explicit fit and bypass the app-wide
 /// [VideoDisplayMode] entirely — Reels uses it to keep every clip aspect-true
 /// while choosing contain/cover from the clip's own shape (see
-/// `reels_fit_policy.dart`). [backdrop] paints a layer behind the video for the
-/// bars a [BoxFit.contain] layout leaves empty.
+/// `reels_fit_policy.dart`). A pinned [fit] also ignores the ratio window: the
+/// forced-window modes are a player-page choice. [backdrop] paints a layer
+/// behind the video for the bars a [BoxFit.contain] layout leaves empty.
 ///
 /// Until a source is initialized there is nothing to paint, so a black
 /// placeholder fills the space instead of a blank frame.
@@ -39,7 +44,8 @@ class VideoSurface extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.watch(playbackControllerProvider);
-    final effectiveFit = fit ?? ref.watch(videoDisplayModeProvider).boxFit;
+    final mode = ref.watch(videoDisplayModeProvider);
+    final pinnedFit = fit;
     final backdrop = this.backdrop;
 
     return ColoredBox(
@@ -66,11 +72,13 @@ class VideoSurface extends ConsumerWidget {
                     : const SizedBox.shrink(),
               );
             }
-            final picture = FittedBox(
-              key: const Key('video_surface_fittedbox'),
-              fit: effectiveFit,
-              child: video,
-            );
+            final picture = pinnedFit != null
+                ? FittedBox(
+                    key: const Key('video_surface_fittedbox'),
+                    fit: pinnedFit,
+                    child: video,
+                  )
+                : _applyMode(mode, video);
             if (backdrop == null) {
               return picture;
             }
@@ -89,6 +97,37 @@ class VideoSurface extends ConsumerWidget {
           },
         ),
       ),
+    );
+  }
+
+  /// The picture laid out for the app-wide [mode] (VP4.4).
+  ///
+  /// A plain mode is one `FittedBox` over the whole frame. A ratio mode first
+  /// takes the largest box of its own ratio that fits — 16:9 on a tall frame or
+  /// 4:3 on a wide one both get height-limited — and fits the video inside that,
+  /// so the user's chosen window survives whatever shape the page gave the
+  /// surface. Falls back to the plain layout when the constraints are unbounded
+  /// and no window can be computed.
+  static Widget _applyMode(VideoDisplayMode mode, Widget video) {
+    final picture = FittedBox(
+      key: const Key('video_surface_fittedbox'),
+      fit: mode.boxFit,
+      child: video,
+    );
+    final ratio = mode.windowRatio;
+    if (ratio == null) return picture;
+
+    return LayoutBuilder(
+      key: const Key('video_surface_window'),
+      builder: (context, constraints) {
+        if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+          return picture;
+        }
+        final width = min(constraints.maxWidth, constraints.maxHeight * ratio);
+        return Center(
+          child: SizedBox(width: width, height: width / ratio, child: picture),
+        );
+      },
     );
   }
 }

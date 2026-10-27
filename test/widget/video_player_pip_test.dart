@@ -9,7 +9,8 @@ import 'package:mytube/domain/services/playback_source_resolver.dart';
 import 'package:mytube/domain/services/playback_source_resolver_provider.dart';
 import 'package:mytube/domain/services/watch_progress_service.dart';
 import 'package:mytube/domain/services/watch_progress_service_provider.dart';
-import 'package:mytube/features/player/playback_controls.dart';
+import 'package:mytube/features/player/player_gesture_layer.dart';
+import 'package:mytube/features/player/player_overlay.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/player/video_surface.dart';
 import 'package:mytube/platform/pip_bridge.dart';
@@ -171,7 +172,7 @@ void main() {
 
       expect(find.byKey(const ValueKey('player_pip_button')), findsNothing);
       // Ordinary chrome stays present.
-      expect(find.byType(PlaybackControls), findsOneWidget);
+      expect(find.byType(PlayerOverlay), findsOneWidget);
     });
 
     testWidgets('hides overlay chrome while floating', (tester) async {
@@ -179,25 +180,38 @@ void main() {
       addTearDown(container.dispose);
       await pumpPlayer(tester, container);
 
-      // Normal mode: app bar + controls are on screen.
-      expect(find.byType(AppBar), findsOneWidget);
-      expect(find.byType(PlaybackControls), findsOneWidget);
+      // Normal mode: the overlay chrome is on screen, PiP control included.
+      expect(find.byType(PlayerOverlay), findsOneWidget);
+      expect(find.byKey(const ValueKey('player_pip_button')), findsOneWidget);
+      // Every piece of chrome the later player phases added must be live here:
+      // the gesture layer, the loading indicator and the (unrevealed) lock
+      // overlay all sit in the tree while the page is shown normally.
+      expect(find.byType(PlayerGestureLayer), findsOneWidget);
+      expect(find.byType(PlayerLoadingIndicator), findsOneWidget);
+      expect(find.byType(PlayerLockOverlay), findsOneWidget);
+      expect(find.byKey(const ValueKey('player_seek_bar')), findsOneWidget);
 
       // Native side reports entering PiP.
       bridge.emitMode(true);
       await tester.pumpAndSettle();
 
       // The OS captures the whole window, so the Dart chrome must vanish and
-      // leave only the surface.
-      expect(find.byType(AppBar), findsNothing);
-      expect(find.byType(PlaybackControls), findsNothing);
+      // leave only the surface — including the newer VP5 widgets (VP5.4).
+      expect(find.byType(PlayerOverlay), findsNothing);
+      expect(find.byKey(const ValueKey('player_pip_button')), findsNothing);
+      expect(find.byType(PlayerGestureLayer), findsNothing);
+      expect(find.byType(PlayerLoadingIndicator), findsNothing);
+      expect(find.byType(PlayerLockOverlay), findsNothing);
+      expect(find.byKey(const ValueKey('player_seek_bar')), findsNothing);
       expect(find.byType(VideoSurface), findsOneWidget);
 
       // Leaving PiP restores the chrome.
       bridge.emitMode(false);
       await tester.pumpAndSettle();
-      expect(find.byType(AppBar), findsOneWidget);
-      expect(find.byType(PlaybackControls), findsOneWidget);
+      expect(find.byType(PlayerOverlay), findsOneWidget);
+      expect(find.byKey(const ValueKey('player_pip_button')), findsOneWidget);
+      expect(find.byType(PlayerGestureLayer), findsOneWidget);
+      expect(find.byType(PlayerLockOverlay), findsOneWidget);
     });
   });
 }

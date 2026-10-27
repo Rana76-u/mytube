@@ -27,9 +27,16 @@ import java.io.IOException
  * Native thumbnail extraction (P7-01, P4-10).
  *
  * Channel: com.example.mytube/thumbnails
- *  - getThumbnail { uri: String, maxSidePx: Int } -> ByteArray (JPEG) or null
- *  - getNetworkThumbnail { uri: String, maxSidePx: Int, headers: Map<String,String> }
+ *  - getThumbnail { uri: String, maxSidePx: Int, timeMs: Long? } -> ByteArray (JPEG) or null
+ *  - getNetworkThumbnail { uri: String, maxSidePx: Int, headers: Map<String,String>, timeMs: Long? }
  *      -> ByteArray (JPEG) or null
+ *
+ * `timeMs` is optional: a card thumbnail omits it and keeps the historical
+ * "near the 1s mark, then 0" frame, while a scrub preview (VP1.4) names the
+ * position it wants. The value is clamped into the media range first, so a
+ * drag past the end answers with the last frame instead of nothing. When an
+ * explicit position yields no frame the call returns null — substituting the
+ * 1s frame would show the user the wrong moment under their finger.
  *
  * Error codes surface as PlatformException on the Dart side:
  *  - PERMISSION_DENIED  : the content grant (MediaStore permission or SAF
@@ -96,6 +103,7 @@ class ThumbnailPlugin :
     private fun getThumbnail(call: MethodCall, result: MethodChannel.Result) {
         val uriString = call.argument<String>("uri")
         val maxSidePx = call.argument<Int>("maxSidePx") ?: DEFAULT_MAX_SIDE_PX
+        val timeMs = call.timeMsArgument()
         val context = appContext
         if (uriString.isNullOrEmpty() || context == null) {
             result.error("NOT_FOUND", "Missing uri argument or detached engine", null)
@@ -108,7 +116,7 @@ class ThumbnailPlugin :
         scope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) {
-                    produceThumbnail(context, uri, maxSidePx)
+                    produceThumbnail(context, uri, maxSidePx, timeMs)
                 }
                 withContext(Dispatchers.Main) { result.success(bytes) }
             } catch (security: SecurityException) {
@@ -138,6 +146,7 @@ class ThumbnailPlugin :
     private fun getNetworkThumbnail(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("uri")
         val maxSidePx = call.argument<Int>("maxSidePx") ?: DEFAULT_MAX_SIDE_PX
+        val timeMs = call.timeMsArgument()
         if (url.isNullOrEmpty()) {
             result.error("NOT_FOUND", "Missing uri argument", null)
             return
@@ -157,7 +166,7 @@ class ThumbnailPlugin :
         scope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) {
-                    produceNetworkThumbnail(url, headers.toMap(), maxSidePx)
+                    produceNetworkThumbnail(url, headers.toMap(), maxSidePx, timeMs)
                 }
                 withContext(Dispatchers.Main) { result.success(bytes) }
             } catch (io: IOException) {
@@ -176,11 +185,16 @@ class ThumbnailPlugin :
         context: Context,
         uri: Uri,
         maxSidePx: Int,
+        timeMs: Long?,
     ): ByteArray? = decodeLimiter.withPermit {
         val target = maxSidePx.coerceIn(MIN_MAX_SIDE_PX, MAX_MAX_SIDE_PX)
         // A real frame first: sharp and correctly oriented.
-        val frame = decodeFrame(context, uri, target)
-        val bitmap = frame ?: systemThumbnail(context, uri, target) ?: return@withPermit null
+        val frame = decodeFrame(context, uri, target, timeMs)
+        // The system preview is only a stand-in for "some frame" — under an
+        // explicit scrub position it would show a different moment than the
+        // one asked for, so a miss stays a miss.
+        val fallback = if (timeMs == null) systemThumbnail(context, uri, target) else null
+        val bitmap = frame ?: fallback ?: return@withPermit null
         bitmap.toJpegBytes()
     }
 
@@ -200,18 +214,28 @@ class ThumbnailPlugin :
         url: String,
         headers: Map<String, String>,
         maxSidePx: Int,
+        timeMs: Long?,
     ): ByteArray? = decodeLimiter.withPermit {
         val target = maxSidePx.coerceIn(MIN_MAX_SIDE_PX, MAX_MAX_SIDE_PX)
-        val frame = decodeNetworkFrame(url, headers, target) ?: return@withPermit null
+        val frame = decodeNetworkFrame(url, headers, target, timeMs) ?: return@withPermit null
         frame.toJpegBytes()
     }
 
     /**
-     * One frame near the 1s mark, scaled to [maxSidePx] and rotated according
-     * to the container metadata, or `null` when the media cannot be decoded.
+     * One frame at [timeMs] (or near the 1s mark when null), scaled to
+     * [maxSidePx] and rotated according to the container metadata, or `null`
+     * when the media cannot be decoded.
      */
-    private fun decodeFrame(context: Context, uri: Uri, maxSidePx: Int): Bitmap? =
-        withRetriever({ retriever -> retriever.setDataSource(context, uri) }, maxSidePx)
+    private fun decodeFrame(
+        context: Context,
+        uri: Uri,
+        maxSidePx: Int,
+        timeMs: Long?,
+    ): Bitmap? = withRetriever(
+        { retriever -> retriever.setDataSource(context, uri) },
+        maxSidePx,
+        timeMs,
+    )
 
     /**
      * The same frame extraction for a network source: the retriever reads the
@@ -222,17 +246,23 @@ class ThumbnailPlugin :
         url: String,
         headers: Map<String, String>,
         maxSidePx: Int,
-    ): Bitmap? = withRetriever({ retriever -> retriever.setDataSource(url, headers) }, maxSidePx)
+        timeMs: Long?,
+    ): Bitmap? = withRetriever(
+        { retriever -> retriever.setDataSource(url, headers) },
+        maxSidePx,
+        timeMs,
+    )
 
     /** Opens one retriever via [open], extracts the frame, and always releases. */
     private fun withRetriever(
         open: (MediaMetadataRetriever) -> Unit,
         maxSidePx: Int,
+        timeMs: Long?,
     ): Bitmap? {
         val retriever = MediaMetadataRetriever()
         return try {
             open(retriever)
-            val frame = frameNear(retriever, maxSidePx) ?: return null
+            val frame = frameNear(retriever, maxSidePx, timeMs) ?: return null
             val rotation = retriever.intMetadata(
                 MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION,
             ) ?: 0
@@ -253,7 +283,11 @@ class ThumbnailPlugin :
         }
     }
 
-    private fun frameNear(retriever: MediaMetadataRetriever, maxSidePx: Int): Bitmap? {
+    private fun frameNear(
+        retriever: MediaMetadataRetriever,
+        maxSidePx: Int,
+        timeMs: Long?,
+    ): Bitmap? {
         val sourceWidth = retriever.intMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
         val sourceHeight = retriever.intMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
         // API 27+ can decode straight to the target size: a 4K frame never
@@ -269,7 +303,7 @@ class ThumbnailPlugin :
             null
         }
 
-        for (timeUs in FRAME_TIMES_US) {
+        for (timeUs in frameTimesUs(retriever, timeMs)) {
             if (target != null) {
                 val scaled = retriever.getScaledFrameAtTime(
                     timeUs,
@@ -325,8 +359,34 @@ class ThumbnailPlugin :
         return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
     }
 
+    /**
+     * Candidate frame positions in microseconds.
+     *
+     * Without an explicit [timeMs] this keeps the historical behaviour (1s in,
+     * then 0 — avoids the black leading frames many encodes have). With one,
+     * only that position is tried, clamped into the media range so a drag past
+     * the end still lands on the last frame.
+     */
+    private fun frameTimesUs(retriever: MediaMetadataRetriever, timeMs: Long?): LongArray {
+        if (timeMs == null) return FRAME_TIMES_US
+        val durationMs = retriever.intMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            ?.toLong()
+            ?: 0L
+        val clamped = if (durationMs > 0L) timeMs.coerceIn(0L, durationMs) else timeMs.coerceAtLeast(0L)
+        return longArrayOf(clamped * 1000L)
+    }
+
     private fun MediaMetadataRetriever.intMetadata(key: Int): Int? =
         extractMetadata(key)?.toIntOrNull()
+
+    /**
+     * The optional explicit frame position, or null for the historical default.
+     *
+     * Read as [Number] because the channel decodes a Dart `int` into whatever
+     * integer box the platform prefers (Integer or Long) — asking for Long
+     * directly would silently drop a valid argument.
+     */
+    private fun MethodCall.timeMsArgument(): Long? = argument<Number>("timeMs")?.toLong()
 
     /** JPEG-encodes the bitmap, flattening any alpha onto black. */
     private fun Bitmap.toJpegBytes(): ByteArray {

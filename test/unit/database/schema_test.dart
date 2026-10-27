@@ -59,17 +59,17 @@ void main() {
 
     // ── Schema version ──────────────────────────────────────────────────────
 
-    test('schema version is 6', () async {
-      // The overall schema version is 6 (disc redesign §18/§19 added the
-      // collection pinning columns and the recommendation_exposures table on
-      // top of the v5 thumbnail_uri column); earlier groups documented their
+    test('schema version is 7', () async {
+      // The overall schema version is 7 (Phase 12 / VP6.2 added the downloads
+      // table on top of the v6 collection-pinning columns and the
+      // recommendation_exposures table); earlier groups documented their
       // own tables rather than the version number itself. The authoritative
       // version tests live in migrations_test.dart.
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(6));
+      expect(version, equals(7));
     });
 
     // ── VideoItems ───────────────────────────────────────────────────────────

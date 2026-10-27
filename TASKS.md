@@ -1335,18 +1335,37 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
 
 ## Phase 12 --- Offline downloads
 
--   [ ] **P12-01** Define per-provider download eligibility. --- Todo
--   [ ] **P12-02** Implement app-managed download records/storage. ---
-    Todo
--   [ ] **P12-03** Add progress, pause/resume where supported, cancel,
-    retry. --- Todo
--   [ ] **P12-04** Implement offline playback. --- Todo
--   [ ] **P12-05** Delete app-managed downloads without deleting
-    originals. --- Todo
--   [ ] **P12-06** Handle low storage, partial files, and interrupted
-    downloads. --- Todo
--   [ ] **P12-07** Verify provider terms; do not bypass DRM/access
-    controls. --- Todo
+> **Scope (decided):** downloads and export exist for **remote providers
+> only** (Direct URL now; OneDrive, Google Drive, Cloudflare R2 when their
+> adapters land). A library item whose only source is MediaStore/SAF is never
+> downloadable or exportable --- the file is already on the device. The
+> concrete breakdown, including the player-side entry, is VP6 at the end of
+> this file.
+
+-   [x] **P12-01** Define per-provider download eligibility. --- Done
+    (VP6.1: `SourceCapabilities.canDownload` + typed `checkDownloadEligibility`;
+    local stays `false`, Direct URL is eligible-if-fetchable)
+-   [x] **P12-02** Implement app-managed download records/storage. ---
+    Done (VP6.2: `DownloadRecord` + `Downloads` table v7 + `HttpDownloadManager`
+    writing only to the separated downloads root, atomic `.part` publish)
+-   [x] **P12-03** Add progress, pause/resume where supported, cancel,
+    retry. --- Done (VP6.2 engine + event stream; Range resume when the source
+    advertises it; surfaced in the player pill, VP6.4)
+-   [x] **P12-04** Implement offline playback. --- Done (VP6.3:
+    `PlaybackSourceResolver` prefers a completed download over the remote
+    source and soft-degrades when it is missing or incomplete)
+-   [x] **P12-05** Delete app-managed downloads without deleting
+    originals. --- Done (VP6.2 `deleteDownload` removes only the app's file and
+    row; VP6.5 regression proves other providers' sources, other downloads and
+    originals survive)
+-   [x] **P12-06** Handle low storage, partial files, and interrupted
+    downloads. --- Done (VP6.2: size-aware low-storage refusal, `pruneInterrupted`
+    normalises crash-orphaned rows/`.part` files; retry re-attempts)
+-   [x] **P12-07** Verify provider terms; do not bypass DRM/access
+    controls. --- Done for the shipped scope: the transport performs plain
+    authenticated-free HTTP GETs only and permission/DRM failures map to
+    prohibited/unknown, never a bypass. Per-provider terms verification is
+    re-opened when OneDrive/Drive/R2 download adapters land.
 
 ## Phase 13 --- Background playback and PiP
 
@@ -1948,4 +1967,707 @@ dependency). No new package was added.
     (36.5 s), which is what proves `MediaStorePlugin.kt`/`SaffBridgePlugin.kt`
     compile. --- Done. On-device delete is still unchecked; see
     `docs/device_testing_design.md` §7.
+
+## Video player redesign --- YouTube-style page and controller
+
+Source of truth for behaviour: `VIDEO_PLAYER_DESIGN.md`. This block splits that
+document into seven phases (`VP1`--`VP7`) so no single agent run has to rebuild
+the player at once. Each task is a self-contained change with its own tests and
+checks. Do not start a phase until the previous one is green.
+
+### Ground rules (apply to every task below)
+
+-   **The player engine is `video_player` 2.14.1** (Android: Media3/ExoPlayer
+    through `video_player_android`), wrapped by the app-owned
+    `PlaybackController` / `PlayerHandle` seam. Do **not** swap it for
+    `chewie`, `better_player`, `media_kit` or any second engine. Only
+    `lib/playback/video_player_handle.dart` may import `package:video_player`;
+    new engine capabilities (buffered ranges, captions) travel through
+    `PlayerHandle` / `PlayerSnapshot` → `PlaybackState`.
+-   **State:** `flutter_riverpod` 3.x for app state, `ValueNotifier` for
+    high-frequency playback/gesture state. No second state solution, and never
+    `setState` the page on a position tick.
+-   **Dependencies (decided):** add only `wakelock_plus`,
+    `screen_brightness` and `volume_controller`. Do **not** add
+    `video_thumbnail` (extend `ThumbnailPlugin`), `flutter_animate`
+    (`AnimatedIcon`/`AnimatedSwitcher`/`TweenAnimationBuilder` suffice) or
+    `audio_service` (`MediaSessionPlugin` + `MediaPlaybackService` already own
+    the session and notification).
+-   **Theme:** keep the shipped tokens (`#0F0F0F`, `#212121`, `#FF0000`;
+    ADR-008/DESIGN.md). The design's `#1E1E1E`/`#272727`/`#FF0033` are **not**
+    adopted app-wide; player-only overlay colours go into a new
+    `ThemeExtension`. `test/widget/app_theme_test.dart` expectations stay.
+-   **Reels is out of scope:** `PlaybackControls`, `ScrubberBar`,
+    `TransportButtons` and `SpeedMenu` keep serving Reels exactly as they do
+    now. The new overlay widgets are player-only and live under
+    `lib/features/player/`; Reels tests must pass untouched.
+-   **Download/Export is cloud-only:** never offered for MediaStore or SAF
+    items. A remote item shows the action only when its adapter reports
+    `SourceCapabilities.canDownload` **and** `checkDownloadEligibility` is not
+    `prohibited`. No capability ⇒ no button (no dead affordance).
+-   **Preserve behaviour and keys:** every `ValueKey`/`Key` asserted by a test
+    today (`player_pip_button`, `player_fullscreen_button`,
+    `player_video_area`, `playback_position_slider`, `mini_player*`, …) survives
+    unless a task explicitly renames it *and* updates that test in the same
+    change. Never delete or weaken a test to make a phase pass.
+-   **Checks per task:** `dart format lib test`, `flutter analyze lib test`,
+    relevant `flutter test`. Any Kotlin/plugin/manifest change also needs
+    `flutter build apk --debug` --- a Dart test never compiles Kotlin.
+-   Record what actually changed here; document device-only behaviour in
+    `docs/device_testing_player_v2.md`.
+
+### Already in place --- keep, do not rebuild
+
+Theme + tokens (`AppTheme`, `AppTokens`), pinned 16:9 player header, tap-to-
+toggle chrome with a 3 s timer, Fit/Fill/Stretch display modes, speed menu,
+docked mini-player with `Hero` + drag-to-dismiss, PiP feature detection and
+auto-enter, media session/notification/audio focus, watch-progress throttling
+and resume, share/tags/sources/collection actions, shimmer skeletons, and the
+relative-date helper (it only needs the pluralisation fix in VP1.5).
+
+### VP1 --- Foundations, engine capabilities and formatting
+
+-   [x] **VP1.1** Dependency gate. --- Done (ADR-018: `wakelock_plus`
+    ^1.8.2, `screen_brightness` ^2.1.11, `volume_controller` ^3.7.1;
+    BSD-3/MIT; no new permission — the window brightness path is used;
+    `flutter build apk --debug` clean). Verify current versions, licences,
+    Android `minSdk 24` compatibility and any manifest/permission needs for
+    `wakelock_plus`, `screen_brightness` and `volume_controller` (system-wide
+    brightness needs `WRITE_SETTINGS`; window brightness does not --- use the
+    window path). Add exactly those three to `pubspec.yaml`, run
+    `flutter pub get`, `flutter analyze`, `flutter test` and
+    `flutter build apk --debug`. Record the decision and versions in
+    `DECISIONS.md` (ADR-018). No other package may enter the pubspec.
+-   [x] **VP1.2** Player theme extension. --- Done
+    (`lib/app/theme/player_theme.dart`, registered on both
+    `AppTheme.dark` and `AppTheme.light`; tests in `app_theme_test.dart`).
+    `lib/app/theme/player_theme.dart`:
+    `PlayerColors extends ThemeExtension<PlayerColors>` with the overlay scrim,
+    control scrim, played/buffered/remaining track colours, thumb, overlay text
+    and icon colours. Register it on both `AppTheme.dark` and `AppTheme.light`
+    and expose `PlayerColors.of(context)` with a documented fallback. Tests:
+    extension present in both brightnesses, overlay colours identical between
+    them, fallback path.
+-   [x] **VP1.3** Buffered range through the engine seam. --- Done
+    (`PlaybackState.buffered`/`bufferedFraction`, `PlayerSnapshot.buffered`,
+    `lib/playback/buffer_range.dart`; clamped to `[position, duration]` and
+    reset on load/stop; tests in `buffer_range_test.dart`,
+    `app_playback_controller_test.dart`, `video_player_handle_test.dart`). Add
+    `buffered` to `PlayerSnapshot`/`PlaybackState` (clamped to the duration,
+    reset on load/stop) with `==`/`hashCode` coverage, populate it from
+    `VideoPlayerValue.buffered`, and update every fake handle/state fixture.
+    No engine type may leak. Unit tests: mapping, clamp, reset, equality.
+-   [x] **VP1.4** Native scrub frames. --- Done (native `timeMs` clamped
+    into `0..duration`, explicit position never falls back to the system
+    preview; `getFrame` decodes at 480 px; `frameForLocation` uses 1 s
+    buckets, a 16-entry LRU, the existing disk cache (`#scrub` keys) and
+    drops a superseded result). `ThumbnailPlugin` gains an
+    optional `timeMs` (clamped into the media range; omitting it keeps the
+    current 1 s/0 s behaviour) and `ThumbnailBridge` gains
+    `getFrame(uri, positionMs, {headers})` reusing the existing decode permit,
+    rotation and JPEG path. Add a small position-keyed cache in front of it
+    (memory + `DiskCacheStore`) and cancel stale requests on drag. Kotlin build
+    required. Tests: argument contract, clamp, cache hit, unsupported scheme,
+    no URI in diagnostics.
+-   [x] **VP1.5** Formatting fixes. --- Done
+    (`lib/core/util/duration_format.dart`; `formatClock` removed from the
+    seek bar; every bucket singularises; tests in `relative_time_test.dart`
+    and `duration_format_test.dart`. No `video_item_card` test asserted a
+    relative date, so none needed changing). `formatRelativeDate` must
+    pluralise (`1 day ago`, `1 hour ago`, `1 minute ago`, `1 week/month/year`),
+    fixing the shipped `1 days ago` bug for every surface. Add one shared
+    `formatDuration` (`m:ss` / `h:mm:ss`) and reuse it in the seek bar, Up Next
+    and mini-player instead of three copies. Update `relative_time` tests,
+    `video_item_card` metadata tests and add a regression test for `1 day ago`.
+-   [x] **VP1 verification.** --- Done. `dart format lib test` (clean),
+    `flutter analyze lib test` (no issues), `flutter test` (1167 passing) and
+    `flutter build apk --debug` (built) on this change set.
+
+### VP2 --- Chrome, gestures and the seek bar
+
+-   [x] **VP2.1** `PlayerChromeController`. --- Done
+    (`lib/features/player/player_chrome_controller.dart`; 17 tests in
+    `test/unit/player/player_chrome_controller_test.dart`). Two deliberate
+    deviations: the injected seam is a `Timer Function(Duration, void Function())`
+    scheduler rather than `package:clock` — a fake timer removes the real timer
+    entirely, which is a stronger guarantee than patching clock reads — and
+    "settings sheet open" is expressed as a named hold (`ChromeHold.settingsSheet`)
+    that VP4.1 raises when it opens the sheet, because no sheet exists yet. Holds
+    are a set, so overlapping reasons (scrub + gesture) cannot un-hide each other,
+    and a notification whose status is unchanged never re-arms the countdown, so
+    position ticks cannot keep the chrome alive. Spec:
+    `lib/features/player/player_chrome_controller.dart`: `ValueNotifier<bool>`
+    plus the visibility rules --- tap toggles, auto-hide after 3 s **only**
+    while playing, never while paused, scrubbing, the settings sheet is open, a
+    gesture is active, locked, completed or errored. Inject `package:clock` so
+    tests need no real timers. Unit tests for every rule.
+-   [x] **VP2.2** `PlayerGestureLayer`. --- Done
+    (`lib/features/player/player_gesture_layer.dart`; per-gesture tests plus the
+    no-seek-while-locked case in `test/widget/player_gesture_layer_test.dart`).
+    Two host switches instead of global behaviour: `deviceGestures` is true only
+    in fullscreen, so the ADR-014 swipe-down dock keeps the portrait vertical
+    drag (and fullscreen keeps brightness/volume), and `locked` installs no
+    handlers at all. A single `GestureDetector` cannot hold a scale recogniser
+    next to a drag one (Flutter asserts), so portrait drags horizontally while
+    fullscreen uses the scale recogniser for both the pan and the pinch. Spec:
+    single tap toggles chrome;
+    double tap on the left/right third seeks ±10 s with a ripple, an animated
+    chevron and a cumulative counter; double tap centre plays/pauses; long
+    press holds 2× and restores on release with a `2x >>` pill; horizontal drag
+    scrubs with a centred offset preview and commits on release; vertical drag
+    on the left half drives brightness and on the right half volume, with a
+    dead zone and a compact percentage indicator; pinch zooms to fill and back.
+    All of it is inert while locked. Widget tests per gesture plus a
+    no-seek-while-locked case.
+-   [x] **VP2.3** Device controls seam. --- Done
+    (`player_device_controls.dart`, `player_device_controls_impl.dart`,
+    `player_device_controls_provider.dart`; 7 unit tests in
+    `test/unit/player/player_device_controls_test.dart`, plus the overridden-fake
+    widget tests for the player screen and the gesture layer). The impl is the
+    only file importing `screen_brightness`/`volume_controller`/`wakelock_plus`,
+    every call is fail-soft (`null`/no-op, never throws — a missing plugin in a
+    widget test is therefore harmless) and values are clamped to 0–1 with NaN
+    rejected. The gesture layer restores brightness in `dispose` only when it
+    actually changed it, and the page keeps the panel awake exactly while the
+    engine reports playing, releasing it on teardown (design §9). Spec: app-owned
+    `PlayerDeviceControls` (read/write brightness, read/write volume,
+    enable/disable wakelock) implemented over the three VP1.1 packages and
+    injected through a provider so tests use a fake. Brightness is restored on
+    exit/dispose; volume stays owned by `PlaybackController` (the UI indicator
+    mirrors the exact value sent, no drift). Unit tests + one widget test with
+    an overridden fake.
+-   [x] **VP2.4** `PlayerSeekBar`. --- Done
+    (`lib/features/player/player_seek_bar.dart` + `SeekBarPainter`; 13 tests in
+    `test/widget/player_seek_bar_test.dart`). The scrub frame arrives through a
+    `FramePreviewLoader` callback, so the widget stays presentation-only; the
+    screen answers it with `ScrubPreviewService` (`scrub_preview_service.dart`),
+    which memoises `ThumbnailService.pickLocation` per item and only builds its
+    provider on the first scrub. That keeps `path_provider`/the native decoder
+    out of every test that never drags the bar. `pickLocation` became public so
+    the card and the scrubber cannot drift. Spec: player-only custom widget:
+    bottom-
+    anchored 3--4 dp track that grows to ~6 dp while dragging, played red /
+    buffered white@40 % / remaining white@20 %, a 12 dp thumb growing to 18 dp
+    on drag, a ≥48 dp hit area, tap-to-seek, a time bubble plus frame preview
+    from VP1.4, and slider semantics with increase/decrease. Widget tests:
+    geometry, buffered painting, one seek per drag, disabled when `!canSeek`.
+-   [x] **VP2.5** Overlay top bar and centre cluster. --- Done
+    (`lib/features/player/player_overlay.dart` + `PlayerProgressLine`; 15 tests
+    in `test/widget/player_overlay_test.dart`, plus the screen rewire tests in
+    `video_player_screen_test.dart`). The screen now draws `PlayerOverlay`
+    instead of `PlaybackControls` (which stays untouched for Reels). Two
+    deliberate scoping choices: the portrait page keeps its `AppBar` until VP3.1,
+    so the overlay title and chevron are fullscreen-only and `player_pip_button`
+    has exactly one home; and the fullscreen toggle moved into the action slot
+    with its key unchanged. Spec: top bar:
+    back/minimise, title (fullscreen only, ellipsised) and PiP --- built with an
+    optional action slot so later tasks append theirs (VP4.1 gear, VP4.3
+    captions, VP5.6 lock) without a rewrite. Centre cluster: rewind 10 s,
+    `AnimatedIcon` play/pause, forward 10 s on a `black@40 %` circular scrim,
+    buffer spinner, replay at the end. A 2 dp red progress line at the bottom
+    edge whenever the chrome is hidden. Existing keys preserved. Widget tests
+    per state.
+-   [x] **VP2 verification.** --- Done. `dart format lib test` (clean),
+    `flutter analyze lib test` (no issues), `flutter test` (1251 passing) and
+    `flutter build apk --debug` (built) on this change set, though VP2 changed no
+    Kotlin, Gradle or manifest file. Verified on the widget level only:
+    brightness, volume, wakelock, real scrub-frame decoding and pinch-zoom remain
+    device-only behaviour (see the VP2 notes above and
+    `docs/device_testing_*.md`).
+
+### VP3 --- Page layout, metadata and Up Next
+
+-   [x] **VP3.1** Overlay-hosted app bar. --- Done (`lib/features/player/video_player_screen.dart`
+    + `player_overlay.dart`; 18 tests in `test/widget/player_overlay_test.dart`,
+    15 in `test/widget/video_player_screen_test.dart`, 3 in
+    `test/widget/video_player_pip_test.dart`). The portrait page is now a
+    `SafeArea` + `CustomScrollView` with the player in a pinned
+    `_DockedPlayerHeader`, so there is no `AppBar` left to draw and the player
+    sits directly under the status bar. Back, title and PiP are overlay content
+    and fade with the rest of the chrome; `PlayerOverlay.title` is no longer
+    fullscreen-only, and the portrait branch passes `onBack` while fullscreen
+    adds its own exit/minimise buttons through the same `topActions` slot.
+    `player_pip_button` keeps its key and now has exactly one home. Spec:
+    Remove the permanent `AppBar` from the portrait player; back, title and PiP
+    move into the overlay top bar so they fade with the controls. Fullscreen and
+    the chrome-less PiP branch stay as they are. Update
+    `video_player_screen_test` and `video_player_pip_test`;
+    `player_pip_button` keeps its key.
+-   [x] **VP3.2** Aspect strategy. --- Done (`lib/features/player/player_layout.dart`,
+    `vertical_expand_notifier.dart`, plus the `Expand` slot in `player_overlay.dart`;
+    6 tests in `test/unit/player/player_layout_test.dart` and the 4-test
+    `VideoPlayerScreen aspect strategy (VP3.2)` group).
+    A pinned sliver needs a concrete extent, so `portraitPlayerHeight` starts
+    every source at 16:9; a source taller than it is wide stays Fit inside that
+    box and gains `player_expand_button` (`Expand`/`Collapse`), which grows the
+    header to the source's own ratio capped at `expandedPlayerFraction` (0.7)
+    of the height under the status bar and never below the 16:9 box --- the
+    control can only add picture. Landscape, square and not-yet-probed
+    dimensions get no control at all, because guessing a shape is worse than
+    the safe letterbox. The choice is held by a session-scoped
+    `VerticalExpandNotifier` (in memory, nothing persisted). The layout maths is
+    a pure, `BuildContext`-free function so all three shapes are unit-testable.
+    Rotation only re-measures the header: the engine is never rebuilt, so
+    playback is not restarted. Spec: 16:9 default; a vertical source is
+    Fit inside that box with an optional `Expand` (up to ~70 % of screen
+    height) toggle remembered per session through a new notifier; landscape
+    sources fill the width. Rotation must not restart playback (the engine is
+    never rebuilt on orientation change). Widget tests for both shapes and the
+    remembered choice.
+-   [x] **VP3.3** Metadata block. --- Done (`lib/features/player/player_item_details.dart`
+    + `player_metadata_panel.dart`; 16 tests in
+    `test/unit/player/player_item_details_test.dart`, 7 in
+    `test/widget/player_metadata_panel_test.dart`). `PlayerItemDetails` reads
+    `getSourceLocationsForVideo` + `getTagsForVideo` once per item through
+    `playerItemDetailsProvider`, so the card and the meta line share one round
+    trip and no widget touches Drift; the provider is deliberately fail-soft,
+    because a half-empty card is not an error state when the video is already
+    playing. `playerMetaLine` prints `date · source · resolution · size ·
+    duration`, dropping any unknown part rather than showing "null" or "0:00",
+    and reuses VP1.5's pluralised `formatRelativeDate` (injectable `now`).
+    `describeSourceLocation` builds the file name and location from
+    `Uri.pathSegments`, which discards query and fragment --- a pre-signed
+    direct URL shows its host only, never its token (AGENTS privacy rule).
+    Deviations recorded as built: the card prints no codec, bitrate or fps,
+    because neither the engine nor the schema reports them; and a video with no
+    source row says "No source recorded for this video." instead of an empty
+    card. `FakeVideoRepository` gained a `tags` map so the tag half is testable
+    without a database. Spec: Two-line title with a `...more`
+    disclosure, a meta line (pluralised relative date, source, resolution, file
+    size, duration) and an expandable description card built from
+    `getSourceLocationsForVideo` + `getTagsForVideo` (file name, provider, path
+    label, size, resolution, date added, tags, availability). Codec, bitrate and
+    fps are **not** shown --- the engine and schema do not report them. Widget
+    tests: collapsed/expanded, missing metadata, pluralisation.
+-   [x] **VP3.4** Action row rework. --- Done (`lib/features/player/player_action_row.dart`
+    + `video_loop_notifier.dart`; 10 tests in
+    `test/widget/player_action_row_test.dart`). One horizontally scrollable
+    strip (`player_action_toolbar`, 48 dp pills) under a `player_action_fade`
+    gradient at the right edge, icon-left labels, filled icon when selected.
+    Like, Save, Share, Tags and Sources all delegate to `videoItemActionsFor`,
+    so a pill cannot advertise something a card doesn't do, and the existing
+    `DisplayModeMenu` is carried unchanged at the end of the strip; Like adds the
+    design's `HapticFeedback.lightImpact` + 1→1.16→1 pop, suppressed under
+    `AppMotion.reduceAnimations`. Loop is a session-scoped
+    `VideoLoopNotifier` pill wired to the engine's `setLooping`. Download is
+    gated by the pure `downloadOfferedFor`: it appears only for a cloud
+    provider, is absent for Local/SAF/direct-URL/unknown items, and its
+    `onPressed` is null until VP6.4 fills the slot. Spec: Horizontally scrollable pills
+    with a fade at the right edge, icon-left labels, filled icon when selected,
+    haptic + pop on Like. Keep Save, Share, Tag, Sources and the display-mode
+    pill as they are today. Add a Loop toggle. Add Download **only** for a
+    remote, eligible source (hidden entirely for MediaStore/SAF items) --- the
+    behaviour lands with VP6.4, this task only reserves the slot and the gate.
+    Tests: local item never shows Download, Like toggles, fade affordance.
+-   [x] **VP3.5** Up Next, autoplay and queue. --- Done
+    (`lib/features/player/playback_queue.dart` + `player_up_next.dart`; 15 unit
+    tests in `test/unit/player/playback_queue_test.dart`, 14 widget tests in
+    `test/widget/player_up_next_test.dart`, plus the 2-test
+    `PlayerOverlay ended action (VP3.5)` group). `PlaybackQueue` is an immutable
+    value type (de-duplicating `playNext`/`enqueue`/`remove`, equality by order)
+    behind a session-scoped `PlaybackQueueController`, and `upNextRows` layers it
+    *over* the recommendations --- queue first, then suggestions, with the
+    playing item and duplicates dropped. The section hides entirely when there is
+    nothing to show. `PlayerUpNextRow` carries a 16:9 thumbnail with a duration
+    badge and a red watched-progress bar, a two-line title, a meta line, and
+    `Shimmer` + `SkeletonBox` while the frame is still generating; Save and Share
+    reuse `videoItemActionsFor` so a row cannot advertise what a card does not
+    do. Deviation as built: **Remove from queue is offered only for a row that
+    came from the queue** --- a suggestion was never added, so an undo there
+    would be meaningless. The countdown is host-built but handed to
+    `PlayerOverlay.completedAction`, which inserts it only while the engine
+    reports `completed`, so its `Timer.periodic` starts at the end of the video
+    and not at page build; Cancel, Play now and the final tick all retire the
+    pill, and `_switchTo` consumes the queue entry so a promised video cannot
+    appear twice below itself. `test/support/stub_recommendations.dart` stubs
+    `recommendationsProvider` so the section is testable without the scorer.
+    Spec: Session-scoped
+    `PlaybackQueue` notifier (`Play next`, `Add to queue`, `Remove`) layered
+    over `upNextProvider`; rows gain a 16:9 thumbnail with duration badge, a
+    two-line title, a meta line, a `⋮` menu (Play next, Add to queue, Save,
+    Share, Remove), a red watched-progress bar and a `Now playing` label; the
+    header gains an Autoplay toggle, and `completed` starts a cancellable 5 s
+    countdown when it is on. Thumbnails use the existing skeleton while
+    generating. Unit tests for the queue plus widget tests for the menu and the
+    countdown.
+-   [x] **VP3 verification.** --- Done. `dart format` over the touched
+    lib/test paths (6 files changed), `flutter analyze lib test` (no issues),
+    `flutter test` (**1327 passing**, up from 1251 before VP3) and
+    `flutter build apk --debug` (built `build\app\outputs\flutter-apk\app-debug.apk`,
+    Gradle `assembleDebug` 32.6 s) on this change set. Verified at the
+    widget/unit level only: how a real vertical source looks inside the 16:9 box,
+    `Expand` on a device panel, rotation without restarting the decoder,
+    thumbnail generation during rapid swipes and the autoplay handover on a real
+    finish are device-only behaviour, and no device run has been recorded for
+    VP3 yet (see `docs/device_testing_*.md`).
+
+### VP4 --- Settings sheet
+
+-   [x] **VP4.1** Sheet shell. --- Done. `player_settings_sheet.dart` shows a
+    `showModalBottomSheet` with a drag handle, scrim and token-shaped top
+    corners; the root list (`_SettingsListPage`) is one `SettingsNavRow` /
+    `SettingsSwitchRow` per setting showing its live value, and tapping a row
+    slides an `AnimatedSwitcher` sub-page in with a back arrow and check marks
+    (`player_settings_rows.dart`). The gear action (`player_settings_button`) is
+    added to the VP2.5 top bar, and `openPlayerSettingsSheet` holds the overlay
+    chrome up while the sheet is open (design §5). Widget tests in
+    `test/widget/player_settings_sheet_test.dart` cover open/close on the scrim,
+    sub-page navigation in/back and the selected value; the gear itself is
+    covered in `video_player_screen_test.dart`.
+    Spec: Bottom sheet with a drag handle,
+    scrim and token-shaped top corners; rows with icon, label and current value;
+    sub-pages slide in with a back arrow and check marks. The gear action is
+    added to the VP2.5 top bar here (no gear before this task). Widget tests for
+    open/close, sub-page navigation and selected value.
+-   [x] **VP4.2** Speed sub-page. --- Done. `PlayerSpeedPage` lists the 0.25×--2×
+    presets and a custom `Slider` clamped by `clampPlaybackSpeed` to the
+    supported range, applied through `PlaybackController.setSpeed`; the check
+    mark reads `PlaybackState.speed` back from the engine so it can never
+    advertise a speed the engine did not apply. Widget tests cover a preset tap,
+    the slider and an out-of-range engine value shown clamped.
+    Spec: 0.25×--2× presets plus a custom
+    slider clamped to the engine's supported range, applied through
+    `PlaybackController.setSpeed` and reflected in the check mark. Widget test
+    for preset + slider + clamp.
+-   [x] **VP4.3** Captions sub-page. --- Done. A sidecar `.srt`/`.vtt` is read
+    through a new dedicated `CaptionSource` method-channel bridge
+    (`lib/platform/caption_source.dart` + `CaptionsPlugin.kt`, an
+    `ACTION_OPEN_DOCUMENT` picker), parsed in the domain layer
+    (`lib/domain/services/caption_parser.dart`, framework-free, auto-detects
+    SubRip/WebVTT) and handed to the engine through an optional capability
+    interface `CaptionCapableHandle`/`CaptionCapableController` (`setCaptions`) --
+    a mixin rather than a widened `PlayerHandle`/`PlaybackController` method, so
+    the existing engine and controller fakes stay untouched. Enable/disable, text
+    size and background live in `captions_notifier.dart`; the visible text is
+    painted by the app's own `PlayerCaptionOverlay` (the only renderer that can
+    honour size/background), while the cues still travel to the handle so
+    "captions reach the handle" holds. The CC action (`player_captions_button`)
+    is added to the top bar -- a no-op with no file opens the sheet straight onto
+    Captions -- and `_switchTo` clears captions on an item change. Documented
+    limits: embedded subtitle **and** audio-track selection are not supported by
+    `video_player`, so neither a track picker nor an audio-track row is shown.
+    Tests: `test/unit/domain/caption_parser_test.dart` (srt + vtt parsing),
+    `test/unit/player/captions_notifier_test.dart` (cues reach a caption-capable
+    controller, cleared on change, cancel/error states) and the Captions-page
+    states in `test/widget/player_settings_sheet_test.dart`.
+    Spec: Load a sidecar `.srt`/`.vtt`
+    through the SAF picker, parse it in the domain layer, and hand it to the
+    engine through a new optional `PlayerHandle.setCaptions`; enable/disable,
+    text size and background options. Add the CC action to the top bar here.
+    Documented limits: embedded subtitle **and** audio-track selection are not
+    supported by `video_player`, so neither a track picker nor an audio-track
+    row is shown. Tests: srt + vtt parsing, sheet states, captions reach the
+    handle, captions cleared when the item changes.
+-   [x] **VP4.4** Aspect-ratio sub-page. --- Done. `PlayerAspectPage` maps Fit,
+    Fill, Stretch, 16:9, 4:3 and Zoom onto the existing `VideoDisplayMode`
+    notifier (the same provider the overlay pill and `VideoSurface` read, so
+    sheet and pill cannot disagree) plus the `AspectRatioLockNotifier`. Widget
+    tests cover each option writing the shared notifier and marking the check.
+    Spec: Fit, Fill, Stretch, 16:9,
+    4:3 and Zoom mapped onto the existing `VideoDisplayMode` notifier (plus a
+    ratio lock) so the sheet and the action pill never disagree. Widget tests
+    for each option.
+-   [x] **VP4.5** Loop, sleep timer and theme. --- Done. The Loop switch mirrors
+    the controller flag; `SleepTimerNotifier` offers off / 15 / 30 / 45 / 60 min
+    / end of video and pauses playback when it expires, behind an injectable
+    `Timer Function(Duration, void Function())` scheduler seam (the house clock
+    convention) so tests fire the countdown without a real timer; the theme page
+    reuses `ThemeModeNotifier` (System/Dark/Light). Unit tests in
+    `test/unit/player/player_settings_test.dart` cover the sleep notifier via the
+    fake scheduler and the pure helpers; a widget test covers the sheet's sleep
+    and theme rows.
+    Spec: Loop mirrors the
+    controller flag; sleep timer offers off / 15 / 30 / 45 / 60 min / end of
+    video, pausing playback when it expires (session-only, fake-clock tests);
+    theme reuses `ThemeModeNotifier` (System/Dark/Light). Tests with
+    `package:clock`.
+-   [x] **VP4.6** Stats for nerds. --- Done. `player_stats.dart` shows only facts
+    the app holds -- resolution and aspect, duration, provider/source type,
+    source size, position and buffered range, availability -- and labels codec,
+    fps and bitrate as "not reported by this engine" rather than faking them.
+    Widget tests cover the populated rows and the partial (Unknown / not-reported)
+    state.
+    Spec: Show only facts the app actually
+    has: resolution and aspect, duration, provider/source type, source size,
+    position and buffered range, availability. Codec, fps and bitrate are
+    labelled as not reported by this engine rather than faked. Tests for the
+    populated and partial states.
+-   [x] **VP4 verification.** --- Done. `dart format` over the touched lib/test
+    paths (11 files changed), `flutter analyze lib test` (no issues),
+    `flutter test` (**1380 passing**, up from 1327 before VP4) and
+    `flutter build apk --debug` (built `build\app\outputs\flutter-apk\app-debug.apk`,
+    Gradle `assembleDebug` 45.2 s -- the new `CaptionsPlugin.kt` compiles) on
+    this change set. Verified at the widget/unit level only: the real document
+    picker, reading a sidecar off the content resolver, and how a rendered
+    subtitle looks on a device are Kotlin/native behaviour and no device run has
+    been recorded for VP4 yet (see `docs/device_testing_*.md`); the caption cues
+    reach the handle through the `CaptionCapableHandle` seam the app-side overlay
+    drives, but the native `video_player` engine treats `setCaptions` as a
+    documented no-op.
+
+### VP5 --- States, lifecycle, mini-player and fullscreen
+
+-   [x] **VP5.1** Player state UI. --- Done. The existing `PlaybackStatus` enum
+    is mapped in the widgets rather than extended: `PlayerOverlay.isLoading`
+    (the first buffering pass, before a duration exists) hides the transport
+    behind a centred `PlayerLoadingIndicator` painted above the chrome so it
+    reads even when the controls are faded; a mid-playback rebuffer keeps the
+    spinner over a usable centre cluster; `PlayerErrorPanel` replaces the
+    cluster with the message, Retry (only when `canRetry`) and Skip-to-next
+    (only when the host supplies one); completed keeps replay plus the VP3.5
+    countdown; a bare idle stays a disabled transport rather than a lying
+    spinner. Per-state tests in `test/widget/player_overlay_test.dart`.
+    Spec: Loading (spinner plus a skeleton below), buffering (spinner over the
+    centre, controls stay usable), completed (replay plus the VP3.5 autoplay
+    countdown), error (message, Retry, Skip to next) and idle. Keep the existing
+    `PlaybackStatus` enum --- map it in the widgets; do not add engine states.
+    Widget tests per state.
+-   [x] **VP5.2** Lifecycle and wakelock. --- Done. `didChangeAppLifecycleState`
+    force-flushes the current watch position on paused/hidden/detached through
+    the captured `_watchProgress` (never `ref`, so it is safe on detach);
+    background playback itself is deliberately left to `AudioFocusCoordinator`
+    (background audio / PiP hold focus), and a paused background still restores
+    the fullscreen system UI. Keep-awake already tracks `isPlaying` via
+    `_syncScreenAwake` and releases on dispose; rotation reuses the same
+    captured engine and position. A lifecycle test drives
+    `WidgetsBindingObserver` through the binding harness in
+    `test/widget/video_player_screen_test.dart`.
+    Spec: Keep playing in the background only when PiP or background audio is
+    active, otherwise pause; hold the screen awake while playing and release it
+    on pause/dispose; rotation keeps the engine and position; timers, listeners
+    and controllers are still disposed on teardown. Tests through the existing
+    `WidgetsBindingObserver` harness.
+-   [x] **VP5.3** Mini-player upgrade. --- Done. The dock's poster
+    `VideoThumbnail` is replaced by the live `VideoSurface(fit: BoxFit.cover)`
+    under the unchanged `Hero` tag, so a docked video keeps moving and the
+    expand hand-off shows one continuous surface. A 2dp red playhead line
+    (`mini_player_progress`) sits on the top edge and only appears once the
+    engine reports a duration. A left/right swipe dismisses alongside the
+    existing downward drag; tap still expands. 56dp height, nav-bar docking and
+    every existing key are unchanged. `mini_player_test` (added live-surface,
+    playhead-line and sideways-dismiss cases) and `main_scaffold_test` pass.
+    Spec: Live `VideoSurface` thumbnail instead of the poster, a 2 dp red
+    progress line on the top edge, swipe left/right dismiss in addition to the
+    existing vertical drag, and tap to expand. 56 dp height, nav-bar docking,
+    `Hero` tag and existing keys stay. Update `mini_player_test` and
+    `main_scaffold_test`.
+-   [x] **VP5.4** PiP polish. --- Done. Feature detection and auto-enter are
+    unchanged; while `inPip` the whole page body is replaced by a bare
+    `VideoSurface`, so every piece of chrome — the older overlay plus the newer
+    `PlayerGestureLayer`, `PlayerLoadingIndicator`, `PlayerLockOverlay` and the
+    seek bar — disappears with it. `video_player_pip_test` now asserts each of
+    those is present in normal mode, absent while floating, and restored on
+    exit.
+    Spec: Keep the current feature detection and auto-enter; every new overlay
+    widget (seek bar, top bar, centre cluster, gesture indicators, sheet) must
+    disappear while `inPip`. Extend `video_player_pip_test` to assert the new
+    chrome is hidden.
+-   [x] **VP5.5** Fullscreen and landscape. --- Done. Immersive sticky mode is
+    unchanged; `FullscreenController.enter({allowLandscape})` now picks the
+    orientation so a vertical source stays portrait while immersive
+    (`_enterFullscreen` passes `allowLandscape: !isVerticalVideo(...)`) and a
+    landscape/unknown source rotates. The fullscreen branch hands the overlay a
+    notch/cutout `padding` (device `MediaQuery.padding` plus a larger base
+    inset) while the video stays edge-to-edge; the title remains in the top bar.
+    `_enterFullscreen` captures the portrait scroll offset and a fullscreen-exit
+    listener jumps back to it after the scroll view rebuilds, so exit restores
+    the previous layout and position. Tests: vertical-stays-portrait and
+    entry-order preference in `fullscreen_controller_test`; scroll-restore on
+    exit in `video_player_screen_test`.
+    Spec: Immersive sticky mode, overlay safe-area padding for notches/cutouts,
+    the same overlay component with larger paddings, title in the top bar, and
+    exit restoring the previous portrait layout and scroll position. Vertical
+    videos stay portrait fullscreen; rotate landscape only for landscape
+    sources. Tests for enter/exit restore.
+-   [x] **VP5.6** Lock mode. --- Done. A top-bar lock action (fullscreen only)
+    sets a page-owned `ValueNotifier<bool>` and `PlayerChromeController.setLocked`
+    so leaving fullscreen by any route auto-unlocks through the fullscreen
+    listener. While locked the gesture layer and the dock drag are inert and a
+    `PlayerLockOverlay` swallows every touch, hiding the chrome and revealing a
+    single unlock button on tap (with a timed hint fallback); lock/unlock fire
+    `HapticFeedback.mediumImpact`. Widget tests in `video_player_screen_test`
+    (freeze + unlock, auto-unlock on exit) and `player_overlay_test`
+    (`PlayerLockOverlay` reveal/hide).
+    Spec: A lock action in the top bar (fullscreen only) that disables every
+    gesture and hides the chrome, leaving one unlock affordance on tap, with
+    haptics on lock/unlock and an automatic unlock when fullscreen is exited.
+    Widget tests: gestures inert while locked, unlock restores them.
+-   [x] **VP5 verification.** --- Done. `dart format` over the touched lib/test
+    paths (7 changed), `flutter analyze` (no issues), `flutter test` (**1398
+    passing**, up from 1380 before VP5) and `flutter build apk --debug` (built
+    `build\app\outputs\flutter-apk\app-debug.apk`, Gradle `assembleDebug` 34.0 s)
+    on this change set. Verified at the widget/unit level only: immersive system
+    chrome, orientation locking, notch/cutout insets, real keep-awake/
+    audio-focus behaviour and the live docked `VideoSurface` are native/device
+    behaviour with no physical-device run recorded for VP5 yet (see
+    `docs/device_testing_*.md`); the fullscreen PiP capture path is asserted only
+    through the fake bridge reporting `inPip`.
+
+### VP6 --- Downloads and export for cloud sources (Phase 12 breakdown)
+
+This is the concrete breakdown of Phase 12 for remote providers. Local
+MediaStore/SAF items are permanently out of scope. Close P12-01--P12-07 as
+these land.
+
+-   [x] **VP6.1** Eligibility seam. --- Done. `SourceCapabilities.canDownload`
+    is declared per adapter (Direct URL reports it per the agreed
+    eligible-if-fetchable policy; local MediaStore/SAF adapters stay `false`)
+    and `checkDownloadEligibility` returns the typed decision — reachable
+    source → eligible, probe failure → unknown, an explicit capability `false`
+    → prohibited. Unit tests in the direct-URL adapter suite (14 cases incl.
+    prohibited and unknown).
+-   [x] **VP6.2** Download engine. --- Done. `DownloadRecord` model +
+    `DownloadRepository` interface, the Drift `Downloads` table (migration v6→7)
+    and `DriftDownloadRepository`, and `HttpDownloadManager` over a dart:io
+    `DownloadTransport`: writes only under the separated downloads root, atomic
+    `.part` → rename on completion, broadcast progress events, pause/resume via
+    HTTP Range when the source advertises it, cancel, retry, low-storage
+    refusal (only when both size and free space are known), and
+    `pruneInterrupted` normalising crash-orphaned rows/files. Deleting a
+    download removes only the app's file and row. Engine bug found and fixed
+    during testing: a completed transfer now leaves the active set so
+    delete/cancel see a settled record. Tests: `download_manager_test.dart`
+    (12), `download_transport_test.dart` (5, real loopback `HttpServer`),
+    `drift_download_repository_test.dart` (9) + migration/schema coverage.
+-   [x] **VP6.3** Offline playback. --- Done. `PlaybackSourceResolver` takes an
+    optional `OfflineDownloadResolver` seam; `StorageOfflineDownloadResolver`
+    returns a `file://` `PlayableSource` for the completed download so the
+    resolver prefers it over the network source, and soft-degrades to the
+    remote path when the record is absent, incomplete, or the file is gone.
+    The durable identity stored on the record is never a signed URL and the
+    offline source carries no auth headers. Tests:
+    `offline_download_resolver_test.dart` (6) + the three-branch additions to
+    `playback_source_resolver_test.dart`.
+-   [x] **VP6.4** Player download action. --- Done. The VP3.4 reserved slot is
+    now a working `DownloadPill` backed by `DownloadController`
+    (ChangeNotifier over the manager event stream): idle → start with live
+    percentage, running → tap to cancel, failed → retry, completed →
+    download-tap removes the copy. It renders nothing for local items or
+    providers the capability seam prohibits, and an idle pill is disabled
+    while the `onlineProbe` reports no connectivity. Widget/unit tests:
+    `download_controller_test.dart` (12), `download_pill_test.dart` (6),
+    `player_action_row_test.dart` (10) — hidden for local, actionable for
+    eligible remote, progress/cancel/failure paths.
+-   [x] **VP6.5** Cross-provider and safety regression. --- Done.
+    `test/unit/downloads/vp6_5_safety_regression_test.dart` (5) runs the real
+    manager + Drift + cache stack against a temp tree: downloading one
+    provider's copy leaves both source locations and the user's original file
+    untouched; deleting a download removes only its own row/file — another
+    provider's download and every source survive; cancel drops only the
+    cancelled `.part`; Clear Cache and eviction leave completed and paused
+    downloads (files and rows) byte-for-byte (CACHE-006). Real-network
+    device-only cases added to `docs/device_testing_player_v2.md` (new file;
+    VP7.4 extends it with the rest of the player checklist).
+
+**VP6 verification:** `dart format` clean; `flutter analyze` — no issues;
+full `flutter test` **1463 passed / 0 failed**; `flutter build apk --debug`
+succeeds (no Kotlin change — checked for completeness). Device-only
+real-network behaviour is pending the CPH2719 run per
+`docs/device_testing_player_v2.md`.
+
+### VP7 --- Accessibility, performance, tests and verification
+
+-   [x] **VP7.1** Accessibility. --- Done. Every player control announces a
+    real label and role: the title is a header, each icon action carries a
+    tooltip label, the clock is a button that names the mode it toggles, the
+    seek bar reads `Seek bar, 1:12 of 4:03` and answers increase/decrease, and
+    an engine error is a live region so it is announced without a tap. Targets
+    are at least 48 dp, no state is carried by colour alone (the mute glyph
+    changes, the lock overlay replaces the chrome, the check marks are
+    `selected`), the dark and light chrome both pass WCAG AA against the real
+    token colours, the chrome lays out at 200 % text scaling without a
+    RenderFlex overflow, the keyboard path has a visible focus ring plus Space,
+    the arrow keys, M and F as shortcuts, and reduced motion
+    (`MediaQuery.disableAnimations`) drops the chrome fade and the gesture
+    ripple instead of only shortening them. Tests: `player_overlay_test`
+    (34, including the semantics group and the 200 % cases),
+    `playback_controls_test` (17), `player_keyboard_shortcuts_test` (13),
+    `player_contrast_test` (8), and the reduced-motion case in
+    `video_player_screen_test`.
+-   [x] **VP7.2** Performance. --- Done. The picture and the chrome each sit in
+    a keyed `RepaintBoundary` (`player_video_repaint`,
+    `player_overlay_repaint`), so a chrome fade cannot repaint the video
+    texture. The chrome rebuilds inside a `ValueListenableBuilder` scope in
+    `_PlayerBox`, so a position tick never reaches the page, the metadata
+    panel, the action row or Up Next; Up Next rows come from
+    `upNextRowsProvider(id)` and their thumbnails from a cached family
+    provider, the list is a lazy sliver, and switching items tears the previous
+    engine down. **Measured** in `video_player_screen_test`, using a handle the
+    test ticks by hand (20 ticks = 5 s of playback): `PlayerOverlay` rebuilt
+    **20/20** (the clock really advanced to `0:05 / 0:10`) while
+    `PlayerUpNextSection` rebuilt **0/20** (identical widget instance) and its
+    thumbnail provider body ran **0** extra times. Engine disposal is pinned at
+    the controller layer
+    (`app_playback_controller_test`: "a second play releases the previous
+    engine" --- two plays, two handles, the first disposed exactly once, the
+    second untouched). Painted frames were not counted on-device: the test
+    pins what each boundary contains, and the frame-pacing check lives in
+    `docs/device_testing_player_v2.md` (J-01/J-02).
+-   [x] **VP7.3** Test reconciliation. --- Done. The seven named suites were
+    re-checked against the shipped player and are green with no case removed:
+    `playback_controls_test` (17), `video_player_screen_test` (27),
+    `video_player_pip_test`, `mini_player_test`, `main_scaffold_test`,
+    `app_theme_test` and `video_item_card_test`. Each listed area has its own
+    suite --- chrome controller (`player_chrome_controller_test`), gesture
+    layer (`player_gesture_layer_test`), device controls
+    (`player_device_controls_test`), seek bar (`player_seek_bar_test`), queue
+    (`playback_queue_test`), settings sheet (`player_settings_sheet_test`),
+    captions parser (`caption_parser_test`) and download eligibility (the
+    `checkDownloadEligibility` cases in `direct_url_adapter_test` and
+    `local_media_adapter_test`, plus the mount gate in
+    `player_action_row_test`). The one real gap --- the stats panel's
+    formatting rules --- is filled by the new
+    `test/unit/player/player_stats_test.dart` (15 cases): the live engine size
+    beats the scanned dimensions, an empty engine size falls back to the scan,
+    ratios are exact (an odd 1000x562 reads `500:281`), an unknown duration
+    prints nothing instead of `0:00`, and a buffered run clamps to 100 %. Two
+    test-only fixes were needed for the current Flutter API
+    (`SemanticsNode.hasFlag` to `flagsCollection`, `binding.pipelineOwner` to
+    `tester.getSemantics`); no assertion was weakened.
+-   [x] **VP7.4** Verification and documentation. --- Done. `dart format lib
+    test` --- 337 files, 3 reformatted; `flutter analyze lib test` --- no
+    issues; `flutter test` --- **1516 passed, 0 failed**;
+    `flutter build apk --debug` --- `build\app\outputs\flutter-apk\app-debug.apk`
+    (Gradle `assembleDebug` 18.8 s). `docs/device_testing_player_v2.md` now
+    carries the whole player checklist (V chrome and seek bar, G gestures, B
+    brightness/volume/wakelock/audio focus, F fullscreen/rotation/lock, S
+    scrub previews, C captions, T sleep timer, P PiP and background audio, A
+    accessibility, J performance, D downloads) plus a results table for the
+    CPH2719 run. `DECISIONS.md` gains **ADR-020** for the queue, Up Next and
+    caption-sidecar seams (ADR-018 already covered the three device-control
+    packages).
+
+**VP7 verification:** `dart format lib test` clean (3 files reformatted);
+`flutter analyze lib test` --- no issues; full `flutter test` **1516 passed /
+0 failed**; `flutter build apk --debug` succeeds.
+
+One caveat, recorded rather than papered over: of three consecutive full
+runs, two were fully green and one failed four `library_screen_test.dart`
+cases because the card menu was reported off-screen at the default 800x600
+surface. That suite is green 3/3 when run on its own, and the same signature
+(`card_menu_id1` tapped off-screen, then `tags_id1` not found) already appears
+in the pre-VP7 `ui1_fail.log`, so it is a pre-existing load-sensitive harness
+flake in the Library suite, not a VP7 regression. Device-only behaviour
+(gestures, brightness/volume, wakelock, PiP, captions via SAF, frame pacing)
+is pending the CPH2719 run per `docs/device_testing_player_v2.md`.
+
+### Sequencing and definition of done
+
+Order: VP1 → VP2 → VP3 → VP4 → VP5 → VP6 → VP7. Within VP1, VP1.1 and VP1.3
+unblock everything else. VP6.4 must not ship before VP6.2 so the pill is never
+dead. VP4.1/VP4.3/VP5.6 add the gear, CC and lock actions to the VP2.5 bar ---
+those controls must not exist before their feature does.
+
+Acceptance for the block as a whole (maps to `VIDEO_PLAYER_DESIGN.md` §14):
+bottom-anchored seek bar with buffered range, scrub preview and hidden-state
+progress line (VP2.4, VP2.5); gesture-driven volume/brightness with no permanent
+slider (VP2.2, VP2.3); double-tap seek, hold-2×, scrub, pinch and swipe-to-
+minimise (VP2.2, VP5.3); 3 s auto-hide that never fires while paused or
+scrubbing (VP2.1); settings sheet with speed, captions, aspect, loop, sleep
+timer and theme (VP4); working mini-player, PiP, background audio and resume
+(VP5.3--VP5.5, already partly shipped); polished dark and light with a working
+toggle (VP1.2, VP4.5); vertical and landscape video correct without a playback
+restart (VP3.2, VP5.5); Up Next with badges, overflow menu, now-playing state
+and autoplay (VP3.5); pluralised relative dates (VP1.5); accessibility verified
+(VP7.1); no jank, leaks or console errors (VP7.2, VP7.4).
 

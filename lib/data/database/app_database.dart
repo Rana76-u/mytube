@@ -4,12 +4,14 @@ import 'package:drift_flutter/drift_flutter.dart';
 
 import 'daos/app_preferences_dao.dart';
 import 'daos/collections_dao.dart';
+import 'daos/downloads_dao.dart';
 import 'daos/recommendation_exposures_dao.dart';
 import 'daos/source_locations_dao.dart';
 import 'daos/video_items_dao.dart';
 import 'tables/app_preferences_table.dart';
 import 'tables/collection_items_table.dart';
 import 'tables/collections_table.dart';
+import 'tables/downloads_table.dart';
 import 'tables/recommendation_exposures_table.dart';
 import 'tables/source_locations_table.dart';
 import 'tables/tags_table.dart';
@@ -28,6 +30,7 @@ part 'app_database.g.dart';
 ///   v5 — [SourceLocations.thumbnailUri] (P7-02)
 ///   v6 — [Collections.isPinned]/[Collections.pinnedAt] + [RecommendationExposures]
 ///        (disc redesign §18/§19 — pinned collections, session-aware exposure)
+///   v7 — [Downloads] (Phase 12 / VP6.2 — app-managed offline download records)
 @DriftDatabase(
   tables: [
     VideoItems,
@@ -38,6 +41,7 @@ part 'app_database.g.dart';
     CollectionItems,
     AppPreferences,
     RecommendationExposures,
+    Downloads,
   ],
   daos: [
     VideoItemsDao,
@@ -45,13 +49,14 @@ part 'app_database.g.dart';
     AppPreferencesDao,
     CollectionsDao,
     RecommendationExposuresDao,
+    DownloadsDao,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -63,6 +68,7 @@ class AppDatabase extends _$AppDatabase {
       await m.createAll();
       await _createIndexes();
       await _createV6Indexes();
+      await _createV7Indexes();
     },
     onUpgrade: (m, from, to) async {
       // v1 → v2: video items and source locations
@@ -100,6 +106,12 @@ class AppDatabase extends _$AppDatabase {
       if (from < 6) {
         await m.createTable(recommendationExposures);
         await _createV6Indexes();
+      }
+      // v6 → v7: app-managed offline downloads (Phase 12 / VP6.2). New table,
+      // so creating it is safe for any pre-v7 database.
+      if (from < 7) {
+        await m.createTable(downloads);
+        await _createV7Indexes();
       }
     },
   );
@@ -145,6 +157,18 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_recommendation_exposures_session_id '
       'ON recommendation_exposures (session_id)',
+    );
+  }
+
+  /// Creates the indexes introduced alongside schema v7 (Phase 12 downloads).
+  ///
+  /// Called from [onCreate] (fresh installs) and the v6→v7 upgrade so both
+  /// paths converge on the same index set. Speeds up the per-item download
+  /// lookup the offline resolver and the Saved/downloads surfaces perform.
+  Future<void> _createV7Indexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_downloads_video_item_id '
+      'ON downloads (video_item_id)',
     );
   }
 

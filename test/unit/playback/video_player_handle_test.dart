@@ -272,6 +272,49 @@ void main() {
       expect(snapshot.duration, const Duration(seconds: 90));
     });
 
+    test('buffered updates map to the playhead\'s stretch (VP1.3)', () async {
+      final handle = VideoPlayerHandle(
+        source: _source('https://example.com/v.mp4'),
+      );
+      addTearDown(handle.dispose);
+
+      final initializing = handle.initialize();
+      await pumpEventQueue();
+      platform.emit(
+        0,
+        VideoEvent(
+          eventType: VideoEventType.initialized,
+          duration: const Duration(seconds: 30),
+          size: const Size(640, 360),
+          rotationCorrection: 0,
+        ),
+      );
+      await initializing;
+
+      // Nothing downloaded yet: the conservative default, which paints no
+      // secondary track on the seek bar.
+      expect(handle.snapshot.buffered, Duration.zero);
+
+      platform.emit(
+        0,
+        VideoEvent(
+          eventType: VideoEventType.bufferingUpdate,
+          buffered: <DurationRange>[
+            DurationRange(Duration.zero, const Duration(seconds: 10)),
+            DurationRange(
+              const Duration(seconds: 20),
+              const Duration(seconds: 30),
+            ),
+          ],
+        ),
+      );
+      await pumpEventQueue();
+
+      // The playhead is at zero, so the stretch it sits in ends at 10s — not
+      // the furthest downloaded point overall (30s), which has a gap before it.
+      expect(handle.snapshot.buffered, const Duration(seconds: 10));
+    });
+
     test('buffering and playing-state events toggle the snapshot', () async {
       final handle = VideoPlayerHandle(
         source: _source('https://example.com/v.mp4'),

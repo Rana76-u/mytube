@@ -1667,6 +1667,12 @@ class _FakeThumbnailService implements ThumbnailService {
       bytes;
 
   @override
+  Future<Uint8List?> frameForLocation(
+    SourceLocation location,
+    Duration position,
+  ) async => bytes;
+
+  @override
   void clearCache() {}
 }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/theme/app_tokens.dart';
+import 'package:mytube/core/util/duration_format.dart';
 import 'package:mytube/features/player/video_display_mode.dart';
 import 'package:mytube/features/player/video_display_mode_notifier.dart';
 import 'package:mytube/playback/playback_controller.dart';
@@ -47,6 +49,7 @@ class PlaybackControls extends ConsumerStatefulWidget {
 
   /// Presets offered by the speed selector.
   static const List<double> speedPresets = [
+    0.25, //
     0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, //
   ];
 
@@ -169,7 +172,7 @@ class _ScrubberBarState extends State<ScrubberBar> {
 
     return Row(
       children: [
-        Text(formatClock(shownPosition)),
+        Text(formatDuration(shownPosition)),
         Expanded(
           child: Slider(
             key: const Key('playback_position_slider'),
@@ -188,7 +191,7 @@ class _ScrubberBarState extends State<ScrubberBar> {
                 : null,
           ),
         ),
-        Text(formatClock(state.duration)),
+        Text(formatDuration(state.duration)),
       ],
     );
   }
@@ -275,9 +278,14 @@ class _SettingsRow extends ConsumerWidget {
                 : Icons.volume_up,
           ),
           Expanded(
+            // A bare slider announces only a 0 – 1 fraction; the formatter
+            // names the control and reads the level as a percentage (VP7.1),
+            // matching the seek bar's position/duration readout.
             child: Slider(
               key: const Key('playback_volume_slider'),
               value: state.volume,
+              semanticFormatterCallback: (value) =>
+                  'Volume ${(value * 100).round()}%',
               onChanged: (value) => controller.setVolume(value),
             ),
           ),
@@ -316,9 +324,19 @@ class SpeedMenu extends ConsumerWidget {
               child: Text(formatSpeed(preset)),
             ),
         ],
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Text(formatSpeed(state.speed)),
+        child: ConstrainedBox(
+          // A menu label is chrome, not a caption: it must still offer the
+          // Material minimum touch and focus target (VP7.1, 48 dp).
+          constraints: const BoxConstraints(
+            minWidth: AppSizes.minTapTarget,
+            minHeight: AppSizes.minTapTarget,
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(formatSpeed(state.speed)),
+            ),
+          ),
         ),
       ),
     );
@@ -349,15 +367,23 @@ class DisplayModeMenu extends ConsumerWidget {
             child: Text(option.label),
           ),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.fit_screen),
-            const SizedBox(width: 4),
-            Text(mode.label),
-          ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minWidth: AppSizes.minTapTarget,
+          minHeight: AppSizes.minTapTarget,
+        ),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.fit_screen),
+                const SizedBox(width: 4),
+                Text(mode.label),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -376,16 +402,6 @@ void togglePlay(PlaybackController controller, PlaybackState state) {
     case PlaybackStatus.idle || PlaybackStatus.error:
       break;
   }
-}
-
-/// `m:ss`, or `h:mm:ss` for hour-long media.
-String formatClock(Duration d) {
-  final hours = d.inHours;
-  final minutes = d.inMinutes.remainder(60);
-  final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return hours > 0
-      ? '$hours:${minutes.toString().padLeft(2, '0')}:$seconds'
-      : '$minutes:$seconds';
 }
 
 /// `1×`, `0.5×`, `1.25×`.

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mytube/app/theme/app_tokens.dart';
+import 'package:mytube/app/theme/player_theme.dart';
 
 /// Produces the [ThemeData] objects used throughout the app.
 ///
@@ -216,6 +217,9 @@ abstract final class AppTheme {
       useMaterial3: true,
       scaffoldBackgroundColor: scaffoldBackground,
       textTheme: textTheme,
+      // Player chrome is painted over video, so it keeps its own colours in
+      // both brightnesses (VP1.2). App surfaces keep using [ColorScheme].
+      extensions: const <ThemeExtension<dynamic>>[PlayerColors.overlay],
       chipTheme: chipThemeFor(scheme),
 
       // Flat brand chrome: the header never floats or tints on scroll.

@@ -64,6 +64,40 @@ void main() {
     );
   });
 
+  test('a vertical source stays portrait while immersive (VP5.5)', () async {
+    final container = containerFor();
+    final controller = container.read(fullscreenControllerProvider.notifier);
+
+    await controller.enter(allowLandscape: false);
+
+    expect(container.read(fullscreenControllerProvider), isTrue);
+    expect(
+      lastArg('SystemChrome.setEnabledSystemUIMode'),
+      'SystemUiMode.immersiveSticky',
+      reason: 'still immersive, just not wide',
+    );
+    expect(
+      orientations().every((value) => value.contains('portrait')),
+      isTrue,
+      reason: 'a portrait-first video gets the tall orientations',
+    );
+  });
+
+  test('the landscape preference follows the most recent entry', () async {
+    final container = containerFor();
+    final controller = container.read(fullscreenControllerProvider.notifier);
+
+    await controller.enter(allowLandscape: false);
+    await controller.exit();
+    await controller.enter();
+
+    expect(
+      orientations().every((value) => value.contains('landscape')),
+      isTrue,
+      reason: 'a later landscape source re-enables the wide orientations',
+    );
+  });
+
   test('leaving fullscreen restores edge-to-edge portrait', () async {
     final container = containerFor();
     final controller = container.read(fullscreenControllerProvider.notifier);

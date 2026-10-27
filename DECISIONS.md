@@ -1051,3 +1051,213 @@ device run. The cost is that cloud deletion is unimplemented-but-advertised:
 the dialog explicitly says so, and the removable-provider list is the single
 place to extend.
 
+
+## ADR-018 --- Three narrow platform packages for player device controls
+
+**Status:** Accepted (implemented in VP1.1).
+
+**Context and problem.** `VIDEO_PLAYER_DESIGN.md` §4–§6 gives the player
+gesture-driven brightness and volume, plus a keep-screen-awake rule. The app
+owns nine Kotlin plugins already and has a standing rule that every
+dependency is audited; adding three more packages for three platform
+features needs a reason that survives review, and each of the three has a
+different blast radius.
+
+-   **Wake lock.** `FLAG_KEEP_SCREEN_ON` is one window flag, but it must be
+    turned off on pause, on background, on error and on dispose — a missed
+    release drains the battery in the user's pocket. A bridge would mean
+    duplicating a lifecycle rule the player already owns.
+-   **Brightness.** A gesture must change only this app's window brightness,
+    never the system setting, and must restore on exit. `WRITE_SETTINGS` is
+    a special user-granted permission and is not needed for the window path.
+-   **Volume.** The gesture sets the media stream volume. Doing that by hand
+    means `AudioManager` plumbing plus a listener to keep the on-screen
+    indicator honest while the hardware keys are used.
+
+**Decision.** Add exactly three packages, and keep every engine-free part of
+the behaviour app-owned.
+
+-   `wakelock_plus` 1.8.x — enable while playing, disable on pause, stop and
+    dispose. No screen-on flag is written outside `PlayerDeviceControls`.
+-   `screen_brightness` 2.1.x — the **window** brightness path only (no
+    `WRITE_SETTINGS`, no manifest permission); the previous value is restored
+    when the player closes.
+-   `volume_controller` 3.7.x — media-stream volume; the app's
+    `PlaybackController.setVolume` remains the single owner of the volume
+    value that reaches the engine, so the gesture and the in-player slider
+    cannot disagree.
+-   All three are wrapped by one injectable seam (`PlayerDeviceControls`,
+    VP2.3) so tests never touch a platform channel and the drift rule holds:
+    the on-screen indicator mirrors what the platform reports, not what the
+    gesture assumed.
+-   Deliberately **not** added: `video_thumbnail` (the existing
+    `ThumbnailPlugin` gains an optional `timeMs` instead),
+    `flutter_animate` (the app's motion primitives are built-ins, ADR-015)
+    and `audio_service` (`MediaSessionPlugin`/`MediaPlaybackService` already
+    own the session, ADR-009).
+
+**Alternatives considered.** Three more Kotlin plugins (rejected: three
+copies of lifecycle rules that the packages already encode; the wake-lock
+release in particular is the bug most likely to be missed). Hand-rolled
+`AudioManager`/`WindowManager` bridges with no dependency (rejected: more
+native code than the packages, and the package surface is the smaller
+audit). `WRITE_SETTINGS` for brightness (rejected: a special permission and
+a system-wide side effect for a player gesture). Skipping the wake lock and
+letting the screen sleep (rejected: the Reels surface and any long video
+would dim mid-playback, which is a requirement, not a nicety).
+
+**Consequences.** `pubspec.yaml` grows by three maintained, MIT/BSD-licensed
+plugins whose Android requirement is at or below the app's `minSdk 24`, and
+`flutter build apk --debug` is the only check that proves their native half
+compiles — Dart tests never execute Kotlin. The cost is that the device
+behaviour (brightness restore, wake-lock release on background, hardware-key
+volume) is only verifiable on a physical device; VP7.4 collects those steps
+in `docs/device_testing_player_v2.md`. No permission is added for
+brightness, and no dependency takes ownership of playback, so the engine
+seam (PLAT-005) is untouched.
+
+
+## ADR-019 --- Provider-agnostic download engine on dart:io, Direct URL first
+
+**Status:** Accepted (implemented in VP6 / Phase 12).
+
+**Context and problem.** Offline copies of remote videos were a Phase 12
+requirement (DL-001, CACHE-006) with no implementation. The open choices
+were: which sources become downloadable first, whether to add an HTTP or
+connectivity package, where a download lives and how it is identified, and
+how offline playback and the UI learn that a copy exists — without breaking
+the standing rules that cache cleanup can never reach downloads, originals
+are never destroyed as a side effect, and an ephemeral signed URL is never
+the durable identity.
+
+**Decision.** One provider-agnostic engine, wired to Direct URL now and
+designed so a cloud adapter plugs in without touching it.
+
+-   **No new dependencies.** The transport is `dart:io` `HttpClient` (Range
+    resume on `Accept-Ranges`, 200-vs-206 handling, `Content-Range` total),
+    storage is `RandomAccessFile` + atomic `.part` → rename under the
+    separated downloads root, and the offline check is an
+    `InternetAddress.lookup` probe with a timeout. A download package and a
+    connectivity package were both rejected against the app's dependency
+    audit rule for surface area they do not buy.
+-   **A separate `DownloadRepository` seam.** Downloads are their own
+    capability (own `Downloads` table, migration v6→7, status persisted as
+    the enum *name* so new states need no migration), not another method on
+    `VideoRepository` — same reasoning as ADR-017 keeping destruction out of
+    the read path. `HttpDownloadManager` depends only on that interface + a
+    `DownloadTransport`, so tests drive a temp directory and a fake or
+    loopback transport with no network.
+-   **Durable identity only.** A record stores the user's direct URL /
+    provider item id — never a signed URL — and file names derive from the
+    record id, so nothing sensitive reaches disk or logs (redaction covered
+    by the transport tests).
+-   **Offline playback via an optional resolver seam.**
+    `PlaybackSourceResolver` gained an injectable `OfflineDownloadResolver;`
+    a completed, existing download resolves to a `file://` `PlayableSource`
+    ahead of the network branch, and every failure mode (no row, incomplete,
+    file gone, storage error) soft-degrades to the remote path rather than
+    breaking playback.
+-   **UI gating is capability-driven.** `providerIsDownloadable` hides the
+    pill for local/unknown providers, the pill is disabled offline when
+    idle, and `DownloadController` (a `ChangeNotifier` fed by the manager
+    event stream, exposed through Riverpod's legacy `ChangeNotifierProvider`)
+    keeps widgets off the transport/repository layers entirely.
+-   **Deleting is scoped to the app's own copy.** `deleteDownload` removes
+    exactly one row and its two file names; VP6.5 regression tests pin that
+    another provider's download, every source location, originals, and the
+    cache boundary survive, and Clear Cache still cannot see downloads.
+
+**Alternatives considered.** Per-provider download code inside each adapter
+(rejected: four copies of storage/progress/resume logic; adapters already
+carry capability flags the engine reads). An `http`/`dio` dependency plus a
+connectivity package (rejected: the engine needs Range GETs and a boolean
+online answer, both already in `dart:io`; keeps the audit surface flat).
+Storing downloads in the cache tree with a "keep" flag (rejected outright by
+CACHE-006 — separate roots are the safety fence, not a naming convention).
+Putting download methods on `VideoRepository` (rejected: bloats every
+existing fake for a capability a third of items have). A signed-URL record
+per download (rejected: ARCHITECTURE §4 — temp URLs die, the durable id must
+be re-resolvable).
+
+**Consequences.** VP6 is fully testable without a device — 52+ new tests
+across engine, transport (real loopback server), offline resolution, the
+controller, the pill, and the safety regression suite; `flutter test` is
+1463/1463 green. One engine bug surfaced during testing (a completed record
+stayed in the active set, blocking delete) and is pinned by that test. When
+OneDrive/Drive/R2 adapters declare `canDownload`, wiring them means supplying
+their resolver-produced durable URL to the same `DownloadRequest` — no
+engine change. Device-only behaviour (real CDN resume, Doze interruption,
+on-device storage refusal) is listed in
+`docs/device_testing_player_v2.md` and pending the CPH2719 run.
+
+## ADR-020 --- The player queue, Up Next and caption sidecars are seams, not page state
+
+**Status:** Accepted (implemented in VP3.5, VP4.3, VP4.6; verified in VP7).
+
+**Context and problem.** Three player features added state that the page did
+not have before: what plays next (VP3.5, with an overflow menu, a now-playing
+row and autoplay), subtitle sidecars the user picks from the device (VP4.3),
+and a "Stats for nerds" page (VP4.6). The obvious home for all three is
+`VideoPlayerScreen`'s `State`, which already owns the current item, the engine
+session and the chrome. That would have made each rule reachable only through
+a widget tree, and would have put "what could play next" on the same object as
+"which engine is playing" --- the owner ADR-014 deliberately keeps single.
+
+**Decision.** Each concern gets a seam outside the widget, and the page only
+composes them.
+
+-   **The queue is a value, not a widget field.** `PlaybackQueue` is an
+    immutable list with `playNext` / `enqueue` / `remove` / `adopt` and a
+    `PlaybackQueueController` that holds the current value; the ordering rules
+    that turn a suggestion pool into visible rows (`upNextRows`) are a pure
+    function, and the suggestion source is a family provider
+    (`upNextProvider(id)`) that returns recommendations first and falls back to
+    library recency, minus the item that is playing. Every rule is unit-tested
+    with no widget tree (`test/unit/player/playback_queue_test.dart`,
+    `up_next_provider_test.dart`).
+-   **Autoplay is its own preference.** "Play next on completion" is a separate
+    boolean (`autoplayEnabledProvider`) rather than an implicit consequence of
+    a non-empty queue, so the user's *decision* is the thing that is stored and
+    the queue can be inspected without starting playback.
+-   **The queue is per session, never persisted.** It is dropped when the app
+    dies; a stale queue restored against a changed library would be a list of
+    items the user cannot explain. Up Next's now-playing row and the
+    player's own `_switchTo` path both go through `adopt`, so "one page, one
+    session" holds however the next item was chosen.
+-   **Rebuild isolation is part of the seam.** The rows hang off a
+    `Provider.family` keyed by the playing item, so the 4 Hz position tick
+    cannot invalidate them; VP7.2 measures this (20 engine ticks → 20 chrome
+    rebuilds, 0 Up Next rebuilds, 0 thumbnail reloads).
+-   **Captions are an app-owned chain.** This engine exposes no sidecar
+    loader, so the app owns the three steps: a `CaptionSource` platform seam
+    (SAF picker → name + text), a pure `caption_parser` for SubRip and WebVTT
+    (tolerant of BOMs, `\r\n`, comma or dot milliseconds, and out-of-order
+    cues), and a `CaptionsNotifier` that resolves the active cue from the
+    position. The overlay is presentation only, so the parser and the cue
+    lookup are tested as pure functions.
+-   **Stats state only facts the app holds.** `statsResolution`,
+    `statsAspect`, `statsPosition` and `statsBuffered` are pure helpers with
+    explicit rules (live engine size beats the scanned dimensions, an unknown
+    duration prints nothing instead of `0:00`, a buffered run clamps to 100 %),
+    and the page says outright that codec, fps and bitrate are not reported.
+
+**Alternatives considered.** Keeping the queue inside `_VideoPlayerScreenState`
+(rejected: the mini-player, PiP and the notification all need the current item,
+and every queue rule would need `pumpWidget`). Putting the queue on the
+existing playback session (rejected: the session owns the engine handle per
+ADR-014; mixing in "what could play next" forces every session test to carry
+queue state). Persisting the queue across launches (rejected for this
+milestone: the design does not ask for it and a restored queue can outlive the
+items it names). Using a subtitle package or the engine's embedded-track API
+(rejected: the Android engine does not expose external sidecars, a package
+would duplicate a parser the tests already pin, and no dependency is warranted
+for one text format family). Printing placeholder codec/fps/bitrate rows
+(rejected: an unmeasurable number is read as a measurement).
+
+**Consequences.** The VP3.5/VP4.3/VP4.6 rules are covered by pure tests
+(`playback_queue_test`, `up_next_provider_test`, `caption_parser_test`,
+`captions_notifier_test`, `player_stats_test`) plus widget tests for the
+section and the sheet, and the page stays a composition layer that VP7's
+rebuild measurement can reason about. Two limitations are explicit: subtitle
+**sidecars** are supported while tracks embedded in the container are not, and
+the queue does not survive a cold start.

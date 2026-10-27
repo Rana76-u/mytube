@@ -3362,6 +3362,758 @@ class RecommendationExposuresCompanion
   }
 }
 
+class $DownloadsTable extends Downloads
+    with TableInfo<$DownloadsTable, Download> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DownloadsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _videoItemIdMeta = const VerificationMeta(
+    'videoItemId',
+  );
+  @override
+  late final GeneratedColumn<String> videoItemId = GeneratedColumn<String>(
+    'video_item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceLocationIdMeta = const VerificationMeta(
+    'sourceLocationId',
+  );
+  @override
+  late final GeneratedColumn<String> sourceLocationId = GeneratedColumn<String>(
+    'source_location_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _providerTypeMeta = const VerificationMeta(
+    'providerType',
+  );
+  @override
+  late final GeneratedColumn<String> providerType = GeneratedColumn<String>(
+    'provider_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceUriMeta = const VerificationMeta(
+    'sourceUri',
+  );
+  @override
+  late final GeneratedColumn<String> sourceUri = GeneratedColumn<String>(
+    'source_uri',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fileNameMeta = const VerificationMeta(
+    'fileName',
+  );
+  @override
+  late final GeneratedColumn<String> fileName = GeneratedColumn<String>(
+    'file_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sizeBytesMeta = const VerificationMeta(
+    'sizeBytes',
+  );
+  @override
+  late final GeneratedColumn<int> sizeBytes = GeneratedColumn<int>(
+    'size_bytes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _downloadedBytesMeta = const VerificationMeta(
+    'downloadedBytes',
+  );
+  @override
+  late final GeneratedColumn<int> downloadedBytes = GeneratedColumn<int>(
+    'downloaded_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _acceptsRangeMeta = const VerificationMeta(
+    'acceptsRange',
+  );
+  @override
+  late final GeneratedColumn<bool> acceptsRange = GeneratedColumn<bool>(
+    'accepts_range',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("accepts_range" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    videoItemId,
+    sourceLocationId,
+    providerType,
+    sourceUri,
+    fileName,
+    sizeBytes,
+    downloadedBytes,
+    status,
+    acceptsRange,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'downloads';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Download> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('video_item_id')) {
+      context.handle(
+        _videoItemIdMeta,
+        videoItemId.isAcceptableOrUnknown(
+          data['video_item_id']!,
+          _videoItemIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_videoItemIdMeta);
+    }
+    if (data.containsKey('source_location_id')) {
+      context.handle(
+        _sourceLocationIdMeta,
+        sourceLocationId.isAcceptableOrUnknown(
+          data['source_location_id']!,
+          _sourceLocationIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('provider_type')) {
+      context.handle(
+        _providerTypeMeta,
+        providerType.isAcceptableOrUnknown(
+          data['provider_type']!,
+          _providerTypeMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_providerTypeMeta);
+    }
+    if (data.containsKey('source_uri')) {
+      context.handle(
+        _sourceUriMeta,
+        sourceUri.isAcceptableOrUnknown(data['source_uri']!, _sourceUriMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sourceUriMeta);
+    }
+    if (data.containsKey('file_name')) {
+      context.handle(
+        _fileNameMeta,
+        fileName.isAcceptableOrUnknown(data['file_name']!, _fileNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fileNameMeta);
+    }
+    if (data.containsKey('size_bytes')) {
+      context.handle(
+        _sizeBytesMeta,
+        sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta),
+      );
+    }
+    if (data.containsKey('downloaded_bytes')) {
+      context.handle(
+        _downloadedBytesMeta,
+        downloadedBytes.isAcceptableOrUnknown(
+          data['downloaded_bytes']!,
+          _downloadedBytesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('accepts_range')) {
+      context.handle(
+        _acceptsRangeMeta,
+        acceptsRange.isAcceptableOrUnknown(
+          data['accepts_range']!,
+          _acceptsRangeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Download map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Download(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      videoItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}video_item_id'],
+      )!,
+      sourceLocationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_location_id'],
+      ),
+      providerType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}provider_type'],
+      )!,
+      sourceUri: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_uri'],
+      )!,
+      fileName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_name'],
+      )!,
+      sizeBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}size_bytes'],
+      ),
+      downloadedBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}downloaded_bytes'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      acceptsRange: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}accepts_range'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $DownloadsTable createAlias(String alias) {
+    return $DownloadsTable(attachedDatabase, alias);
+  }
+}
+
+class Download extends DataClass implements Insertable<Download> {
+  /// Stable app-assigned UUID (TEXT, PRIMARY KEY); also keys the file name.
+  final String id;
+
+  /// The parent library item's id (raw string, no cascade — see class doc).
+  final String videoItemId;
+
+  /// The source location this copy came from, when known.
+  final String? sourceLocationId;
+
+  /// Serialised [ProviderType] name (e.g. `"directUrl"`).
+  final String providerType;
+
+  /// Durable source identity — never an ephemeral signed URL (ARCHITECTURE §4).
+  final String sourceUri;
+
+  /// Final file name relative to the downloads root; the running transfer uses
+  /// `fileName + '.part'`.
+  final String fileName;
+
+  /// Total expected size in bytes, or null when the server declared none.
+  final int? sizeBytes;
+
+  /// Bytes written so far.
+  final int downloadedBytes;
+
+  /// Serialised [DownloadStatus] name (e.g. `"running"`).
+  final String status;
+
+  /// Whether the source advertised byte-range support (resume, P12-04).
+  final bool acceptsRange;
+
+  /// Wall-clock timestamp (ms since epoch) when the row was created.
+  final int createdAt;
+
+  /// Wall-clock timestamp (ms since epoch) of the last update.
+  final int updatedAt;
+  const Download({
+    required this.id,
+    required this.videoItemId,
+    this.sourceLocationId,
+    required this.providerType,
+    required this.sourceUri,
+    required this.fileName,
+    this.sizeBytes,
+    required this.downloadedBytes,
+    required this.status,
+    required this.acceptsRange,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['video_item_id'] = Variable<String>(videoItemId);
+    if (!nullToAbsent || sourceLocationId != null) {
+      map['source_location_id'] = Variable<String>(sourceLocationId);
+    }
+    map['provider_type'] = Variable<String>(providerType);
+    map['source_uri'] = Variable<String>(sourceUri);
+    map['file_name'] = Variable<String>(fileName);
+    if (!nullToAbsent || sizeBytes != null) {
+      map['size_bytes'] = Variable<int>(sizeBytes);
+    }
+    map['downloaded_bytes'] = Variable<int>(downloadedBytes);
+    map['status'] = Variable<String>(status);
+    map['accepts_range'] = Variable<bool>(acceptsRange);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  DownloadsCompanion toCompanion(bool nullToAbsent) {
+    return DownloadsCompanion(
+      id: Value(id),
+      videoItemId: Value(videoItemId),
+      sourceLocationId: sourceLocationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceLocationId),
+      providerType: Value(providerType),
+      sourceUri: Value(sourceUri),
+      fileName: Value(fileName),
+      sizeBytes: sizeBytes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sizeBytes),
+      downloadedBytes: Value(downloadedBytes),
+      status: Value(status),
+      acceptsRange: Value(acceptsRange),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory Download.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Download(
+      id: serializer.fromJson<String>(json['id']),
+      videoItemId: serializer.fromJson<String>(json['videoItemId']),
+      sourceLocationId: serializer.fromJson<String?>(json['sourceLocationId']),
+      providerType: serializer.fromJson<String>(json['providerType']),
+      sourceUri: serializer.fromJson<String>(json['sourceUri']),
+      fileName: serializer.fromJson<String>(json['fileName']),
+      sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
+      downloadedBytes: serializer.fromJson<int>(json['downloadedBytes']),
+      status: serializer.fromJson<String>(json['status']),
+      acceptsRange: serializer.fromJson<bool>(json['acceptsRange']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'videoItemId': serializer.toJson<String>(videoItemId),
+      'sourceLocationId': serializer.toJson<String?>(sourceLocationId),
+      'providerType': serializer.toJson<String>(providerType),
+      'sourceUri': serializer.toJson<String>(sourceUri),
+      'fileName': serializer.toJson<String>(fileName),
+      'sizeBytes': serializer.toJson<int?>(sizeBytes),
+      'downloadedBytes': serializer.toJson<int>(downloadedBytes),
+      'status': serializer.toJson<String>(status),
+      'acceptsRange': serializer.toJson<bool>(acceptsRange),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  Download copyWith({
+    String? id,
+    String? videoItemId,
+    Value<String?> sourceLocationId = const Value.absent(),
+    String? providerType,
+    String? sourceUri,
+    String? fileName,
+    Value<int?> sizeBytes = const Value.absent(),
+    int? downloadedBytes,
+    String? status,
+    bool? acceptsRange,
+    int? createdAt,
+    int? updatedAt,
+  }) => Download(
+    id: id ?? this.id,
+    videoItemId: videoItemId ?? this.videoItemId,
+    sourceLocationId: sourceLocationId.present
+        ? sourceLocationId.value
+        : this.sourceLocationId,
+    providerType: providerType ?? this.providerType,
+    sourceUri: sourceUri ?? this.sourceUri,
+    fileName: fileName ?? this.fileName,
+    sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
+    downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+    status: status ?? this.status,
+    acceptsRange: acceptsRange ?? this.acceptsRange,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  Download copyWithCompanion(DownloadsCompanion data) {
+    return Download(
+      id: data.id.present ? data.id.value : this.id,
+      videoItemId: data.videoItemId.present
+          ? data.videoItemId.value
+          : this.videoItemId,
+      sourceLocationId: data.sourceLocationId.present
+          ? data.sourceLocationId.value
+          : this.sourceLocationId,
+      providerType: data.providerType.present
+          ? data.providerType.value
+          : this.providerType,
+      sourceUri: data.sourceUri.present ? data.sourceUri.value : this.sourceUri,
+      fileName: data.fileName.present ? data.fileName.value : this.fileName,
+      sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
+      downloadedBytes: data.downloadedBytes.present
+          ? data.downloadedBytes.value
+          : this.downloadedBytes,
+      status: data.status.present ? data.status.value : this.status,
+      acceptsRange: data.acceptsRange.present
+          ? data.acceptsRange.value
+          : this.acceptsRange,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Download(')
+          ..write('id: $id, ')
+          ..write('videoItemId: $videoItemId, ')
+          ..write('sourceLocationId: $sourceLocationId, ')
+          ..write('providerType: $providerType, ')
+          ..write('sourceUri: $sourceUri, ')
+          ..write('fileName: $fileName, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('downloadedBytes: $downloadedBytes, ')
+          ..write('status: $status, ')
+          ..write('acceptsRange: $acceptsRange, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    videoItemId,
+    sourceLocationId,
+    providerType,
+    sourceUri,
+    fileName,
+    sizeBytes,
+    downloadedBytes,
+    status,
+    acceptsRange,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Download &&
+          other.id == this.id &&
+          other.videoItemId == this.videoItemId &&
+          other.sourceLocationId == this.sourceLocationId &&
+          other.providerType == this.providerType &&
+          other.sourceUri == this.sourceUri &&
+          other.fileName == this.fileName &&
+          other.sizeBytes == this.sizeBytes &&
+          other.downloadedBytes == this.downloadedBytes &&
+          other.status == this.status &&
+          other.acceptsRange == this.acceptsRange &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class DownloadsCompanion extends UpdateCompanion<Download> {
+  final Value<String> id;
+  final Value<String> videoItemId;
+  final Value<String?> sourceLocationId;
+  final Value<String> providerType;
+  final Value<String> sourceUri;
+  final Value<String> fileName;
+  final Value<int?> sizeBytes;
+  final Value<int> downloadedBytes;
+  final Value<String> status;
+  final Value<bool> acceptsRange;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const DownloadsCompanion({
+    this.id = const Value.absent(),
+    this.videoItemId = const Value.absent(),
+    this.sourceLocationId = const Value.absent(),
+    this.providerType = const Value.absent(),
+    this.sourceUri = const Value.absent(),
+    this.fileName = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.downloadedBytes = const Value.absent(),
+    this.status = const Value.absent(),
+    this.acceptsRange = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DownloadsCompanion.insert({
+    required String id,
+    required String videoItemId,
+    this.sourceLocationId = const Value.absent(),
+    required String providerType,
+    required String sourceUri,
+    required String fileName,
+    this.sizeBytes = const Value.absent(),
+    this.downloadedBytes = const Value.absent(),
+    this.status = const Value.absent(),
+    this.acceptsRange = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       videoItemId = Value(videoItemId),
+       providerType = Value(providerType),
+       sourceUri = Value(sourceUri),
+       fileName = Value(fileName),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<Download> custom({
+    Expression<String>? id,
+    Expression<String>? videoItemId,
+    Expression<String>? sourceLocationId,
+    Expression<String>? providerType,
+    Expression<String>? sourceUri,
+    Expression<String>? fileName,
+    Expression<int>? sizeBytes,
+    Expression<int>? downloadedBytes,
+    Expression<String>? status,
+    Expression<bool>? acceptsRange,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (videoItemId != null) 'video_item_id': videoItemId,
+      if (sourceLocationId != null) 'source_location_id': sourceLocationId,
+      if (providerType != null) 'provider_type': providerType,
+      if (sourceUri != null) 'source_uri': sourceUri,
+      if (fileName != null) 'file_name': fileName,
+      if (sizeBytes != null) 'size_bytes': sizeBytes,
+      if (downloadedBytes != null) 'downloaded_bytes': downloadedBytes,
+      if (status != null) 'status': status,
+      if (acceptsRange != null) 'accepts_range': acceptsRange,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DownloadsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? videoItemId,
+    Value<String?>? sourceLocationId,
+    Value<String>? providerType,
+    Value<String>? sourceUri,
+    Value<String>? fileName,
+    Value<int?>? sizeBytes,
+    Value<int>? downloadedBytes,
+    Value<String>? status,
+    Value<bool>? acceptsRange,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return DownloadsCompanion(
+      id: id ?? this.id,
+      videoItemId: videoItemId ?? this.videoItemId,
+      sourceLocationId: sourceLocationId ?? this.sourceLocationId,
+      providerType: providerType ?? this.providerType,
+      sourceUri: sourceUri ?? this.sourceUri,
+      fileName: fileName ?? this.fileName,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+      status: status ?? this.status,
+      acceptsRange: acceptsRange ?? this.acceptsRange,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (videoItemId.present) {
+      map['video_item_id'] = Variable<String>(videoItemId.value);
+    }
+    if (sourceLocationId.present) {
+      map['source_location_id'] = Variable<String>(sourceLocationId.value);
+    }
+    if (providerType.present) {
+      map['provider_type'] = Variable<String>(providerType.value);
+    }
+    if (sourceUri.present) {
+      map['source_uri'] = Variable<String>(sourceUri.value);
+    }
+    if (fileName.present) {
+      map['file_name'] = Variable<String>(fileName.value);
+    }
+    if (sizeBytes.present) {
+      map['size_bytes'] = Variable<int>(sizeBytes.value);
+    }
+    if (downloadedBytes.present) {
+      map['downloaded_bytes'] = Variable<int>(downloadedBytes.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (acceptsRange.present) {
+      map['accepts_range'] = Variable<bool>(acceptsRange.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DownloadsCompanion(')
+          ..write('id: $id, ')
+          ..write('videoItemId: $videoItemId, ')
+          ..write('sourceLocationId: $sourceLocationId, ')
+          ..write('providerType: $providerType, ')
+          ..write('sourceUri: $sourceUri, ')
+          ..write('fileName: $fileName, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('downloadedBytes: $downloadedBytes, ')
+          ..write('status: $status, ')
+          ..write('acceptsRange: $acceptsRange, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3378,6 +4130,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AppPreferencesTable appPreferences = $AppPreferencesTable(this);
   late final $RecommendationExposuresTable recommendationExposures =
       $RecommendationExposuresTable(this);
+  late final $DownloadsTable downloads = $DownloadsTable(this);
   late final VideoItemsDao videoItemsDao = VideoItemsDao(this as AppDatabase);
   late final SourceLocationsDao sourceLocationsDao = SourceLocationsDao(
     this as AppDatabase,
@@ -3390,6 +4143,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   );
   late final RecommendationExposuresDao recommendationExposuresDao =
       RecommendationExposuresDao(this as AppDatabase);
+  late final DownloadsDao downloadsDao = DownloadsDao(this as AppDatabase);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3403,6 +4157,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     collectionItems,
     appPreferences,
     recommendationExposures,
+    downloads,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6469,6 +7224,352 @@ typedef $$RecommendationExposuresTableProcessedTableManager =
       RecommendationExposure,
       PrefetchHooks Function({bool videoItemId})
     >;
+typedef $$DownloadsTableCreateCompanionBuilder =
+    DownloadsCompanion Function({
+      required String id,
+      required String videoItemId,
+      Value<String?> sourceLocationId,
+      required String providerType,
+      required String sourceUri,
+      required String fileName,
+      Value<int?> sizeBytes,
+      Value<int> downloadedBytes,
+      Value<String> status,
+      Value<bool> acceptsRange,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$DownloadsTableUpdateCompanionBuilder =
+    DownloadsCompanion Function({
+      Value<String> id,
+      Value<String> videoItemId,
+      Value<String?> sourceLocationId,
+      Value<String> providerType,
+      Value<String> sourceUri,
+      Value<String> fileName,
+      Value<int?> sizeBytes,
+      Value<int> downloadedBytes,
+      Value<String> status,
+      Value<bool> acceptsRange,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$DownloadsTableFilterComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get videoItemId => $composableBuilder(
+    column: $table.videoItemId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceLocationId => $composableBuilder(
+    column: $table.sourceLocationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get providerType => $composableBuilder(
+    column: $table.providerType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceUri => $composableBuilder(
+    column: $table.sourceUri,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get acceptsRange => $composableBuilder(
+    column: $table.acceptsRange,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DownloadsTableOrderingComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get videoItemId => $composableBuilder(
+    column: $table.videoItemId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceLocationId => $composableBuilder(
+    column: $table.sourceLocationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get providerType => $composableBuilder(
+    column: $table.providerType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceUri => $composableBuilder(
+    column: $table.sourceUri,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fileName => $composableBuilder(
+    column: $table.fileName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get acceptsRange => $composableBuilder(
+    column: $table.acceptsRange,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DownloadsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get videoItemId => $composableBuilder(
+    column: $table.videoItemId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceLocationId => $composableBuilder(
+    column: $table.sourceLocationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get providerType => $composableBuilder(
+    column: $table.providerType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sourceUri =>
+      $composableBuilder(column: $table.sourceUri, builder: (column) => column);
+
+  GeneratedColumn<String> get fileName =>
+      $composableBuilder(column: $table.fileName, builder: (column) => column);
+
+  GeneratedColumn<int> get sizeBytes =>
+      $composableBuilder(column: $table.sizeBytes, builder: (column) => column);
+
+  GeneratedColumn<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<bool> get acceptsRange => $composableBuilder(
+    column: $table.acceptsRange,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$DownloadsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DownloadsTable,
+          Download,
+          $$DownloadsTableFilterComposer,
+          $$DownloadsTableOrderingComposer,
+          $$DownloadsTableAnnotationComposer,
+          $$DownloadsTableCreateCompanionBuilder,
+          $$DownloadsTableUpdateCompanionBuilder,
+          (Download, BaseReferences<_$AppDatabase, $DownloadsTable, Download>),
+          Download,
+          PrefetchHooks Function()
+        > {
+  $$DownloadsTableTableManager(_$AppDatabase db, $DownloadsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DownloadsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DownloadsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DownloadsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> videoItemId = const Value.absent(),
+                Value<String?> sourceLocationId = const Value.absent(),
+                Value<String> providerType = const Value.absent(),
+                Value<String> sourceUri = const Value.absent(),
+                Value<String> fileName = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<int> downloadedBytes = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<bool> acceptsRange = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DownloadsCompanion(
+                id: id,
+                videoItemId: videoItemId,
+                sourceLocationId: sourceLocationId,
+                providerType: providerType,
+                sourceUri: sourceUri,
+                fileName: fileName,
+                sizeBytes: sizeBytes,
+                downloadedBytes: downloadedBytes,
+                status: status,
+                acceptsRange: acceptsRange,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String videoItemId,
+                Value<String?> sourceLocationId = const Value.absent(),
+                required String providerType,
+                required String sourceUri,
+                required String fileName,
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<int> downloadedBytes = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<bool> acceptsRange = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => DownloadsCompanion.insert(
+                id: id,
+                videoItemId: videoItemId,
+                sourceLocationId: sourceLocationId,
+                providerType: providerType,
+                sourceUri: sourceUri,
+                fileName: fileName,
+                sizeBytes: sizeBytes,
+                downloadedBytes: downloadedBytes,
+                status: status,
+                acceptsRange: acceptsRange,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DownloadsTable, Download>(table),
+                  BaseReferences<_$AppDatabase, $DownloadsTable, Download>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DownloadsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DownloadsTable,
+      Download,
+      $$DownloadsTableFilterComposer,
+      $$DownloadsTableOrderingComposer,
+      $$DownloadsTableAnnotationComposer,
+      $$DownloadsTableCreateCompanionBuilder,
+      $$DownloadsTableUpdateCompanionBuilder,
+      (Download, BaseReferences<_$AppDatabase, $DownloadsTable, Download>),
+      Download,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6491,4 +7592,6 @@ class $AppDatabaseManager {
         _db,
         _db.recommendationExposures,
       );
+  $$DownloadsTableTableManager get downloads =>
+      $$DownloadsTableTableManager(_db, _db.downloads);
 }

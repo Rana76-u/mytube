@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:ui' show Size;
 
 import 'package:flutter/widgets.dart' show Widget, SizedBox;
+import 'package:mytube/domain/services/caption_parser.dart' show CaptionCue;
+import 'package:mytube/playback/buffer_range.dart';
 import 'package:mytube/playback/player_handle.dart';
 import 'package:mytube/sources/source_adapter.dart';
 import 'package:video_player/video_player.dart';
@@ -18,7 +20,7 @@ import 'package:video_player/video_player.dart';
 /// `VideoPlayerController.contentUri` / `.file` / `.networkUrl` constructors;
 /// unsupported schemes never reach this class — the controller pre-validates
 /// via [playbackKindFor].
-class VideoPlayerHandle implements PlayerHandle {
+class VideoPlayerHandle implements PlayerHandle, CaptionCapableHandle {
   VideoPlayerHandle({required PlayableSource source})
     : _kind = playbackKindFor(source.uri) {
     switch (_kind) {
@@ -67,6 +69,7 @@ class VideoPlayerHandle implements PlayerHandle {
       completed: value.isCompleted,
       position: value.position,
       duration: value.duration,
+      buffered: _bufferedEnd(value),
       speed: value.playbackSpeed,
       volume: value.volume,
       videoSize: _displaySize(value),
@@ -103,6 +106,18 @@ class VideoPlayerHandle implements PlayerHandle {
 
   @override
   Future<void> setLooping(bool looping) => _controller.setLooping(looping);
+
+  /// Caption cues are accepted but not fed to the native overlay (VP4.3).
+  ///
+  /// `video_player` renders a `ClosedCaptionFile` with a fixed, un-styleable
+  /// appearance, and its file can only be supplied when the controller is
+  /// constructed — applying one mid-session would mean rebuilding the engine
+  /// and losing position. The design needs subtitle size and background
+  /// options, so the app paints the cues in its own overlay instead; this seam
+  /// still receives them (satisfying "captions reach the handle") and an engine
+  /// that could render them styled would do so here.
+  @override
+  Future<void> setCaptions(List<CaptionCue>? cues) async {}
 
   @override
   Future<void> dispose() async {
@@ -143,6 +158,15 @@ class VideoPlayerHandle implements PlayerHandle {
       child: VideoPlayer(_controller),
     );
   }
+
+  /// The furthest downloaded point for the seek bar's buffered track (VP1.3).
+  ///
+  /// The engine reports a list of stretches; [bufferedEndAt] reduces it to the
+  /// one the playhead sits in, so an engine type never leaves this file.
+  static Duration _bufferedEnd(VideoPlayerValue value) => bufferedEndAt(
+    value.buffered.map((range) => BufferRange(range.start, range.end)).toList(),
+    value.position,
+  );
 
   /// The picture's intrinsic size as it is laid out on screen, or null when
   /// there is nothing to size.

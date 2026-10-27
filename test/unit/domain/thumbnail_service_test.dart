@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show Uint8List;
@@ -61,6 +62,34 @@ class FakeThumbnailBridge implements ThumbnailBridge {
     networkHeaders.add(headers);
     networkMaxSide.add(maxSidePx);
     return responses[url] ?? Ok(_kBytes);
+  }
+
+  /// Scrub-frame requests (VP1.4), recorded so a test can prove the service
+  /// quantises the drag, asks for the cheap decode size, and does not re-decode
+  /// a position it already has.
+  final List<String> frameRequests = [];
+  final List<int> framePositions = [];
+  final List<Map<String, String>> frameHeaders = [];
+  final List<int> frameMaxSide = [];
+
+  /// When non-null, [getFrame] suspends on this gate: a test can hold one
+  /// decode open while a newer scrub position is requested.
+  Completer<void>? frameGate;
+
+  @override
+  Future<Result<Uint8List>> getFrame(
+    String uri, {
+    required int positionMs,
+    Map<String, String> headers = const {},
+    int maxSidePx = ThumbnailBridge.scrubMaxSidePx,
+  }) async {
+    frameRequests.add(uri);
+    framePositions.add(positionMs);
+    frameHeaders.add(headers);
+    frameMaxSide.add(maxSidePx);
+    final gate = frameGate;
+    if (gate != null) await gate.future;
+    return responses[uri] ?? Ok(_kBytes);
   }
 }
 
@@ -603,6 +632,188 @@ void main() {
       service.clearCache();
       expect(await service.thumbnailForVideo('v1'), _kBytes);
       expect(bridge.requested, ['content://thumbs/1', 'content://thumbs/1']);
+    });
+  });
+
+  group('ThumbnailService scrub frames (VP1.4)', () {
+    Future<SourceLocation> locationOf(String itemId) async {
+      final result = await repo.getSourceLocationsForVideo(VideoItemId(itemId));
+      return switch (result) {
+        Ok(:final value) => value.single,
+        Err() => throw StateError('seeded location missing'),
+      };
+    }
+
+    test('decodes the video source at the quantised position', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'content://media/external/video/1',
+        thumbnailUri: 'content://media/thumbs/1',
+      );
+      final location = await locationOf('v1');
+
+      final bytes = await service.frameForLocation(
+        location,
+        const Duration(milliseconds: 12_700),
+      );
+
+      expect(bytes, _kBytes);
+      // The video itself, never the stored poster: a still image cannot answer
+      // "what is at 0:12?".
+      expect(bridge.frameRequests, ['content://media/external/video/1']);
+      // Quantised to the one-second bucket, and decoded at scrub resolution.
+      expect(bridge.framePositions, [12_000]);
+      expect(bridge.frameMaxSide, [ThumbnailBridge.scrubMaxSidePx]);
+      expect(bridge.requested, isEmpty);
+    });
+
+    test('a position inside the same second is a cache hit', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'content://media/external/video/1',
+      );
+      final location = await locationOf('v1');
+
+      await service.frameForLocation(location, const Duration(seconds: 10));
+      await service.frameForLocation(
+        location,
+        const Duration(milliseconds: 10_900),
+      );
+
+      expect(bridge.frameRequests, hasLength(1));
+    });
+
+    test('a superseded request is dropped instead of painted', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'content://media/external/video/1',
+      );
+      final location = await locationOf('v1');
+
+      final gate = Completer<void>();
+      bridge.frameGate = gate;
+      final slow = service.frameForLocation(
+        location,
+        const Duration(seconds: 5),
+      );
+      await pumpEventQueue();
+
+      // The user keeps dragging while the first decode is still running.
+      bridge.frameGate = null;
+      final fresh = await service.frameForLocation(
+        location,
+        const Duration(seconds: 40),
+      );
+      expect(fresh, _kBytes);
+
+      gate.complete();
+      // Correct for 0:05, but the thumb has moved on — the widget must not
+      // paint it over the newer frame.
+      expect(await slow, isNull);
+    });
+
+    test('a network source is read as a frame, not as a poster', () async {
+      final withHeaders = ThumbnailService(
+        repository: repo,
+        bridge: bridge,
+        remoteFetcher: fetcher,
+        networkHeaders: (location) => const {'User-Agent': 'MyTube/0.1'},
+      );
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'https://cdn.example.com/video.mp4',
+        thumbnailUri: 'https://cdn.example.com/preview.jpg',
+        providerType: ProviderType.directUrl,
+      );
+      final location = await locationOf('v1');
+
+      await withHeaders.frameForLocation(location, const Duration(seconds: 3));
+
+      expect(bridge.frameRequests, ['https://cdn.example.com/video.mp4']);
+      expect(bridge.framePositions, [3_000]);
+      expect(bridge.frameHeaders, [
+        {'User-Agent': 'MyTube/0.1'},
+      ]);
+      expect(fetcher.requested, isEmpty);
+    });
+
+    test('an unsupported scheme yields no frame', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'onedrive:item-id-123',
+        providerType: ProviderType.oneDrive,
+      );
+      final location = await locationOf('v1');
+
+      expect(
+        await service.frameForLocation(location, const Duration(seconds: 1)),
+        isNull,
+      );
+      expect(bridge.frameRequests, isEmpty);
+    });
+
+    test('a decode failure stays a soft null', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'content://media/external/video/1',
+      );
+      bridge.responses['content://media/external/video/1'] = _kErr;
+      final location = await locationOf('v1');
+
+      expect(
+        await service.frameForLocation(location, const Duration(seconds: 2)),
+        isNull,
+      );
+    });
+
+    test('frames are persisted across a memory-cache clear', () async {
+      final cacheDir = Directory.systemTemp.createTempSync('mytube_scrub_');
+      addTearDown(() {
+        if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+      });
+      final cached = ThumbnailService(
+        repository: repo,
+        bridge: bridge,
+        remoteFetcher: fetcher,
+        diskCache: ThumbnailDiskCache(
+          resolveStore: () async => FileDiskCacheStore(root: cacheDir.path),
+        ),
+      );
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'content://media/external/video/1',
+      );
+      final location = await locationOf('v1');
+
+      await cached.frameForLocation(location, const Duration(seconds: 7));
+      cached.clearCache();
+      final bytes = await cached.frameForLocation(
+        location,
+        const Duration(seconds: 7),
+      );
+
+      expect(bytes, _kBytes);
+      expect(bridge.frameRequests, hasLength(1));
+      // A frame lives in its own cache entry, tagged `#scrub`, so it never
+      // shadows the card thumbnail of the same source.
+      expect(
+        Directory(cacheDir.path).listSync().whereType<File>(),
+        hasLength(1),
+      );
     });
   });
 }

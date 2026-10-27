@@ -1,16 +1,15 @@
-import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/app/shell/mini_player.dart';
 import 'package:mytube/core/result.dart';
-import 'package:mytube/domain/services/thumbnail_service_provider.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/playback_source_resolver.dart';
 import 'package:mytube/domain/services/playback_source_resolver_provider.dart';
 import 'package:mytube/domain/services/watch_progress_service.dart';
 import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
+import 'package:mytube/features/player/video_surface.dart';
 import 'package:mytube/playback/now_playing.dart';
 import 'package:mytube/playback/playback_controller.dart';
 import 'package:mytube/playback/playback_provider.dart';
@@ -132,11 +131,6 @@ void main() {
       overrides: [
         playbackSourceResolverProvider.overrideWithValue(_FakeResolver()),
         watchProgressServiceProvider.overrideWithValue(progress),
-        // The dock shows a thumbnail; the real provider would reach for the
-        // platform thumbnail bridge and leave timers in the fake-async zone.
-        videoThumbnailProvider(
-          'vid-1',
-        ).overrideWith((ref) => Future<Uint8List?>.value(null)),
         playerHandleFactoryProvider.overrideWithValue((source) {
           final handle = _FakeHandle();
           handles.add(handle);
@@ -206,6 +200,69 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('mini_player_close')), findsOneWidget);
+    });
+
+    testWidgets('shows the live surface, not a poster, with no playhead yet', (
+      tester,
+    ) async {
+      final container = buildContainer();
+      container.read(playbackSessionProvider.notifier)
+        ..adopt(_item())
+        ..collapse();
+      await pumpDock(tester, container);
+
+      // VP5.3: the dock paints the running video through the shared surface.
+      expect(find.byType(VideoSurface), findsOneWidget);
+      // With no duration reported yet, the red playhead line stays hidden.
+      expect(find.byKey(const ValueKey('mini_player_progress')), findsNothing);
+    });
+
+    testWidgets('draws the red playhead line once a duration is known', (
+      tester,
+    ) async {
+      final container = buildContainer();
+      await container
+          .read(playbackControllerProvider)
+          .play(
+            PlayableSource(
+              uri: Uri.parse('https://example.com/clip.mp4'),
+              sourceId: 'vid-1',
+              sourceType: ProviderType.directUrl,
+              canSeek: true,
+            ),
+          );
+      container.read(playbackSessionProvider.notifier)
+        ..adopt(_item())
+        ..collapse();
+      await pumpDock(tester, container);
+      await tester.pumpAndSettle();
+
+      // The fake engine reports a 10 s duration, so the 2 dp line appears.
+      expect(
+        container.read(playbackControllerProvider).state.value.duration,
+        const Duration(seconds: 10),
+      );
+      expect(
+        find.byKey(const ValueKey('mini_player_progress')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a sideways swipe dismisses the dock (VP5.3)', (tester) async {
+      final container = buildContainer();
+      container.read(playbackSessionProvider.notifier)
+        ..adopt(_item())
+        ..collapse();
+      await pumpDock(tester, container);
+
+      await tester.drag(
+        find.byKey(const ValueKey('mini_player')),
+        const Offset(80, 0),
+      );
+      await tester.pumpAndSettle();
+
+      expect(container.read(playbackSessionProvider).isActive, isFalse);
+      expect(find.byKey(const ValueKey('mini_player')), findsNothing);
     });
 
     testWidgets('closing the dock stops the engine and clears the session', (

@@ -33,6 +33,11 @@ import 'package:mytube/platform/thumbnail_bridge.dart';
 /// Local previews are decoded at [decodeMaxSidePx] — the size a full-width
 /// card actually needs — because a smaller native decode is upscaled by the
 /// grid and reads as blurry.
+///
+/// Scrub previews (VP1.4) are a second, position-keyed product of the same
+/// decode path: [frameForLocation] quantises the drag to [frameBucketMs],
+/// reuses the same soft-fail and LRU rules, and drops a frame the user has
+/// already scrubbed away from.
 class ThumbnailService {
   ThumbnailService({
     required VideoRepository repository,
@@ -86,6 +91,27 @@ class ThumbnailService {
   /// once share one decode/download.
   final _inFlight = <String, Future<Uint8List?>>{};
 
+  /// Decoded scrub frames, keyed by source and quantised position, with the
+  /// same LRU discipline as [_cache] but a much smaller budget: only the
+  /// positions under the drag are ever useful again.
+  final _frameCache = <String, Uint8List>{};
+  final _framesInFlight = <String, Future<Uint8List?>>{};
+
+  /// Key of the most recent scrub request. A decode that finishes for an older
+  /// key is discarded instead of painted (VP1.4).
+  String? _latestFrameKey;
+
+  /// How far a scrub position is quantised.
+  ///
+  /// A drag emits dozens of positions per second; a one-second bucket keeps the
+  /// work proportional to the seconds travelled instead of to the pixels, and
+  /// a repeat visit to the same second is a cache hit.
+  static const int frameBucketMs = 1000;
+
+  /// Frames kept for the session — enough for the seconds around a thumb plus
+  /// the previous drag, without pinning a video's worth of JPEGs in memory.
+  static const int frameCacheLimit = 16;
+
   /// Returns the best thumbnail for the logical item [videoItemId], or `null`
   /// when none can be produced.
   ///
@@ -105,7 +131,8 @@ class ThumbnailService {
     }
     if (locations.isEmpty) return null;
 
-    final location = _pickLocation(locations);
+    final location = pickLocation(locations);
+    if (location == null) return null;
     return thumbnailForLocation(location);
   }
 
@@ -155,6 +182,67 @@ class ThumbnailService {
   /// Clears the in-memory cache (exposed for tests and low-memory handling).
   void clearCache() {
     _cache.clear();
+    _frameCache.clear();
+    _latestFrameKey = null;
+  }
+
+  /// Returns the frame of [location]'s video at [position] for the scrub
+  /// preview, or `null` when none can be produced (VP1.4).
+  ///
+  /// Unlike [thumbnailForLocation] this always decodes the *video* —
+  /// `sourceUri`, never a stored poster image — because a still image cannot
+  /// answer "what is at 2:14?". A position is quantised to [frameBucketMs]
+  /// before it reaches the cache or the decoder, so a drag costs one decode
+  /// per second travelled rather than one per frame.
+  ///
+  /// Stale work is dropped, not cancelled: the native decoder has no cancel
+  /// token, so the answer is discarded when a newer position has already been
+  /// requested. The bytes still land in the cache — they are correct for the
+  /// position that asked for them — but the widget never paints a moment the
+  /// user has scrubbed past.
+  Future<Uint8List?> frameForLocation(
+    SourceLocation location,
+    Duration position,
+  ) async {
+    final ref = _ThumbnailRef.ofSourceUri(location.sourceUri);
+    if (ref == null) return null;
+
+    final positionMs = _frameBucket(position);
+    final key = _frameKey(ref.key, positionMs);
+    _latestFrameKey = key;
+
+    final cached = _frameCache[key];
+    if (cached != null) {
+      // Touch for LRU recency.
+      _frameCache
+        ..remove(key)
+        ..[key] = cached;
+      return cached;
+    }
+
+    final pending = _framesInFlight[key];
+    if (pending != null) return pending;
+
+    Future<Uint8List?> run() async {
+      final persisted = await _diskCache?.read(key);
+      if (persisted != null) {
+        _storeFrame(key, persisted);
+        return persisted;
+      }
+      final bytes = await _fetchFrame(ref, location, positionMs);
+      _storeFrame(key, bytes);
+      await _persist(key, bytes);
+      return bytes;
+    }
+
+    final fetch = run();
+    _framesInFlight[key] = fetch;
+    try {
+      final bytes = await fetch;
+      return _latestFrameKey == key ? bytes : null;
+    } finally {
+      _framesInFlight.removeWhere((entryKey, _) => entryKey == key);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -194,6 +282,38 @@ class ThumbnailService {
     Err() => null,
   };
 
+  /// Asks the bridge for one frame, under the same request identity the player
+  /// presents for a network source (P4-10), at the cheap scrub decode size.
+  Future<Uint8List?> _fetchFrame(
+    _ThumbnailRef ref,
+    SourceLocation location,
+    int positionMs,
+  ) async {
+    final headers = ref.kind == _ThumbnailKind.frame
+        ? (_networkHeaders?.call(location) ?? const <String, String>{})
+        : const <String, String>{};
+    return _bytesOrNull(
+      await _bridge.getFrame(
+        ref.key,
+        positionMs: positionMs,
+        headers: headers,
+        maxSidePx: ThumbnailBridge.scrubMaxSidePx,
+      ),
+    );
+  }
+
+  /// Quantises [position] onto the frame bucket grid.
+  static int _frameBucket(Duration position) {
+    final ms = position.inMilliseconds;
+    if (ms <= 0) return 0;
+    return (ms ~/ frameBucketMs) * frameBucketMs;
+  }
+
+  /// `#scrub` keeps a frame from colliding with the card thumbnail of the same
+  /// source, which is a different image at a different decode size.
+  static String _frameKey(String source, int positionMs) =>
+      '$source@${positionMs}ms#scrub';
+
   void _store(String key, Uint8List? bytes) {
     if (bytes == null) return;
     _cache[key] = bytes;
@@ -202,10 +322,23 @@ class ThumbnailService {
     }
   }
 
+  void _storeFrame(String key, Uint8List? bytes) {
+    if (bytes == null) return;
+    _frameCache[key] = bytes;
+    while (_frameCache.length > frameCacheLimit) {
+      _frameCache.remove(_frameCache.keys.first);
+    }
+  }
+
   /// Picks which location to render from — primary+available first
-  /// (P7-06), never showing a thumbnail from a source the user did not
-  /// choose while their pick is usable.
-  static SourceLocation _pickLocation(List<SourceLocation> locations) {
+  /// (P7-06), never showing a preview from a source the user did not choose
+  /// while their pick is usable. `null` only for an empty list.
+  ///
+  /// Public because the scrub preview (VP2.4) must pick exactly the same
+  /// source the grid card did, and duplicating the ordering would let the two
+  /// drift.
+  static SourceLocation? pickLocation(List<SourceLocation> locations) {
+    if (locations.isEmpty) return null;
     for (final location in locations) {
       if (location.isPrimary &&
           location.availability == AvailabilityState.available) {

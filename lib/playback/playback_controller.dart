@@ -2,6 +2,7 @@ import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show Widget;
+import 'package:mytube/domain/services/caption_parser.dart' show CaptionCue;
 import 'package:mytube/sources/source_adapter.dart';
 
 /// App-owned playback controller interface (ARCHITECTURE §3 Playback,
@@ -119,6 +120,7 @@ class PlaybackState {
     this.status = PlaybackStatus.idle,
     this.position = Duration.zero,
     this.duration = Duration.zero,
+    this.buffered = Duration.zero,
     this.speed = 1.0,
     this.volume = 1.0,
     this.canSeek = false,
@@ -133,6 +135,15 @@ class PlaybackState {
   final PlaybackStatus status;
   final Duration position;
   final Duration duration;
+
+  /// Furthest downloaded point, for the seek bar's buffered track (VP1.3).
+  ///
+  /// Always within `[position, duration]` while a source is loaded, and
+  /// [Duration.zero] whenever nothing is loaded — the state machine resets it
+  /// on load and on stop so one video's buffer is never painted on the next
+  /// one's timeline.
+  final Duration buffered;
+
   final double speed;
 
   /// Audio volume for the current/next source (0.0 – 1.0).  Carried across
@@ -175,6 +186,15 @@ class PlaybackState {
     return size.width > size.height;
   }
 
+  /// Fraction of the timeline already downloaded (0.0 – 1.0). Zero while the
+  /// duration is unknown, so a seek bar can paint the buffered track without
+  /// guarding against a divide-by-zero.
+  double get bufferedFraction {
+    final total = duration.inMilliseconds;
+    if (total <= 0) return 0;
+    return (buffered.inMilliseconds / total).clamp(0.0, 1.0);
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -182,6 +202,7 @@ class PlaybackState {
           other.status == status &&
           other.position == position &&
           other.duration == duration &&
+          other.buffered == buffered &&
           other.speed == speed &&
           other.volume == volume &&
           other.canSeek == canSeek &&
@@ -194,6 +215,7 @@ class PlaybackState {
     status,
     position,
     duration,
+    buffered,
     speed,
     volume,
     canSeek,
@@ -222,4 +244,14 @@ enum PlaybackStatus {
 
   /// An unrecoverable error stopped playback.
   error,
+}
+
+/// The optional caption command a [PlaybackController] may declare (VP4.3).
+///
+/// A capability mixin rather than a member of [PlaybackController] so the many
+/// UI test controllers that `implements PlaybackController` stay valid; the
+/// concrete `AppPlaybackController` provides it and callers probe with `is`.
+abstract interface class CaptionCapableController {
+  /// Hands parsed caption [cues] to the engine, or clears them when null.
+  Future<void> setCaptions(List<CaptionCue>? cues);
 }

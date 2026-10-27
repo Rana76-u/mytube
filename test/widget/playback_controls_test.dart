@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
@@ -191,6 +192,30 @@ Slider _volumeSlider(WidgetTester tester) =>
 
 IconButton _iconButton(WidgetTester tester, IconData icon) =>
     tester.widget<IconButton>(find.widgetWithIcon(IconButton, icon));
+
+/// The first semantic node under [root] whose announced value starts with
+/// [prefix].
+///
+/// A Material [Slider] renders a container node of its own and puts the
+/// value/actions on a child, so a plain `getSemantics` on the widget finds the
+/// empty parent (VP7.1).
+SemanticsNode _nodeWithValuePrefix(SemanticsNode root, String prefix) {
+  SemanticsNode? found;
+  void visit(SemanticsNode node) {
+    if (found != null) return;
+    if (node.value.startsWith(prefix)) {
+      found = node;
+      return;
+    }
+    node.visitChildren((child) {
+      visit(child);
+      return found == null;
+    });
+  }
+
+  visit(root);
+  return found!;
+}
 
 void main() {
   group('PlaybackControls rendering (P4-05)', () {
@@ -478,6 +503,52 @@ void main() {
 
       expect(find.text('This source type cannot be played.'), findsOneWidget);
       expect(find.byKey(const Key('playback_retry_button')), findsNothing);
+    });
+  });
+
+  group('PlaybackControls accessibility (VP7.1)', () {
+    testWidgets('the volume slider names itself and reads a percentage', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      final f = _fixture();
+      await _pump(tester, f);
+
+      // The slider's own node hangs below the container the Slider widget
+      // renders, so the assertion looks it up by what it announces.
+      final node = _nodeWithValuePrefix(
+        tester.getSemantics(find.byKey(const Key('playback_volume_slider'))),
+        'Volume',
+      );
+      expect(node.value, 'Volume 100%');
+      expect(
+        node.getSemanticsData().hasAction(SemanticsAction.increase),
+        isTrue,
+      );
+
+      semantics.dispose();
+    });
+
+    testWidgets('the speed and display selectors keep 48 dp targets', (
+      tester,
+    ) async {
+      final f = _fixture();
+      await _pump(tester, f);
+      await _play(tester, f);
+
+      for (final key in ['playback_speed_menu', 'playback_display_mode_menu']) {
+        final size = tester.getSize(find.byKey(Key(key)));
+        expect(
+          size.height,
+          greaterThanOrEqualTo(48),
+          reason: '$key must offer a 48 dp target',
+        );
+        expect(
+          size.width,
+          greaterThanOrEqualTo(48),
+          reason: '$key must offer a 48 dp target',
+        );
+      }
     });
   });
 }

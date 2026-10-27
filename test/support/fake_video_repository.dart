@@ -15,14 +15,17 @@ class FakeVideoRepository implements VideoRepository {
   FakeVideoRepository({
     List<VideoItemSummary>? items,
     Map<String, List<SourceLocation>>? locations,
+    Map<String, List<LibraryTag>>? tags,
     this.sourceLocationsError,
     this.queryError,
     this.deleteError,
   }) : _items = items ?? const <VideoItemSummary>[],
-       _locations = locations ?? const <String, List<SourceLocation>>{};
+       _locations = locations ?? const <String, List<SourceLocation>>{},
+       _tags = tags ?? const <String, List<LibraryTag>>{};
 
   final List<VideoItemSummary> _items;
   final Map<String, List<SourceLocation>> _locations;
+  final Map<String, List<LibraryTag>> _tags;
 
   /// When set, the matching read fails instead of returning data.
   final AppError? sourceLocationsError;
@@ -88,8 +91,8 @@ class FakeVideoRepository implements VideoRepository {
       throw UnimplementedError('getTags');
 
   @override
-  Future<Result<List<LibraryTag>>> getTagsForVideo(VideoItemId id) =>
-      throw UnimplementedError('getTagsForVideo');
+  Future<Result<List<LibraryTag>>> getTagsForVideo(VideoItemId id) async =>
+      Result.ok(_tags[id.value] ?? const <LibraryTag>[]);
 
   @override
   Future<Result<LibraryTag>> ensureTag(String name) =>

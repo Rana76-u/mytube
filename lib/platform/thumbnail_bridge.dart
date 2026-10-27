@@ -56,9 +56,40 @@ abstract interface class ThumbnailBridge {
     int maxSidePx = defaultMaxSidePx,
   });
 
+  /// Returns encoded bytes (JPEG) for the frame at [positionMs] of the video
+  /// behind [uri] (VP1.4, scrub previews).
+  ///
+  /// Routes by scheme through the same two native paths as the card
+  /// thumbnails: a local `content://`/`file://`/`document://` reference is
+  /// decoded on device, an `http(s)` URL is fetched as one frame. Both reuse
+  /// the plugin's decode permit, rotation handling and JPEG encoding, so a
+  /// dragged thumb costs the same as a card tile.
+  ///
+  /// [positionMs] is clamped natively into the media range, so a drag past the
+  /// end answers with the last frame instead of nothing. Only the encoded
+  /// preview crosses the channel — a remote stream is never downloaded.
+  ///
+  /// Returns [Err] with the same vocabulary as the other two calls
+  /// (`PermissionDeniedError`, `NotFoundError`, `NetworkUnavailableError`,
+  /// `UnexpectedError`) and never throws. A scheme no decoder can open yields
+  /// [NotFoundError] without touching the platform channel.
+  Future<Result<Uint8List>> getFrame(
+    String uri, {
+    required int positionMs,
+    Map<String, String> headers = const {},
+    int maxSidePx = scrubMaxSidePx,
+  });
+
   /// Default decode size — the longest side of a full-width 16:9 card on a
   /// high-density phone (~1100 physical px). Decoding smaller makes the grid
   /// upscale and read as blurry (LIB-007, NFR-001). Kept in sync with
   /// `ThumbnailPlugin.DEFAULT_MAX_SIDE_PX` on the Android side.
   static const int defaultMaxSidePx = 1080;
+
+  /// Longest side decoded for a scrub preview.
+  ///
+  /// The bubble is ~160 dp wide, so 480 physical px already covers a 3× phone
+  /// without upscaling — and a frame this small decodes several times faster
+  /// than a card tile, which is what keeps a drag responsive (NFR-001).
+  static const int scrubMaxSidePx = 480;
 }

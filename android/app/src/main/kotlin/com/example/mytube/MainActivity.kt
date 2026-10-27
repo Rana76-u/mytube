@@ -28,6 +28,9 @@ class MainActivity : FlutterActivity() {
         SharePlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
+        CaptionsPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
     }
 
     // PiP enter/leave is reported by the framework on the activity, not on a

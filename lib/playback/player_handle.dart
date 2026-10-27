@@ -1,6 +1,7 @@
 import 'dart:ui' show Size;
 
 import 'package:flutter/widgets.dart' show Widget;
+import 'package:mytube/domain/services/caption_parser.dart' show CaptionCue;
 import 'package:mytube/sources/source_adapter.dart';
 
 /// A single playable-source scheme classification (P4-04).
@@ -50,6 +51,7 @@ class PlayerSnapshot {
     required this.completed,
     required this.position,
     required this.duration,
+    this.buffered = Duration.zero,
     required this.speed,
     required this.volume,
     this.videoSize,
@@ -70,6 +72,17 @@ class PlayerSnapshot {
 
   final Duration position;
   final Duration duration;
+
+  /// Furthest point downloaded ahead of [position], or [Duration.zero] when
+  /// nothing is buffered.
+  ///
+  /// Defaults to zero so an engine (or a test fake) that reports nothing claims
+  /// no buffered progress — the conservative answer, which paints no secondary
+  /// track on the seek bar rather than inventing one. Already resolved to a
+  /// single point by the handle: the engine's own buffer list never crosses
+  /// this seam (VP1.3).
+  final Duration buffered;
+
   final double speed;
   final double volume;
 
@@ -142,3 +155,15 @@ abstract interface class PlayerHandle {
 ///
 /// Injected into `AppPlaybackController` so tests can supply fake handles.
 typedef PlayerHandleFactory = PlayerHandle Function(PlayableSource source);
+
+/// The optional caption capability a [PlayerHandle] may declare (VP4.3).
+///
+/// Deliberately a separate interface rather than a member of [PlayerHandle]:
+/// "optional" means an engine that cannot carry timed text simply does not
+/// implement it, and every existing handle (and test fake) stays valid. The
+/// controller probes for this type and only calls [setCaptions] when the live
+/// engine supports it. Passing null clears the cues.
+abstract interface class CaptionCapableHandle {
+  /// Hands parsed caption [cues] to the engine, or clears them when null.
+  Future<void> setCaptions(List<CaptionCue>? cues);
+}

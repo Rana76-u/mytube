@@ -61,4 +61,8 @@ abstract final class AppSizes {
 
   /// Vertical swiping distance that docks the player into the mini player.
   static const double dockDragThreshold = 96;
+
+  /// How far above the player's bottom edge the caption line sits, clearing the
+  /// control bar so a subtitle is never painted under the seek slider (VP4.3).
+  static const double playerCaptionInset = 88;
 }

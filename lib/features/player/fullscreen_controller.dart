@@ -34,12 +34,22 @@ class FullscreenController extends Notifier<bool> {
     return false;
   }
 
+  /// Whether the current fullscreen session may rotate to landscape. A vertical
+  /// source keeps this false so it stays portrait while immersive (VP5.5).
+  bool _allowLandscape = true;
+
   /// Whether the player currently fills the screen.
   bool get isFullscreen => state;
 
   /// Enters fullscreen; a no-op when already there.
-  Future<void> enter() async {
+  ///
+  /// [allowLandscape] chooses the orientation: a landscape (or unknown-shape)
+  /// source gets the wide orientations, while a vertical source passes `false`
+  /// and stays portrait immersive (VP5.5, "vertical videos stay portrait
+  /// fullscreen").
+  Future<void> enter({bool allowLandscape = true}) async {
     if (state) return;
+    _allowLandscape = allowLandscape;
     state = true;
     await _apply(active: true);
   }
@@ -72,7 +82,9 @@ class FullscreenController extends Notifier<bool> {
         active ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
       );
       await SystemChrome.setPreferredOrientations(
-        active ? landscapeOrientations : portraitOrientations,
+        active
+            ? (_allowLandscape ? landscapeOrientations : portraitOrientations)
+            : portraitOrientations,
       );
     } catch (_) {
       // See the doc comment: display chrome is best-effort, playback is not.

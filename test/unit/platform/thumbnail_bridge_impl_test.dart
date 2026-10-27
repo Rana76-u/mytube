@@ -111,4 +111,97 @@ void main() {
       expect((result as Err<Uint8List>).error, isA<UnexpectedError>());
     });
   });
+
+  group('getFrame', () {
+    test('a local source asks the decoder for the position', () async {
+      setHandler((call) async {
+        calls.add(call);
+        return bytes;
+      });
+
+      final result = await bridge.getFrame(
+        'content://media/external/video/7',
+        positionMs: 12_000,
+      );
+
+      expect(result, isA<Ok<Uint8List>>());
+      expect(calls.single.method, 'getThumbnail');
+      expect(calls.single.arguments, {
+        'uri': 'content://media/external/video/7',
+        'maxSidePx': ThumbnailBridge.scrubMaxSidePx,
+        'timeMs': 12_000,
+      });
+    });
+
+    test(
+      'a network source sends the position and the caller identity',
+      () async {
+        setHandler((call) async {
+          calls.add(call);
+          return bytes;
+        });
+
+        await bridge.getFrame(
+          'https://cdn.example.com/video.mp4',
+          positionMs: 90_000,
+          headers: const {'User-Agent': 'MyTube/0.1'},
+          maxSidePx: 320,
+        );
+
+        expect(calls.single.method, 'getNetworkThumbnail');
+        expect(calls.single.arguments, {
+          'uri': 'https://cdn.example.com/video.mp4',
+          'maxSidePx': 320,
+          'headers': {'User-Agent': 'MyTube/0.1'},
+          'timeMs': 90_000,
+        });
+      },
+    );
+
+    test('a negative position is floored at zero', () async {
+      setHandler((call) async {
+        calls.add(call);
+        return bytes;
+      });
+
+      await bridge.getFrame('file:///movies/a.mp4', positionMs: -500);
+
+      expect(calls.single.arguments, {
+        'uri': 'file:///movies/a.mp4',
+        'maxSidePx': ThumbnailBridge.scrubMaxSidePx,
+        'timeMs': 0,
+      });
+    });
+
+    test('an unsupported scheme never reaches the channel', () async {
+      setHandler((call) async {
+        calls.add(call);
+        return bytes;
+      });
+
+      final result = await bridge.getFrame(
+        'onedrive:item-id-123',
+        positionMs: 1_000,
+      );
+
+      expect(result, isA<Err<Uint8List>>());
+      expect((result as Err<Uint8List>).error, isA<NotFoundError>());
+      expect(calls, isEmpty);
+    });
+
+    test('a failure never leaks the URI into the diagnostic', () async {
+      setHandler((call) async {
+        throw PlatformException(code: 'NOT_FOUND', message: 'no frame');
+      });
+
+      final result = await bridge.getFrame(
+        'content://media/external/video/secret-path',
+        positionMs: 5_000,
+      );
+
+      final error = (result as Err<Uint8List>).error;
+      expect(error, isA<NotFoundError>());
+      expect(error.diagnosticMessage, isNot(contains('secret-path')));
+    });
+  });
 }

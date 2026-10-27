@@ -65,6 +65,22 @@ class _FakeAdapter implements VideoSourceAdapter {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
+/// Fake offline lookup returning a scripted source (or null) and recording the
+/// item it was asked about, so tests can assert the offline branch is taken
+/// before any adapter/repository work (VP6.3).
+class _FakeOffline implements OfflineDownloadResolver {
+  _FakeOffline(this.source);
+
+  final PlayableSource? source;
+  VideoItemId? askedFor;
+
+  @override
+  Future<PlayableSource?> resolveOfflineSource(VideoItemId item) async {
+    askedFor = item;
+    return source;
+  }
+}
+
 SourceLocation _location({
   required String id,
   required ProviderType providerType,
@@ -327,6 +343,64 @@ void main() {
         final result = await resolver.resolveForItem(_item());
 
         expect((result as Ok<PlayableSource>).value.sourceId, 'src-chosen');
+      },
+    );
+
+    // ── P12-03 / VP6.3: offline-download preference ──────────────────────────
+
+    test('prefers a completed offline copy over the network source', () async {
+      final adapter = _FakeAdapter(sourceType: ProviderType.directUrl);
+      final repository = _FakeRepository([
+        _location(
+          id: 'remote',
+          providerType: ProviderType.directUrl,
+          availability: AvailabilityState.available,
+        ),
+      ]);
+      final offline = _FakeOffline(
+        PlayableSource(
+          uri: Uri.file('/downloads/d1_video.mp4'),
+          sourceId: 'd1',
+          sourceType: ProviderType.directUrl,
+          canSeek: true,
+        ),
+      );
+      final resolver = DefaultPlaybackSourceResolver(
+        repository: repository,
+        adapters: [adapter],
+        offlineDownload: offline,
+      );
+
+      final result = await resolver.resolveForItem(_item());
+
+      final source = (result as Ok<PlayableSource>).value;
+      expect(source.sourceId, 'd1');
+      expect(source.uri.scheme, 'file');
+      // The offline copy short-circuits the remote path entirely.
+      expect(adapter.lastResolvedSourceId, isNull);
+      expect(offline.askedFor, VideoItemId('item'));
+    });
+
+    test(
+      'falls back to the remote source when there is no offline copy',
+      () async {
+        final adapter = _FakeAdapter(sourceType: ProviderType.directUrl);
+        final resolver = DefaultPlaybackSourceResolver(
+          repository: _FakeRepository([
+            _location(
+              id: 'remote',
+              providerType: ProviderType.directUrl,
+              availability: AvailabilityState.available,
+            ),
+          ]),
+          adapters: [adapter],
+          offlineDownload: _FakeOffline(null),
+        );
+
+        final result = await resolver.resolveForItem(_item());
+
+        expect((result as Ok<PlayableSource>).value.sourceId, 'src-remote');
+        expect(adapter.lastResolvedSourceId, 'src-remote');
       },
     );
   });
