@@ -21,17 +21,22 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 
 /**
- * Native thumbnail extraction for local video content (P7-01).
+ * Native thumbnail extraction (P7-01, P4-10).
  *
  * Channel: com.example.mytube/thumbnails
  *  - getThumbnail { uri: String, maxSidePx: Int } -> ByteArray (JPEG) or null
+ *  - getNetworkThumbnail { uri: String, maxSidePx: Int, headers: Map<String,String> }
+ *      -> ByteArray (JPEG) or null
  *
  * Error codes surface as PlatformException on the Dart side:
  *  - PERMISSION_DENIED  : the content grant (MediaStore permission or SAF
  *                         persistable URI) is no longer live.
- *  - NOT_FOUND          : the URI cannot be resolved to a readable file.
+ *  - NOT_FOUND          : the URI cannot be resolved to a readable file, or
+ *                         the URL is not http(s).
+ *  - NETWORK            : the remote host could not be reached.
  *  - THUMB_FAILED       : decode/encode problem.
  *
  * Strategy (quality first):
@@ -40,10 +45,17 @@ import java.io.ByteArrayOutputStream
  *     allocates a full-resolution bitmap) and rotated by the container's
  *     rotation metadata. This is the only path that is both sharp and
  *     correctly oriented for a full-width card.
- *  2. Fallback — ContentResolver.loadThumbnail (API 29+), the system's cached
- *     preview. It is much cheaper but capped at whatever MediaStore
- *     pre-generated (typically ~512px), so it only fills in when the frame
- *     cannot be decoded.
+ *  2. Fallback (local only) — ContentResolver.loadThumbnail (API 29+), the
+ *     system's cached preview. It is much cheaper but capped at whatever
+ *     MediaStore pre-generated (typically ~512px), so it only fills in when
+ *     the frame cannot be decoded.
+ *
+ * A network source has no local file to decode, so [produceNetworkThumbnail]
+ * opens the URL with the caller's headers and reuses the same frame
+ * extraction: one synced frame is fetched, never the whole stream. The headers
+ * matter — the probe and the player send the app User-Agent (P4-02), so a
+ * server that gates on it must not see the preview arrive as a different
+ * client.
  *
  * Decoding always happens on the IO dispatcher so the UI thread never
  * blocks (NFR-001), and at most [MAX_CONCURRENT_DECODES] frames are decoded
@@ -76,6 +88,7 @@ class ThumbnailPlugin :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getThumbnail" -> getThumbnail(call, result)
+            "getNetworkThumbnail" -> getNetworkThumbnail(call, result)
             else -> result.notImplemented()
         }
     }
@@ -115,6 +128,50 @@ class ThumbnailPlugin :
         }
     }
 
+    /**
+     * A frame of the stream at `uri`, decoded natively (P4-10).
+     *
+     * Only http(s) is accepted: a network preview is a frame of the player's
+     * own target, and refusing anything else keeps this from becoming a
+     * generic "fetch and decode whatever the caller passes" channel.
+     */
+    private fun getNetworkThumbnail(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("uri")
+        val maxSidePx = call.argument<Int>("maxSidePx") ?: DEFAULT_MAX_SIDE_PX
+        if (url.isNullOrEmpty()) {
+            result.error("NOT_FOUND", "Missing uri argument", null)
+            return
+        }
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+            result.error("NOT_FOUND", "Only http(s) URLs have network previews", null)
+            return
+        }
+        // Copy the caller's identity verbatim: whatever the probe and the
+        // player present is what this request must present too.
+        val headers = mutableMapOf<String, String>()
+        call.argument<Map<*, *>>("headers")?.forEach { (key, value) ->
+            if (key is String && value is String && key.isNotBlank() && value.isNotEmpty()) {
+                headers[key] = value
+            }
+        }
+        scope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    produceNetworkThumbnail(url, headers.toMap(), maxSidePx)
+                }
+                withContext(Dispatchers.Main) { result.success(bytes) }
+            } catch (io: IOException) {
+                // The host could not be reached — distinct from "decoded but
+                // no frame", so the Dart side can report reachability.
+                withContext(Dispatchers.Main) { result.error("NETWORK", io.message, null) }
+            } catch (illegal: IllegalArgumentException) {
+                withContext(Dispatchers.Main) { result.error("NOT_FOUND", illegal.message, null) }
+            } catch (error: Exception) {
+                withContext(Dispatchers.Main) { result.error("THUMB_FAILED", error.message, null) }
+            }
+        }
+    }
+
     private suspend fun produceThumbnail(
         context: Context,
         uri: Uri,
@@ -128,13 +185,53 @@ class ThumbnailPlugin :
     }
 
     /**
+     * One frame of the network video at [url], fetched with [headers], encoded
+     * as JPEG — or `null` when the host, the stream, or a frame is unusable.
+     *
+     * The retriever pulls only what it needs for the requested frame; the
+     * stream is never downloaded in full. It runs under the same decode permit
+     * as a local decode, so a grid of URL cards cannot open a burst of
+     * downloaders. The cost of sharing the permit: a host that accepts the
+     * connection and then stalls keeps one of [MAX_CONCURRENT_DECODES] busy
+     * until the platform call returns. That only delays other tiles — the grid
+     * keeps showing its placeholder, and nothing blocks the UI thread.
+     */
+    private suspend fun produceNetworkThumbnail(
+        url: String,
+        headers: Map<String, String>,
+        maxSidePx: Int,
+    ): ByteArray? = decodeLimiter.withPermit {
+        val target = maxSidePx.coerceIn(MIN_MAX_SIDE_PX, MAX_MAX_SIDE_PX)
+        val frame = decodeNetworkFrame(url, headers, target) ?: return@withPermit null
+        frame.toJpegBytes()
+    }
+
+    /**
      * One frame near the 1s mark, scaled to [maxSidePx] and rotated according
      * to the container metadata, or `null` when the media cannot be decoded.
      */
-    private fun decodeFrame(context: Context, uri: Uri, maxSidePx: Int): Bitmap? {
+    private fun decodeFrame(context: Context, uri: Uri, maxSidePx: Int): Bitmap? =
+        withRetriever({ retriever -> retriever.setDataSource(context, uri) }, maxSidePx)
+
+    /**
+     * The same frame extraction for a network source: the retriever reads the
+     * container straight off the URL, so only the headers and the data source
+     * differ from [decodeFrame].
+     */
+    private fun decodeNetworkFrame(
+        url: String,
+        headers: Map<String, String>,
+        maxSidePx: Int,
+    ): Bitmap? = withRetriever({ retriever -> retriever.setDataSource(url, headers) }, maxSidePx)
+
+    /** Opens one retriever via [open], extracts the frame, and always releases. */
+    private fun withRetriever(
+        open: (MediaMetadataRetriever) -> Unit,
+        maxSidePx: Int,
+    ): Bitmap? {
         val retriever = MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, uri)
+            open(retriever)
             val frame = frameNear(retriever, maxSidePx) ?: return null
             val rotation = retriever.intMetadata(
                 MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION,

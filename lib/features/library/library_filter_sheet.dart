@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
-import 'package:mytube/features/library/library_screen.dart'
-    show libraryTagsProvider;
+import 'package:mytube/features/library/library_providers.dart';
 
 /// Modal filter sheet for the Library (P5-03, LIB-004).
 ///

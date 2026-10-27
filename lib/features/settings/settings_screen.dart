@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/theme/theme_mode_notifier.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/util/format_bytes.dart';
 import 'package:mytube/domain/models/cache_limit.dart';
@@ -13,14 +14,15 @@ import 'package:mytube/domain/services/scan_settings_notifier.dart';
 /// Settings tab — providers, folders, playback preferences, downloads, cache,
 /// library controls, and theme selection (NAV-005, SET-001, SET-002).
 ///
-/// Currently hosts the scan-location section (SET-002 source/folder
-/// management): the whole-device MediaStore toggle plus the explicit SAF
-/// folders the local scan may use.
-/// All reads/writes go through [ScanSettingsNotifier]; this widget never
-/// touches the database or the platform bridge directly. Each change is
-/// applied immediately via `LibraryRefreshNotifier.rescanAndDeindex()` —
-/// invoked from these handlers rather than inside the scan-settings notifier
-/// to avoid a circular provider dependency — while a busy indicator runs.
+/// Currently hosts the appearance (theme mode) section plus the scan-location
+/// section (SET-002 source/folder management): the whole-device MediaStore
+/// toggle and the explicit SAF folders the local scan may use.
+/// All reads/writes go through [ThemeModeNotifier] and [ScanSettingsNotifier];
+/// this widget never touches the database or the platform bridge directly. Each
+/// scan-location change is applied immediately via
+/// `LibraryRefreshNotifier.rescanAndDeindex()` — invoked from these handlers
+/// rather than inside the scan-settings notifier to avoid a circular provider
+/// dependency — while a busy indicator runs.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -98,67 +100,65 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // Live phase of the running scan (adapter + adapter progress) so the
     // user can tell a slow scan from a stuck one.
     final refreshState = ref.watch(libraryRefreshServiceProvider);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: ListView(
-        children: [
-          const _SettingsSectionHeader('Video scanning'),
-          SwitchListTile(
-            title: const Text('Scan entire device'),
-            subtitle: const Text(
-              'Include every video indexed on the device. When off, only '
-              'the folders below are scanned.',
-            ),
-            value: settings.scanEntireDevice,
-            onChanged: _busy
-                ? null
-                : (value) => _apply(() async {
-                    await ref
-                        .read(scanSettingsProvider.notifier)
-                        .setScanEntireDevice(value);
-                    await _rescanAndDeindex();
-                  }),
+    return ListView(
+      children: [
+        const _AppearanceSection(),
+        const _SettingsSectionHeader('Video scanning'),
+        SwitchListTile(
+          title: const Text('Scan entire device'),
+          subtitle: const Text(
+            'Include every video indexed on the device. When off, only '
+            'the folders below are scanned.',
           ),
-          const Divider(height: 1),
-          const _SettingsSectionHeader('Scan folders'),
-          if (settings.folderUris.isEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Text('No folders added yet.'),
-            )
-          else
-            for (final uri in settings.folderUris)
-              _FolderTile(
-                uri: uri,
-                busy: _busy,
-                onBusy: (busy) => busy ? _startBusy() : _stopBusy(),
-              ),
-          ListTile(
-            leading: const Icon(Icons.create_new_folder_outlined),
-            title: const Text('Add folder'),
-            enabled: !_busy,
-            onTap: () => _addFolder(),
-          ),
-          if (_busy)
-            _ProgressPanel(
-              state: refreshState,
-              elapsedSeconds: _elapsedSeconds,
-              onCancel: refreshState is RefreshInProgress ? _cancelScan : null,
-            )
-          else
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Text(
-                'Changing scan locations immediately rescans the library and '
-                'removes videos outside the selected locations from the '
-                'library. Original files are never modified.',
-                style: TextStyle(fontStyle: FontStyle.italic),
-              ),
+          value: settings.scanEntireDevice,
+          onChanged: _busy
+              ? null
+              : (value) => _apply(() async {
+                  await ref
+                      .read(scanSettingsProvider.notifier)
+                      .setScanEntireDevice(value);
+                  await _rescanAndDeindex();
+                }),
+        ),
+        const Divider(height: 1),
+        const _SettingsSectionHeader('Scan folders'),
+        if (settings.folderUris.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text('No folders added yet.'),
+          )
+        else
+          for (final uri in settings.folderUris)
+            _FolderTile(
+              uri: uri,
+              busy: _busy,
+              onBusy: (busy) => busy ? _startBusy() : _stopBusy(),
             ),
-          const Divider(height: 1),
-          const _CacheSection(),
-        ],
-      ),
+        ListTile(
+          leading: const Icon(Icons.create_new_folder_outlined),
+          title: const Text('Add folder'),
+          enabled: !_busy,
+          onTap: () => _addFolder(),
+        ),
+        if (_busy)
+          _ProgressPanel(
+            state: refreshState,
+            elapsedSeconds: _elapsedSeconds,
+            onCancel: refreshState is RefreshInProgress ? _cancelScan : null,
+          )
+        else
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Text(
+              'Changing scan locations immediately rescans the library and '
+              'removes videos outside the selected locations from the '
+              'library. Original files are never modified.',
+              style: TextStyle(fontStyle: FontStyle.italic),
+            ),
+          ),
+        const Divider(height: 1),
+        const _CacheSection(),
+      ],
     );
   }
 
@@ -200,6 +200,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 // ---------------------------------------------------------------------------
 // Private widgets
 // ---------------------------------------------------------------------------
+
+/// Appearance section — dark / light / follow-system (SET-001).
+///
+/// The choice is persisted by [ThemeModeNotifier] through the typed
+/// preferences DAO, so it survives a restart. This widget only reads the
+/// current mode and forwards changes; it never touches storage itself. A
+/// dropdown (rather than a segmented control) matches the Cache-limit row and
+/// stays within the tile on narrow screens and at large text scales.
+class _AppearanceSection extends ConsumerWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _SettingsSectionHeader('Appearance'),
+        ListTile(
+          leading: const Icon(Icons.brightness_6_outlined),
+          title: const Text('Theme'),
+          subtitle: const Text(
+            'Dark is the default. Follow device uses your system setting.',
+          ),
+          trailing: DropdownButton<ThemeMode>(
+            key: const ValueKey('settings_theme_mode'),
+            value: mode,
+            isDense: true,
+            items: const [
+              DropdownMenuItem(value: ThemeMode.system, child: Text('System')),
+              DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
+              DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+            ],
+            onChanged: (selected) {
+              if (selected == null) return;
+              ref.read(themeModeNotifierProvider.notifier).setMode(selected);
+            },
+          ),
+        ),
+        const Divider(height: 1),
+      ],
+    );
+  }
+}
 
 /// Storage & cache section (CACHE-003/CACHE-004/CACHE-005,
 /// P8-02/P8-03/P8-05): how much disposable data the app currently holds, the

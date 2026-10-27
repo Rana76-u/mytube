@@ -4,8 +4,8 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/discover/discover_sections.dart';
-import 'package:mytube/features/library/library_screen.dart'
-    show libraryTagsProvider;
+import 'package:mytube/features/library/library_providers.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
 import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/collection_screen.dart';
@@ -67,7 +67,12 @@ final recentlyAddedRowProvider = FutureProvider<List<VideoItemSummary>>((
 final collectionRowProvider =
     FutureProvider.family<List<VideoItemSummary>, String>((ref, id) async {
       final repository = ref.watch(videoRepositoryProvider);
-      final result = await repository.getCollectionItems(id);
+      // Bounded in SQL, as for [recentlyAddedRowProvider] / [tagRowProvider]:
+      // the row never shows more than [_maxCards] cards, so a large collection
+      // must not be read in full to render its first screenful. The `.take` is
+      // a belt-and-braces cap on top of that, so the row stays bounded whatever
+      // the repository returns.
+      final result = await repository.getCollectionItems(id, limit: _maxCards);
       return switch (result) {
         Ok(:final value) => value.take(_maxCards).toList(),
         Err(:final error) => throw StateError(error.diagnosticMessage),
@@ -120,7 +125,7 @@ class DiscoverBrowseRows extends ConsumerWidget {
 
 /// A single row that reveals [items] under [title] only when it has content;
 /// while loading, on error, or when empty it collapses entirely (§ UI-3).
-class _BrowseRow extends StatelessWidget {
+class _BrowseRow extends ConsumerWidget {
   const _BrowseRow({required this.title, required this.items, this.onTitleTap});
 
   final String title;
@@ -128,7 +133,7 @@ class _BrowseRow extends StatelessWidget {
   final VoidCallback? onTitleTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (items.isEmpty) return const SizedBox.shrink();
     return DiscoverCarousel(
       title: title,
@@ -143,11 +148,11 @@ class _BrowseRow extends StatelessWidget {
             // A 32dp avatar would squeeze the title at this width; the
             // collection/tag row already names the grouping.
             showSourceAvatar: false,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => VideoPlayerScreen(item: item),
-              ),
-            ),
+            // The same bundle every other surface offers, so a card behaves
+            // identically wherever it appears (plan M4).
+            actions: videoItemActionsFor(context, ref, item),
+            onTap: () =>
+                Navigator.of(context).push(VideoPlayerScreen.route(item)),
           ),
       ],
     );

@@ -5,6 +5,7 @@ import 'package:mytube/data/database/app_database.dart' as db_lib;
 import 'package:mytube/data/repositories/drift_video_repository.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/availability_check_service.dart';
 import 'package:mytube/platform/media_store_bridge.dart';
@@ -85,6 +86,11 @@ class FakeSafBridge implements SafBridge {
   @override
   Future<Result<bool>> checkFolderAccess(String uri) async =>
       Ok(folderAccessGranted);
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteDocuments(
+    List<String> uris,
+  ) async => Ok(SourceDeletionReport(deleted: uris));
 }
 
 class FakeMediaStoreBridge implements MediaStoreBridge {
@@ -102,6 +108,11 @@ class FakeMediaStoreBridge implements MediaStoreBridge {
   @override
   Future<MediaStorePermissionStatus> requestPermission() async =>
       permissionStatus;
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteVideos(
+    List<String> contentUris,
+  ) async => Ok(SourceDeletionReport(deleted: contentUris));
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,37 @@ flutter run -d CPH2719
   that the entry is still listed as available.
 - [ ] **Incompatible server:** point at an HTML page / PDF / non-video content.
   Confirm it is rejected as unsupported and never claimed playable (URL-005).
+- [ ] **Plain `http://` stream (cleartext):** add a URL served over plain HTTP
+  (e.g. a LAN box at `http://192.168.1.10:8080/video.mp4`) and play it. Confirm
+  the entry is listed as available **and** actually plays — the probe and the
+  engine must agree, because the `dart:io` probe is not subject to Android's
+  cleartext policy while the engine's platform HTTP stack is. If it fails,
+  check `adb logcat | findstr Cleartext` for
+  `Cleartext HTTP traffic to <host> not permitted` and confirm
+  `android/app/src/main/res/xml/network_security_config.xml` is applied.
+- [ ] **User-Agent–gated server:** play a URL whose host rejects unknown
+  clients. The probe (P4-02) and the engine send the same `User-Agent`
+  (`directUrlRequestHeaders`), so an entry cannot pass the probe and then be
+  rejected at playback with a generic load error.
+
+## P4-10 — Stream thumbnails
+
+- [ ] **Frame preview appears:** add an `https://` MP4, go to Library, and
+  confirm the card shows a real frame instead of the play-circle placeholder.
+  The preview is decoded natively from the stream itself
+  (`MediaMetadataRetriever`), not from a local file.
+- [ ] **Preview survives a restart:** force-stop and relaunch. The same card
+  must show the preview without re-downloading — previews are persisted in the
+  thumbnail disk cache keyed by URL.
+- [ ] **Unreachable host:** add a URL whose server is down, then scroll to its
+  card. Confirm the placeholder is shown (no spinner, no error dialog), and
+  `adb logcat` shows no full URL in any log line (SEC-005).
+- [ ] **User-Agent–gated host:** the card preview must appear for a host that
+  rejects unknown clients — the frame grab sends
+  `directUrlRequestHeaders`, the same identity the probe and player use.
+- [ ] **Fast scroll:** scroll a library of many URL items quickly. The UI must
+  stay responsive; at most two native decodes run at once, so tiles may fill in
+  slightly after they scroll into view.
 
 ---
 

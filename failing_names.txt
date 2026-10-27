@@ -1,0 +1,46 @@
+﻿E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) shows a useful empty state for an empty library
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) the mode-selected feed lists the library under an active Recommended chip
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) the Reels shortcut is removed from the Discover surface
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) the app-bar search button opens the smart-search screen
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) the body is wrapped in a pull-to-refresh indicator
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/add_url_dialog_test.dart :: LibraryScreen URL entry (P4-01) the app-bar link icon opens the dialog
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) a hard-unavailable source is demoted in the suggestions (P6-08, DISC-002)
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/add_url_dialog_test.dart :: LibraryScreen URL entry (P4-01) a completed add refreshes the list and confirms
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: DiscoverScreen (P6-07, NAV-003 / DISC-004, redesign ┬º16ΓÇô┬º19) pull-to-refresh reshuffles to demote the previous suggestion head (P6-08, DISC-003)
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover feed-mode chips (┬º17.1/┬º17.2) starts on Recommended and switching re-drives the feed
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Continue watching section (┬º16.3) appears only when a video is partially watched
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) shows video list when items exist
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) displays search button in app bar
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) tapping search reveals the title search field
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) search filters the list to matching titles
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) search with no matches shows the no-results state
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) closing search restores the full library list
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover infinite scroll (ADR-005, ┬º17.3) pages a large feed lazily and shows end-of-feed
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) sort menu opens with the four LIB-005 options
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Collections browse rows (UI-3) surfaces a video-card row per collection, pinned-first
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) selecting the Duration sort reorders the list
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover browse rows (UI-3) Recently Added renders a row and is bounded to the card cap
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) filter button opens the filter sheet
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) filter sheet lists available tags as options
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover browse rows (UI-3) a tag row renders its group cards
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover browse rows (UI-3) collection and tag rows are bounded to the card cap
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) applying the favourites filter narrows the list
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover browse rows (UI-3) empty groups collapse ΓÇö no browse rows are shown
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) filtering everything out shows the No Matches state
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover filter chips (UI-2) tapping a collection chip filters the feed to that collection
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) tapping the heart favourite a video
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover filter chips (UI-2) tapping a tag chip filters the feed through the tag query
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) un-favouriting while the favourites filter is active drops the item from the list
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover filter chips (UI-2) the Recommended chip restores the mode-driven feed
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) the tag button opens the manage-tags sheet
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) creating a tag in the sheet assigns it to the video
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover filter chips (UI-2) changing the chip resets pagination to the new group
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) the scan button runs a manual refresh and reports the result
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover YouTube feed composition (ADR-012) interleaves the browse rows after the sixth feed card
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) a denied scan surfaces the permission message
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover YouTube feed composition (ADR-012) places the browse rows after a feed shorter than the insert index
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover YouTube feed composition (ADR-012) choosing a mode chip clears an active collection filter
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) the empty state offers a Scan device action
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/library_screen_test.dart :: LibraryScreen (P5-01) tapping a video card opens the player screen
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover YouTube feed composition (ADR-012) shows static skeleton tiles while the first page loads
+E:/02_Development/Projects/1. Video Streaming Personal App/mytube/test/widget/discover_screen_test.dart :: Discover YouTube feed composition (ADR-012) keeps the chip row pinned while the feed scrolls

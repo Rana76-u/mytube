@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/platform/media_store_bridge.dart';
 import 'package:mytube/platform/saf_bridge.dart';
@@ -31,6 +32,11 @@ class FakeMediaStoreBridge implements MediaStoreBridge {
 
   @override
   Future<MediaStorePermissionStatus> requestPermission() async => permStatus;
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteVideos(
+    List<String> contentUris,
+  ) async => Ok(SourceDeletionReport(deleted: contentUris));
 }
 
 class FakeSafBridge implements SafBridge {
@@ -55,6 +61,11 @@ class FakeSafBridge implements SafBridge {
 
   @override
   Future<Result<bool>> checkFolderAccess(String uri) async => const Ok(true);
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteDocuments(
+    List<String> uris,
+  ) async => Ok(SourceDeletionReport(deleted: uris));
 }
 
 // ---------------------------------------------------------------------------

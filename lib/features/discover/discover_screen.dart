@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/shell/shell_scroll_signal.dart';
 import 'package:mytube/core/ui/async_value_widget.dart';
 import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/core/ui/error_state.dart';
@@ -9,10 +10,9 @@ import 'package:mytube/domain/services/discover_feed_filter.dart';
 import "package:mytube/domain/services/discover_feed_provider.dart";
 import "package:mytube/domain/services/recommendation_scorer_provider.dart";
 import 'package:mytube/features/discover/discover_browse_rows.dart';
-import 'package:mytube/features/discover/discover_search_screen.dart';
 import 'package:mytube/features/discover/discover_sections.dart';
-import 'package:mytube/features/library/library_screen.dart'
-    show libraryTagsProvider;
+import 'package:mytube/features/library/library_providers.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
 import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/saved_providers.dart';
@@ -40,7 +40,11 @@ import 'package:mytube/features/saved/saved_providers.dart';
 /// it respects the currently selected mode (§17.2). Scrolling to the end of a
 /// page requests the next one lazily without re-ranking (§17.3).
 class DiscoverScreen extends ConsumerStatefulWidget {
-  const DiscoverScreen({super.key});
+  const DiscoverScreen({super.key, this.active = true});
+
+  /// Whether this tab is the visible one inside the shell's `IndexedStack`.
+  /// Only the visible tab scrolls to the top when the header logo is tapped.
+  final bool active;
 
   @override
   ConsumerState<DiscoverScreen> createState() => _DiscoverScreenState();
@@ -84,6 +88,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
   /// [RecommendationsController.reshuffle] (not invalidation) so the session's
   /// repetition-reduction history and the selected mode survive (DISC-003,
   /// §17.2). Awaited so pull-to-refresh keeps its spinner until data lands.
+  ///
+  /// Each section renders its own [AsyncValue] error state, so a single
+  /// failing section must not abort the gesture (and the remaining sections)
+  /// by rejecting the `onRefresh` future: every section is awaited through
+  /// [_settle], which swallows the failure after it has been recorded in the
+  /// provider's state.
   Future<void> _refresh() async {
     final filter = ref.read(discoverFeedFilterProvider);
     // In the `All` state a refresh reshuffles the recommendation head while
@@ -94,23 +104,25 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
         ? ref.read(recommendationsProvider.notifier).reshuffle()
         : Future<void>(() => ref.invalidate(discoverFeedProvider));
     await Future.wait([
-      feedRefresh,
-      ref.refresh(continueWatchingProvider.future),
-      ref.refresh(savedCollectionsProvider.future),
-      ref.refresh(libraryTagsProvider.future),
+      _settle(() => feedRefresh),
+      _settle(() => ref.refresh(continueWatchingProvider.future)),
+      _settle(() => ref.refresh(savedCollectionsProvider.future)),
+      _settle(() => ref.refresh(libraryTagsProvider.future)),
     ]);
   }
 
-  void _openSearch() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const DiscoverSearchScreen()),
-    );
+  /// Awaits [work] and swallows a failure, after the section it belongs to has
+  /// already recorded the error in its provider's [AsyncValue].
+  static Future<void> _settle(Future<void> Function() work) async {
+    try {
+      await work();
+    } catch (_) {
+      // Rendered by that section's own error state — see [_refresh].
+    }
   }
 
   void _openItem(VideoItemSummary item) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => VideoPlayerScreen(item: item)),
-    );
+    Navigator.of(context).push(VideoPlayerScreen.route(item));
   }
 
   /// Pinned header extent: the base row plus whatever the text scaler adds to a
@@ -136,60 +148,60 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen> {
     final collections = ref.watch(savedCollectionsProvider).value ?? const [];
     final tags = ref.watch(libraryTagsProvider).value ?? const [];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Discover'),
-        actions: [
-          IconButton(
-            key: const ValueKey('discover_search_button'),
-            icon: const Icon(Icons.search),
-            tooltip: 'Search',
-            onPressed: _openSearch,
+    // The header's logo (or a re-tap of the tab) asks the visible feed to go
+    // back to the top.
+    ref.listen<int>(shellScrollToTopProvider, (_, _) {
+      if (!widget.active || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
+
+    // No Scaffold/AppBar here: the shell owns the branded header, so this tab
+    // renders just the scrollable page. That is what keeps the header fixed
+    // while the feed scrolls under it (plan M3).
+    return RefreshIndicator(
+      key: const ValueKey('discover_refresh_indicator'),
+      onRefresh: _refresh,
+      child: CustomScrollView(
+        key: const ValueKey('discover_feed_list'),
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          // Chips stay pinned under the app bar: the row *is* the page's only
+          // active-state indicator (the old duplicated feed heading is gone),
+          // so it has to remain visible while the feed scrolls.
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _ChipRowHeaderDelegate(
+              height: _chipRowExtent(context),
+              child: DiscoverFilterChips(
+                mode: mode,
+                onModeSelected: (next) {
+                  // A mode chip is the `All` state, so it also clears any
+                  // active collection/tag filter (ADR-009).
+                  ref.read(recommendationsProvider.notifier).setMode(next);
+                  ref.read(discoverFeedFilterProvider.notifier).clear();
+                },
+                collections: collections,
+                tags: tags,
+                selected: filter,
+                onSelected: (next) =>
+                    ref.read(discoverFeedFilterProvider.notifier).toggle(next),
+              ),
+            ),
           ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: _ContinueWatchingSection(onTap: _openItem),
+            ),
+          ),
+          _FeedSliver(onTap: _openItem),
+          const SliverToBoxAdapter(child: _FeedPaginationFooter()),
         ],
-      ),
-      body: RefreshIndicator(
-        key: const ValueKey('discover_refresh_indicator'),
-        onRefresh: _refresh,
-        child: CustomScrollView(
-          key: const ValueKey('discover_feed_list'),
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            // Chips stay pinned under the app bar: the row *is* the page's only
-            // active-state indicator (the old duplicated feed heading is gone),
-            // so it has to remain visible while the feed scrolls.
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _ChipRowHeaderDelegate(
-                height: _chipRowExtent(context),
-                child: DiscoverFilterChips(
-                  mode: mode,
-                  onModeSelected: (next) {
-                    // A mode chip is the `All` state, so it also clears any
-                    // active collection/tag filter (ADR-009).
-                    ref.read(recommendationsProvider.notifier).setMode(next);
-                    ref.read(discoverFeedFilterProvider.notifier).clear();
-                  },
-                  collections: collections,
-                  tags: tags,
-                  selected: filter,
-                  onSelected: (next) => ref
-                      .read(discoverFeedFilterProvider.notifier)
-                      .toggle(next),
-                ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: _ContinueWatchingSection(onTap: _openItem),
-              ),
-            ),
-            _FeedSliver(onTap: _openItem),
-            const SliverToBoxAdapter(child: _FeedPaginationFooter()),
-          ],
-        ),
       ),
     );
   }
@@ -319,7 +331,7 @@ class _FeedSliver extends ConsumerWidget {
                 ),
               );
             }
-            return _buildFeed(feed.items);
+            return _buildFeed(context, ref, feed.items);
           },
         );
   }
@@ -327,7 +339,11 @@ class _FeedSliver extends ConsumerWidget {
   /// Flattens cards and the single browse-row block into one slot list. Only
   /// visible slots are mounted by [SliverList], so this stays lazy even though
   /// the widgets themselves are constructed eagerly (page size is 20).
-  Widget _buildFeed(List<VideoItemSummary> items) {
+  Widget _buildFeed(
+    BuildContext context,
+    WidgetRef ref,
+    List<VideoItemSummary> items,
+  ) {
     final insertAt = items.length < _shelfInsertIndex
         ? items.length
         : _shelfInsertIndex;
@@ -342,6 +358,9 @@ class _FeedSliver extends ConsumerWidget {
           child: VideoItemCard(
             key: ValueKey('discover_item_${item.id.value}'),
             item: item,
+            // Same action bundle as Library/Saved/search, so a video behaves
+            // identically wherever it is tapped (plan M4).
+            actions: videoItemActionsFor(context, ref, item),
             onTap: () => onTap(item),
           ),
         ),

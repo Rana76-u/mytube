@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mytube/app/shell/app_header.dart';
+import 'package:mytube/app/shell/shell_tabs.dart';
+import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
@@ -114,8 +117,9 @@ class _RecordingRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async => Result.ok(const []);
+    String collectionId, {
+    int? limit,
+  }) async => Result.ok(const []);
 
   @override
   Future<Result<void>> addVideoToCollection({
@@ -403,6 +407,32 @@ void main() {
       expect(repo.insertedItems, hasLength(1));
     });
 
+    testWidgets('a plain-http URL warns that the link is unencrypted', (
+      tester,
+    ) async {
+      await openDialog(tester);
+
+      await tester.enterText(
+        find.byType(TextField),
+        'http://192.168.1.10:8080/v.mp4',
+      );
+      await tester.pump();
+
+      expect(find.byKey(const Key('add_url_insecure_notice')), findsOneWidget);
+
+      await tester.enterText(
+        find.byType(TextField),
+        'https://example.com/v.mp4',
+      );
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('add_url_insecure_notice')),
+        findsNothing,
+        reason: 'HTTPS needs no cleartext warning',
+      );
+    });
+
     testWidgets('cancel closes without probing or persisting', (tester) async {
       await openDialog(tester);
 
@@ -435,19 +465,27 @@ void main() {
       );
       addTearDown(container.dispose);
 
+      // The Library tab is a chrome-free body under the shell header, so the
+      // harness mirrors the shell (plan M3).
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: const Scaffold(
+              appBar: MyTubeTopBar(tab: ShellTab.library),
+              body: LibraryScreen(),
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
     }
 
-    testWidgets('the app-bar link icon opens the dialog', (tester) async {
+    testWidgets('the header link action opens the dialog', (tester) async {
       await pumpLibrary(tester);
 
-      await tester.tap(find.byIcon(Icons.add_link));
+      await tester.tap(find.byKey(const ValueKey('shell_add_url')));
       await tester.pumpAndSettle();
 
       expect(find.text('Add video URL'), findsOneWidget);
@@ -469,7 +507,7 @@ void main() {
     ) async {
       await pumpLibrary(tester);
 
-      await tester.tap(find.byIcon(Icons.add_link));
+      await tester.tap(find.byKey(const ValueKey('shell_add_url')));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byType(TextField),

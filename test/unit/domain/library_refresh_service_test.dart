@@ -4,6 +4,7 @@ import 'package:mytube/data/database/app_database.dart' as db_lib;
 import 'package:mytube/data/repositories/drift_video_repository.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/scan_merge_service.dart';
@@ -121,6 +122,11 @@ class FakeMediaStoreBridge implements MediaStoreBridge {
   @override
   Future<Result<List<MediaStoreVideo>>> queryVideos() async =>
       Result.ok(const []);
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteVideos(
+    List<String> contentUris,
+  ) async => Ok(SourceDeletionReport(deleted: contentUris));
 }
 
 // ---------------------------------------------------------------------------

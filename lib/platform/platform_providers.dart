@@ -11,6 +11,8 @@ import 'package:mytube/platform/pip_bridge_impl.dart';
 import 'package:mytube/platform/remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/saf_bridge.dart';
 import 'package:mytube/platform/saf_bridge_impl.dart';
+import 'package:mytube/platform/share_bridge.dart';
+import 'package:mytube/platform/share_bridge_impl.dart';
 import 'package:mytube/platform/storage_paths.dart';
 import 'package:mytube/platform/thumbnail_bridge.dart';
 import 'package:mytube/platform/thumbnail_bridge_impl.dart';
@@ -79,3 +81,11 @@ final mediaSessionBridgeProvider = Provider<MediaSessionBridge>(
 /// hosts never show a dead control or crash (NFR-006, PLAY-013). Override with
 /// a fake bridge to drive enter / mode changes in tests.
 final pipBridgeProvider = Provider<PipBridge>((ref) => PipBridgeImpl());
+
+/// Riverpod provider for the Android file-share bridge (plan M8).
+///
+/// [ShareBridgeImpl] reports `false` instead of throwing where the native
+/// plugin is absent, so the share affordance degrades to a user-safe message
+/// rather than a dead control (NFR-006). Override with a fake bridge to assert
+/// the share path in tests.
+final shareBridgeProvider = Provider<ShareBridge>((ref) => ShareBridgeImpl());

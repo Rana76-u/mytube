@@ -712,10 +712,11 @@ class DriftVideoRepository
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async {
+    String collectionId, {
+    int? limit,
+  }) async {
     try {
-      final rows = await _collectionsDao.itemsFor(collectionId);
+      final rows = await _collectionsDao.itemsFor(collectionId, limit: limit);
       return Result.ok(await _summaries(rows));
     } catch (e) {
       return Result.err(

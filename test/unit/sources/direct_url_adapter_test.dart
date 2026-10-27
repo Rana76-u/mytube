@@ -191,6 +191,9 @@ void main() {
         expect(source.sourceId, url);
         expect(source.sourceType, ProviderType.directUrl);
         expect(source.canSeek, isTrue);
+        // Playback must present the identity the probe used (P4-02).
+        expect(source.httpHeaders, directUrlRequestHeaders);
+        expect(source.httpHeaders['User-Agent'], directUrlUserAgent);
         expect(
           fakeProber.probed,
           isEmpty,

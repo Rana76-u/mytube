@@ -2,14 +2,15 @@ import 'package:flutter/foundation.dart' show Uint8List;
 
 import 'package:mytube/core/result.dart';
 
-/// Interface for native thumbnail extraction of local video content
-/// (P7-01, LIB-007).
+/// Interface for native thumbnail extraction (P7-01, LIB-007, P4-10).
 ///
 /// The concrete implementation is a Kotlin MethodChannel bridge that decodes
 /// a small bitmap off the main thread (`ContentResolver.loadThumbnail` on
-/// API 29+, `MediaMetadataRetriever` fallback below). The interface lives in
-/// [lib/platform/] so domain services depend on this contract, not on the
-/// native implementation.
+/// API 29+, `MediaMetadataRetriever` fallback below). The same retriever
+/// grabs a frame of a network stream for sources that have no local file to
+/// decode ([getNetworkThumbnail]). The interface lives in [lib/platform/] so
+/// domain services depend on this contract, not on the native
+/// implementation.
 ///
 /// Widgets must never call methods on this bridge directly; they go through
 /// the thumbnail service instead.
@@ -27,6 +28,31 @@ abstract interface class ThumbnailBridge {
   /// Never throws.
   Future<Result<Uint8List>> getThumbnail(
     String uri, {
+    int maxSidePx = defaultMaxSidePx,
+  });
+
+  /// Returns encoded thumbnail bytes (JPEG) for one frame of the network
+  /// video at [url] (P4-10).
+  ///
+  /// A stream has no local reference to decode, so the native side opens [url]
+  /// over HTTP and grabs a single synced frame near the start. Only the
+  /// encoded preview comes back to Dart — the stream itself is never
+  /// downloaded.
+  ///
+  /// [headers] must be the identity the probe and the player use for this
+  /// source (`PlayableSource.httpHeaders`): a server that gates on User-Agent
+  /// answers the probe and the player, so a preview asked for under a
+  /// different identity would 403 for no visible reason. Never log them
+  /// (SEC-005).
+  ///
+  /// Returns [Err] with:
+  /// - `NotFoundError` when the URL is not http(s) or yields no frame,
+  /// - `NetworkUnavailableError` when the host cannot be reached,
+  /// - `UnexpectedError` for decode/IO failures.
+  /// Never throws.
+  Future<Result<Uint8List>> getNetworkThumbnail(
+    String url, {
+    Map<String, String> headers = const {},
     int maxSidePx = defaultMaxSidePx,
   });
 

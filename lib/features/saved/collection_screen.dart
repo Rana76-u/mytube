@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/async_value_widget.dart';
+import 'package:mytube/core/ui/content_width.dart';
 import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
 import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/features/saved/add_videos_sheet.dart';
@@ -174,30 +176,32 @@ class _CollectionScreenState extends ConsumerState<CollectionScreen> {
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            itemCount: items.length,
-            // Flat tiles carry no surface of their own, so the list supplies
-            // the separation between them (ADR-009).
-            separatorBuilder: (_, _) => const SizedBox(height: 16),
-            itemBuilder: (context, index) {
-              final item = items[index];
-              return VideoItemCard(
-                item: item,
-                // Card tap opens the player, like every other card surface.
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => VideoPlayerScreen(item: item),
+          return ContentWidth(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: items.length,
+              // Flat tiles carry no surface of their own, so the list supplies
+              // the separation between them (ADR-009).
+              separatorBuilder: (_, _) => const SizedBox(height: 16),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return VideoItemCard(
+                  item: item,
+                  // The shared bundle keeps the card identical to the Library
+                  // and Discover ones (plan M4).
+                  actions: videoItemActionsFor(context, ref, item),
+                  // Card tap opens the player, like every other card surface.
+                  onTap: () =>
+                      Navigator.of(context).push(VideoPlayerScreen.route(item)),
+                  trailing: IconButton(
+                    key: ValueKey('collection_remove_${item.id.value}'),
+                    icon: const Icon(Icons.remove_circle_outline),
+                    tooltip: 'Remove from collection',
+                    onPressed: () => _removeVideo(item),
                   ),
-                ),
-                trailing: IconButton(
-                  key: ValueKey('collection_remove_${item.id.value}'),
-                  icon: const Icon(Icons.remove_circle_outline),
-                  tooltip: 'Remove from collection',
-                  onPressed: () => _removeVideo(item),
-                ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
       ),

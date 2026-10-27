@@ -51,6 +51,7 @@ class LibraryRefreshResult {
   const LibraryRefreshResult({
     required this.adapterResults,
     required this.completedAt,
+    this.wasCancelled = false,
   });
 
   /// Per-provider merge results.  Only adapters that succeeded are included.
@@ -58,6 +59,16 @@ class LibraryRefreshResult {
 
   /// When the refresh finished (local wall clock).
   final DateTime completedAt;
+
+  /// True when the run stopped early because [LibraryRefreshService.cancel]
+  /// was called.
+  ///
+  /// The partial [adapterResults] are still reported, but a cancelled run only
+  /// observed part of the library: it proves nothing about the rows it never
+  /// reached, so callers must not treat the library as fully resynced (see
+  /// `LibraryRefreshNotifier.rescanAndDeindex`, which skips the de-index
+  /// sweep for such runs).
+  final bool wasCancelled;
 
   /// Total new VideoItem + SourceLocation pairs inserted across all providers.
   int get totalAdded => adapterResults.values.fold(0, (s, r) => s + r.added);
@@ -158,7 +169,10 @@ class RefreshFailed extends RefreshState {
 /// ### Cancellation
 /// Call [cancel] to stop the current scan.  The service emits
 /// [RefreshIdle] immediately; the adapter's in-flight [Future] may still
-/// resolve briefly in the background before it checks the token.
+/// resolve briefly in the background before it checks the token.  The
+/// cancelled run then returns `Ok` with
+/// [LibraryRefreshResult.wasCancelled] set and leaves the state alone, so a
+/// newer run that started in the meantime keeps its token and progress.
 ///
 /// ### Known limitation
 /// [_lastRefreshedAt] is in-memory only — throttle resets on app process
@@ -311,24 +325,40 @@ class LibraryRefreshService {
         }
       }
 
-      _lastRefreshedAt = DateTime.now();
-      _activeCancellationToken = null;
-
+      // Only the run that still owns the active token may finalise the
+      // service. `cancel()` already cleared the token and emitted
+      // [RefreshIdle]; a newer run installs its own token. Finalising in either
+      // case would report a foreign outcome and — worse — null out the newer
+      // run's token so it could no longer be cancelled.
+      final cancelled = token.isCancelled;
       final result = LibraryRefreshResult(
         adapterResults: adapterResults,
-        completedAt: _lastRefreshedAt!,
+        completedAt: DateTime.now(),
+        wasCancelled: cancelled,
       );
 
-      _emit(RefreshIdle(lastRefreshedAt: _lastRefreshedAt, lastResult: result));
+      if (identical(_activeCancellationToken, token)) {
+        _activeCancellationToken = null;
+        // A cancelled run must not reset the throttle: it did not complete.
+        if (!cancelled) _lastRefreshedAt = result.completedAt;
+        _emit(
+          RefreshIdle(lastRefreshedAt: _lastRefreshedAt, lastResult: result),
+        );
+      }
 
       return Result.ok(result);
     } catch (e, st) {
-      _activeCancellationToken = null;
       final error = UnexpectedError(
         diagnosticMessage: 'LibraryRefreshService.refresh threw: $e\n$st',
         cause: e,
       );
-      _emit(RefreshFailed(error: error, failedAt: DateTime.now()));
+      // Same ownership rule as above: a superseded run reports its own error
+      // but must not clear the newer run's token or overwrite its progress
+      // state with a failure it did not cause.
+      if (identical(_activeCancellationToken, token)) {
+        _activeCancellationToken = null;
+        _emit(RefreshFailed(error: error, failedAt: DateTime.now()));
+      }
       return Result.err(error);
     }
   }

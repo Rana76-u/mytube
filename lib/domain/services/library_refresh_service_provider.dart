@@ -85,10 +85,19 @@ class LibraryRefreshNotifier extends Notifier<RefreshState> {
   /// gone are removed; items that still have another source (duplicate copy,
   /// direct URL, cloud) keep their row and user metadata; original files and
   /// other providers' rows are never touched. If the refresh fails nothing
-  /// is de-indexed — the caller's error surfaces and the user can retry.
+  /// is de-indexed — the caller's error surfaces and the user can retry. A
+  /// cancelled run ([LibraryRefreshResult.wasCancelled]) observed only part of
+  /// the library, so it proves nothing absent and the sweep is skipped too.
   Future<Result<LibraryRefreshResult>> rescanAndDeindex() async {
     final refreshed = await refresh();
-    if (refreshed case Err()) return refreshed;
+    switch (refreshed) {
+      case Err():
+        return refreshed;
+      case Ok(:final value) when value.wasCancelled:
+        return refreshed;
+      case Ok():
+        break;
+    }
     final repository = ref.read(videoRepositoryProvider);
     if (repository case final LocalSourceSweeper sweeper) {
       await sweeper.deindexMissingLocalSources();

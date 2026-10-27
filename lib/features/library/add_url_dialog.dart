@@ -33,6 +33,11 @@ class _AddUrlDialogState extends ConsumerState<AddUrlDialog> {
     super.dispose();
   }
 
+  /// Plain `http://` is accepted (SEC-006 LAN exception), but the user should
+  /// know the link is unencrypted before adding it (URL-002).
+  bool get _isInsecureUrl =>
+      _controller.text.trim().toLowerCase().startsWith('http://');
+
   Future<void> _submit() async {
     final rawUrl = _controller.text;
 
@@ -84,7 +89,23 @@ class _AddUrlDialogState extends ConsumerState<AddUrlDialog> {
                 hintText: 'https://example.com/video.mp4',
                 border: OutlineInputBorder(),
               ),
+              // Rebuild on every keystroke so the plain-HTTP notice below
+              // appears as soon as the scheme is typed.
+              onChanged: (_) => setState(() {}),
             ),
+            if (_isInsecureUrl) ...[
+              const SizedBox(height: 8),
+              Text(
+                'This link is not encrypted (http://). It only plays on '
+                'networks that allow unencrypted traffic — use https:// when '
+                'the server offers it.',
+                key: const Key('add_url_insecure_notice'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.tertiary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
             if (_errorMessage != null) ...[
               const SizedBox(height: 12),
               Text(

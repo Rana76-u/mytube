@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mytube/app/shell/app_header.dart';
+import 'package:mytube/app/shell/shell_tabs.dart';
+import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/error_state.dart';
 import 'package:mytube/data/database/app_database.dart' show AppDatabase;
@@ -18,6 +21,22 @@ import 'package:mytube/features/library/library_screen.dart';
 import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
 import 'package:mytube/sources/source_adapter.dart';
+
+/// Mirrors the shell around the Library tab (plan M3): the tab itself is a
+/// chrome-free body, so its actions now live in [MyTubeTopBar].
+Widget _libraryHarness() => MaterialApp(
+  theme: AppTheme.dark,
+  home: const Scaffold(
+    appBar: MyTubeTopBar(tab: ShellTab.library),
+    body: LibraryScreen(),
+  ),
+);
+
+/// Opens the header's overflow menu, where scan/folders/filter now live.
+Future<void> _openLibraryMenu(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('shell_library_more')));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   group('LibraryScreen (P5-01)', () {
@@ -37,7 +56,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -84,7 +103,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -111,7 +130,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -136,12 +155,12 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.search), findsOneWidget);
+      expect(find.byKey(const ValueKey('shell_search_button')), findsOneWidget);
       addTearDown(container.dispose);
     });
 
@@ -165,16 +184,18 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.search));
+      await tester.tap(find.byKey(const ValueKey('shell_search_button')));
       await tester.pumpAndSettle();
 
       expect(find.byType(TextField), findsOneWidget);
-      expect(find.byIcon(Icons.clear), findsOneWidget);
+      // The clear affordance only appears once something is typed.
+      expect(find.byKey(const ValueKey('shell_search_clear')), findsNothing);
+      expect(find.byKey(const ValueKey('shell_search_close')), findsOneWidget);
       addTearDown(container.dispose);
     });
 
@@ -196,14 +217,16 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.search));
+      await tester.tap(find.byKey(const ValueKey('shell_search_button')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'video 2');
+      // Let the search debounce elapse before asserting the filtered list.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
       expect(find.byType(VideoItemCard), findsOneWidget);
@@ -232,14 +255,16 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.search));
+      await tester.tap(find.byKey(const ValueKey('shell_search_button')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'nothing matches this');
+      // Let the search debounce elapse before asserting the empty state.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
 
       expect(find.text('No Matches'), findsOneWidget);
@@ -268,30 +293,32 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.search));
+      await tester.tap(find.byKey(const ValueKey('shell_search_button')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'video 2');
+      // Let the search debounce elapse so the narrowed list is on screen.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
       expect(find.byType(VideoItemCard), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.clear));
+      await tester.tap(find.byKey(const ValueKey('shell_search_close')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Library'), findsOneWidget);
+      // Closing the field returns the header to its brand row and the list to
+      // the unfiltered library.
+      expect(find.byKey(const ValueKey('shell_header_brand')), findsOneWidget);
       expect(find.byType(VideoItemCard), findsNWidgets(2));
       addTearDown(container.dispose);
     });
 
     // ── Sort menu (P5-04, LIB-005) ───────────────────────────────
 
-    testWidgets('sort menu opens with the four LIB-005 options', (
-      tester,
-    ) async {
+    testWidgets('sort pills expose the four LIB-005 options', (tester) async {
       // The scan-settings notifier reads the typed preferences table, so the
       // documented in-memory database override keeps these harnesses
       // platform-free (avoids opening the real on-disk AppDatabase twice).
@@ -308,18 +335,25 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('library_sort_menu')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Recently added'), findsOneWidget);
+      // LIB-005 options are pills in the sticky row: Recent, Last played,
+      // Longest and Shuffle.
+      for (final sort in [
+        'recentlyAdded',
+        'lastPlayed',
+        'duration',
+        'random',
+      ]) {
+        expect(find.byKey(ValueKey('library_pill_sort_$sort')), findsOneWidget);
+      }
+      expect(find.text('Recent'), findsOneWidget);
       expect(find.text('Last played'), findsOneWidget);
-      expect(find.text('Duration'), findsOneWidget);
-      expect(find.text('Random'), findsOneWidget);
+      expect(find.text('Longest'), findsOneWidget);
+      expect(find.text('Shuffle'), findsOneWidget);
       addTearDown(container.dispose);
     });
 
@@ -342,14 +376,18 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('library_sort_menu')));
+      // The pill row scrolls horizontally, so reveal the pill before tapping it.
+      final durationPill = find.byKey(
+        const ValueKey('library_pill_sort_duration'),
+      );
+      await tester.ensureVisible(durationPill);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Duration'));
+      await tester.tap(durationPill);
       await tester.pumpAndSettle();
 
       // Video 2 (120000 ms) is longer than Video 1 (60000 ms) → first.
@@ -380,11 +418,12 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_filter_button')));
       await tester.pumpAndSettle();
 
@@ -418,11 +457,12 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_filter_button')));
       await tester.pumpAndSettle();
 
@@ -453,12 +493,13 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
       expect(find.byType(VideoItemCard), findsNWidgets(2));
 
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_filter_button')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('library_filter_favourites')));
@@ -491,11 +532,12 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_filter_button')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Long (>30 min)'));
@@ -527,7 +569,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -568,12 +610,13 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
       // Apply the favourites-only filter → only Video 2 remains.
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_filter_button')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('library_filter_favourites')));
@@ -610,7 +653,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -645,7 +688,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -684,11 +727,12 @@ void main() {
         await tester.pumpWidget(
           UncontrolledProviderScope(
             container: container,
-            child: const MaterialApp(home: LibraryScreen()),
+            child: _libraryHarness(),
           ),
         );
         await tester.pumpAndSettle();
 
+        await _openLibraryMenu(tester);
         await tester.tap(find.byKey(const ValueKey('library_scan_button')));
         await tester.pumpAndSettle();
 
@@ -726,11 +770,12 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
 
+      await _openLibraryMenu(tester);
       await tester.tap(find.byKey(const ValueKey('library_scan_button')));
       await tester.pumpAndSettle();
 
@@ -755,7 +800,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -792,7 +837,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: LibraryScreen()),
+          child: _libraryHarness(),
         ),
       );
       await tester.pumpAndSettle();
@@ -926,8 +971,9 @@ class _FakeEmptyRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async => Result.ok([]);
+    String collectionId, {
+    int? limit,
+  }) async => Result.ok([]);
 
   @override
   Future<Result<void>> addVideoToCollection({
@@ -1164,8 +1210,9 @@ class _FakeRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async => Result.ok(const []);
+    String collectionId, {
+    int? limit,
+  }) async => Result.ok(const []);
 
   @override
   Future<Result<void>> addVideoToCollection({
@@ -1386,8 +1433,9 @@ class _FakeErrorRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async => Result.ok(const []);
+    String collectionId, {
+    int? limit,
+  }) async => Result.ok(const []);
 
   @override
   Future<Result<void>> addVideoToCollection({

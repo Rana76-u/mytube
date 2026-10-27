@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Paths the app may re-serve through FileProvider when sharing a `file://`
+  source with another app (plan M8).
+
+  Only used for sources the library already indexes — the app never copies or
+  exposes anything it does not own a grant for, and the receiver gets a
+  read-only, intent-scoped grant.
+-->
+<paths>
+    <!-- /storage/emulated/0/... — the MediaStore video roots. -->
+    <external-path name="external" path="." />
+    <!-- App-private external files dir. -->
+    <external-files-path name="external_files" path="." />
+    <!-- Files downloaded into the app's own storage (future Phase 12). -->
+    <files-path name="files" path="." />
+    <!-- Thumbnails / transient copies. -->
+    <cache-path name="cache" path="." />
+</paths>

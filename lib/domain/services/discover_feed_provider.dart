@@ -66,8 +66,15 @@ class DiscoverFeedController extends AsyncNotifier<DiscoverFeedState> {
     pageSize: _pageSize,
   );
 
+  /// Incremented by every [build]. A build that resumes after a newer one
+  /// started must not seed the shared [_paginator] with its stale snapshot —
+  /// otherwise a slow group query could overwrite the feed the user is now
+  /// looking at and later pages would append items from the old filter.
+  var _buildGeneration = 0;
+
   @override
   Future<DiscoverFeedState> build() async {
+    final generation = ++_buildGeneration;
     // Watching the filter re-runs this build whenever the active chip changes,
     // so [DiscoverFeedPaginator.reset] re-seeds page one and its generation
     // guard cancels any in-flight page — a chip change resets pagination and
@@ -81,6 +88,16 @@ class DiscoverFeedController extends AsyncNotifier<DiscoverFeedState> {
       final active => _fetchGroup(active),
     };
     final ranked = await rankedFuture;
+    if (generation != _buildGeneration) {
+      // Superseded while awaiting: leave the paginator and the exposure log to
+      // the newer build and return its current view. Riverpod discards this
+      // value, the guard exists purely to keep the side effects out.
+      return DiscoverFeedState(
+        items: _paginator.visible,
+        endOfFeed: _paginator.endOfFeed,
+        isLoadingMore: false,
+      );
+    }
     final page = _paginator.reset(ranked);
     await _expose(page.items);
     return DiscoverFeedState(
@@ -123,7 +140,17 @@ class DiscoverFeedController extends AsyncNotifier<DiscoverFeedState> {
     final page = await _paginator.loadMore(
       () => Future<void>.delayed(_pageLatency),
     );
-    await _expose(page.items);
+    // The provider can be torn down while the page is in flight (container
+    // disposal); every write below would throw on a disposed ref.
+    if (!ref.mounted) return;
+
+    try {
+      await _expose(page.items);
+    } catch (_) {
+      // Exposure is best-effort bookkeeping: a failed write must never strand
+      // the feed in its loading-more state.
+    }
+    if (!ref.mounted) return;
 
     // A rebuild (mode/refresh) during the fetch may have already emitted fresh
     // state and reset the paginator; reading the paginator post-await reflects

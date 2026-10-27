@@ -25,6 +25,9 @@ class MainActivity : FlutterActivity() {
         PipPlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
+        SharePlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
     }
 
     // PiP enter/leave is reported by the framework on the activity, not on a

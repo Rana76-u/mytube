@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:mytube/app/theme/app_theme.dart';
+import 'package:mytube/app/theme/app_tokens.dart';
+import 'package:mytube/core/ui/pressable.dart';
 import 'package:mytube/core/util/relative_time.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
 import 'package:mytube/features/library/video_thumbnail.dart';
 
 /// Card widget for a single video item (P5-01), styled as the flat
@@ -19,11 +23,11 @@ import 'package:mytube/features/library/video_thumbnail.dart';
 /// reads as one continuous list, and each parent supplies its own card spacing
 /// (ADR-009).
 ///
-/// When [onToggleFavourite]/[onManageTags]/[onManageSources] are supplied they
-/// collapse into a `⋮` overflow menu (matching the reference image); the menu
-/// items keep their stable `ValueKey`s so behaviour stays testable. [trailing]
-/// renders inline beside the title (e.g. a remove button on the collection
-/// detail screen, P5-07). With no callbacks the card is read-only.
+/// When [actions] (or the individual callbacks) are supplied they collapse into
+/// a `⋮` overflow menu (matching the reference image); the menu items keep
+/// their stable `ValueKey`s so behaviour stays testable. [trailing] renders
+/// inline beside the title (e.g. a remove button on the collection detail
+/// screen, P5-07). With no callbacks the card is read-only.
 ///
 /// Pass [width] to constrain the card inside a horizontal carousel; otherwise
 /// it fills the available width. [showSourceAvatar] is turned off by the narrow
@@ -33,6 +37,7 @@ class VideoItemCard extends StatelessWidget {
     super.key,
     required this.item,
     required this.onTap,
+    this.actions,
     this.onToggleFavourite,
     this.onManageTags,
     this.onManageSources,
@@ -43,6 +48,13 @@ class VideoItemCard extends StatelessWidget {
 
   final VideoItemSummary item;
   final VoidCallback onTap;
+
+  /// The item's contextual actions (plan M4). Production surfaces all pass a
+  /// [videoItemActionsFor] bundle so the same video offers the same actions
+  /// everywhere; the three callbacks below remain for focused call-sites
+  /// (and for tests that exercise one entry at a time).
+  final VideoItemActions? actions;
+
   final VoidCallback? onToggleFavourite;
   final VoidCallback? onManageTags;
 
@@ -73,128 +85,146 @@ class VideoItemCard extends StatelessWidget {
         : null;
     final showProgress = progress != null && progress > 0 && progress < 1;
 
-    final hasActions =
-        onToggleFavourite != null ||
-        onManageTags != null ||
-        onManageSources != null;
+    // The bundle wins over the individual callbacks when both are supplied, so
+    // a surface can migrate one action at a time without changing behaviour.
+    final bundle = actions;
+    final toggleFavourite = bundle?.onToggleFavourite ?? onToggleFavourite;
+    final manageTags = bundle?.onManageTags ?? onManageTags;
+    final manageSources = bundle?.onManageSources ?? onManageSources;
+    final saveToCollection = bundle?.onSaveToCollection;
+    final share = bundle?.onShare;
+    final delete = bundle?.onDelete;
 
-    final card = InkWell(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Thumbnail with duration badge + watched-progress overlay. The whole
-          // 16:9 box is rounded once, so the badges and the progress bar are
-          // clipped to the same corner radius as the image (ADR-009).
-          ClipRRect(
-            borderRadius: BorderRadius.circular(VideoThumbnail.radius),
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  VideoThumbnail(item: item),
-                  if (item.isFavourite)
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: _ThumbBadge(
-                        key: ValueKey('fav_badge_$id'),
-                        child: Icon(
-                          Icons.favorite,
-                          size: 14,
-                          color: colorScheme.error,
+    final hasActions =
+        toggleFavourite != null ||
+        manageTags != null ||
+        manageSources != null ||
+        saveToCollection != null ||
+        share != null ||
+        delete != null;
+
+    final card = PressableScale(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Thumbnail with duration badge + watched-progress overlay. The
+            // whole 16:9 box is rounded once, so the badges and the progress bar
+            // are clipped to the same corner radius as the image (ADR-009).
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.card),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    VideoThumbnail(item: item),
+                    if (item.isFavourite)
+                      Positioned(
+                        top: AppSpacing.sm,
+                        left: AppSpacing.sm,
+                        child: _ThumbBadge(
+                          key: ValueKey('fav_badge_$id'),
+                          child: Icon(
+                            Icons.favorite,
+                            size: 14,
+                            color: colorScheme.primary,
+                          ),
                         ),
                       ),
-                    ),
-                  if (duration != null)
-                    Positioned(
-                      right: 8,
-                      bottom: 8,
-                      child: _DurationBadge(
-                        key: ValueKey('duration_$id'),
-                        text: _formatDuration(duration),
+                    if (duration != null)
+                      Positioned(
+                        right: AppSpacing.sm,
+                        bottom: AppSpacing.sm,
+                        child: _DurationBadge(
+                          key: ValueKey('duration_$id'),
+                          text: _formatDuration(duration),
+                        ),
                       ),
-                    ),
-                  if (showProgress)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: LinearProgressIndicator(
-                        key: ValueKey('progress_$id'),
-                        value: progress,
-                        minHeight: 4,
-                        color: colorScheme.error,
-                        backgroundColor: colorScheme.surfaceContainerHighest,
+                    if (showProgress)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: LinearProgressIndicator(
+                          key: ValueKey('progress_$id'),
+                          value: progress,
+                          minHeight: 4,
+                          color: colorScheme.primary,
+                          backgroundColor: colorScheme.surfaceContainerHighest,
+                        ),
                       ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            // Metadata row: source avatar, then title + `provider · age`.
+            Padding(
+              padding: const EdgeInsets.only(
+                left: AppSpacing.xs / 2,
+                right: AppSpacing.xs / 2,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (showSourceAvatar) ...[
+                    _SourceAvatar(
+                      key: ValueKey('source_avatar_$id'),
+                      provider: item.primaryProvider,
                     ),
+                    const SizedBox(width: AppSpacing.sm),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.title,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  height: 1.35,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (hasActions)
+                              _ActionMenu(
+                                item: item,
+                                onToggleFavourite: toggleFavourite,
+                                onManageTags: manageTags,
+                                onManageSources: manageSources,
+                                onSaveToCollection: saveToCollection,
+                                onShare: share,
+                                onDelete: delete,
+                              ),
+                            ?trailing,
+                          ],
+                        ),
+                        Text(
+                          metadataLine(item),
+                          key: ValueKey('meta_$id'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          // Metadata row: source avatar, then title + `provider · age`.
-          Padding(
-            padding: const EdgeInsets.only(left: 2, right: 2),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (showSourceAvatar) ...[
-                  _SourceAvatar(
-                    key: ValueKey('source_avatar_$id'),
-                    provider: item.primaryProvider,
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item.title,
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                                height: 1.35,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (hasActions)
-                            _ActionMenu(
-                              item: item,
-                              onToggleFavourite: onToggleFavourite,
-                              onManageTags: onManageTags,
-                              onManageSources: onManageSources,
-                            ),
-                          ?trailing,
-                        ],
-                      ),
-                      Text(
-                        _metadataLine(item),
-                        key: ValueKey('meta_$id'),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 12,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
 
@@ -203,15 +233,19 @@ class VideoItemCard extends StatelessWidget {
 
   /// Builds the `provider · relative date` metadata line. Uses the last-played
   /// time when the item has been watched, otherwise the added time.
-  static String _metadataLine(VideoItemSummary item) {
+  ///
+  /// Public because the player page prints the same line under its title, so
+  /// both surfaces describe an item identically (plan M5).
+  static String metadataLine(VideoItemSummary item) {
     final date = item.lastPlayedAt != null
         ? 'Watched ${formatRelativeDate(item.lastPlayedAt!)}'
         : formatRelativeDate(item.createdAt);
     final provider = item.primaryProvider;
-    return provider == null ? date : '${_providerLabel(provider)} · $date';
+    return provider == null ? date : '${providerLabel(provider)} · $date';
   }
 
-  static String _providerLabel(ProviderType type) => switch (type) {
+  /// Human label for a source provider.
+  static String providerLabel(ProviderType type) => switch (type) {
     ProviderType.localMediaStore => 'Local',
     ProviderType.selectedFolder => 'Folder',
     ProviderType.directUrl => 'Direct URL',
@@ -300,7 +334,12 @@ class _ThumbBadge extends StatelessWidget {
   }
 }
 
-/// The dark rounded duration pill overlaid on the thumbnail's corner.
+/// The dark rounded duration pill overlaid on the thumbnail's corner
+/// (DESIGN.md §3 — black @ 80%, 4dp radius).
+///
+/// The label uses [AppTheme.onMediaScrim] rather than a scheme role: this text
+/// always sits on black media, in both brightnesses, so a semantic colour would
+/// flip to unreadable dark-on-dark in the light theme.
 class _DurationBadge extends StatelessWidget {
   const _DurationBadge({super.key, required this.text});
 
@@ -308,18 +347,17 @@ class _DurationBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: colorScheme.scrim.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(4),
+        color: Colors.black.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(AppRadius.badge),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
         child: Text(
           text,
-          style: TextStyle(
-            color: colorScheme.onInverseSurface,
+          style: const TextStyle(
+            color: AppTheme.onMediaScrim,
             fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
@@ -330,19 +368,28 @@ class _DurationBadge extends StatelessWidget {
 }
 
 /// The `⋮` overflow menu holding the item's contextual actions. Menu entries
-/// keep the historical `favourite_<id>` / `tags_<id>` / `sources_<id>` keys.
+/// keep the historical `favourite_<id>` / `tags_<id>` / `sources_<id>` keys and
+/// add `save_<id>` / `share_<id>` for the two DESIGN.md actions that used to be
+/// missing, plus `delete_<id>` — the destructive entry that unlinks or deletes
+/// the item after confirmation (ADR-017).
 class _ActionMenu extends StatelessWidget {
   const _ActionMenu({
     required this.item,
     required this.onToggleFavourite,
     required this.onManageTags,
     required this.onManageSources,
+    required this.onSaveToCollection,
+    required this.onShare,
+    required this.onDelete,
   });
 
   final VideoItemSummary item;
   final VoidCallback? onToggleFavourite;
   final VoidCallback? onManageTags;
   final VoidCallback? onManageSources;
+  final VoidCallback? onSaveToCollection;
+  final VoidCallback? onShare;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -363,7 +410,7 @@ class _ActionMenu extends StatelessWidget {
                 Icon(
                   item.isFavourite ? Icons.favorite : Icons.favorite_border,
                   color: item.isFavourite
-                      ? colorScheme.error
+                      ? colorScheme.primary
                       : colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
@@ -412,6 +459,69 @@ class _ActionMenu extends StatelessWidget {
                     'Manage sources',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (onSaveToCollection != null)
+          PopupMenuItem<void>(
+            value: null,
+            onTap: onSaveToCollection,
+            child: Row(
+              key: ValueKey('save_$id'),
+              children: [
+                const Icon(Icons.playlist_add),
+                const SizedBox(width: 12),
+                const Flexible(
+                  child: Text(
+                    'Save to collection',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (onShare != null)
+          PopupMenuItem<void>(
+            value: null,
+            onTap: onShare,
+            child: Row(
+              key: ValueKey('share_$id'),
+              children: const [
+                Icon(Icons.share_outlined),
+                SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    'Share',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        // Destructive entry last: it is never the accidental first target, and
+        // its label follows the only thing this item can actually lose — a
+        // direct URL has no file to delete, so it says "Remove" (ADR-017).
+        if (onDelete != null)
+          PopupMenuItem<void>(
+            value: null,
+            onTap: onDelete,
+            child: Row(
+              key: ValueKey('delete_$id'),
+              children: [
+                Icon(Icons.delete_outline, color: colorScheme.error),
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    item.primaryProvider == ProviderType.directUrl
+                        ? 'Remove from library'
+                        : 'Delete',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: colorScheme.error),
                   ),
                 ),
               ],

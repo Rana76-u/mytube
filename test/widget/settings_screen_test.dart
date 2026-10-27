@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/cache/cache_providers.dart';
 import 'package:mytube/data/cache/cache_usage.dart';
@@ -11,6 +12,7 @@ import 'package:mytube/data/database/app_database.dart';
 import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/database/tables/app_preferences_table.dart';
 import 'package:mytube/domain/models/cache_limit.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/services/cache_controller.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/library_refresh_service_provider.dart';
@@ -50,6 +52,11 @@ class FakeSafBridge implements SafBridge {
 
   @override
   Future<Result<bool>> checkFolderAccess(String uri) async => const Ok(true);
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteDocuments(
+    List<String> uris,
+  ) async => Ok(SourceDeletionReport(deleted: uris));
 }
 
 Widget _harness(
@@ -74,7 +81,13 @@ Widget _harness(
       if (cacheController != null)
         cacheControllerProvider.overrideWith(cacheController),
     ],
-    child: const MaterialApp(home: SettingsScreen()),
+    // The shell supplies the Scaffold (and the branded header) around every
+    // tab, so the harness mirrors that instead of letting the screen carry its
+    // own chrome (plan M3).
+    child: MaterialApp(
+      theme: AppTheme.dark,
+      home: const Scaffold(body: SettingsScreen()),
+    ),
   );
 }
 
@@ -392,6 +405,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Nothing cached yet.'), findsOneWidget);
 
+      // Scrolled into view first: the settings list is longer than the test
+      // viewport, so the cache rows can sit below the fold.
+      await tester.ensureVisible(find.byTooltip('Measure cache again'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Measure cache again'));
       await tester.pumpAndSettle();
 
@@ -414,6 +431,10 @@ void main() {
       expect(find.text('Cache limit'), findsOneWidget);
       expect(find.text(CacheLimit.defaultLimit.label), findsOneWidget);
 
+      // Scrolled into view first: the settings list is longer than the test
+      // viewport, so the trailing dropdown can sit below the fold.
+      await tester.ensureVisible(find.byType(DropdownButton<CacheLimit>));
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButton<CacheLimit>));
       await tester.pumpAndSettle();
       // The menu shows every offered budget; pick the 1 GB option.

@@ -1,5 +1,6 @@
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 
 /// Interface for Android MediaStore video discovery (LOCAL-001, PLAT-004).
@@ -29,6 +30,17 @@ abstract interface class MediaStoreBridge {
   ///
   /// Returns the resulting [MediaStorePermissionStatus].
   Future<MediaStorePermissionStatus> requestPermission();
+
+  /// Permanently deletes the MediaStore items at [contentUris] (ADR-017).
+  ///
+  /// Android 11+ shows one system confirmation for the whole batch; a dismissed
+  /// confirmation is reported as "every URI kept", not as an error — the user
+  /// declining is a normal outcome. Below API 30 the rows are deleted directly
+  /// and the per-URI result is reported.
+  ///
+  /// Destructive: callers must hold explicit user consent. Widgets must never
+  /// call this directly; the domain removal service does.
+  Future<Result<SourceDeletionReport>> deleteVideos(List<String> contentUris);
 }
 
 // ---------------------------------------------------------------------------

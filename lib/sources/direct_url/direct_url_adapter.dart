@@ -106,6 +106,9 @@ class DirectUrlAdapter implements VideoSourceAdapter {
             sourceType: ProviderType.directUrl,
             // mimeType stays null: ExoPlayer sniffs the container.
             canSeek: true,
+            // Same identity the probe used (P4-02), so a server that gates on
+            // User-Agent cannot pass the probe and then reject the player.
+            httpHeaders: directUrlRequestHeaders,
           ),
         );
       case Err<Uri>(:final error):

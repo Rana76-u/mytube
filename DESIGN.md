@@ -28,7 +28,7 @@ Objective: Design a sleek, responsive, and accessible mobile-first app Similar t
 	• Active pill style: Solid white background with dark black text (#0F0F0F); inactive pills use #212121 with #F1F1F1 text.
 • Video Feed (Vertical RecyclerView / Grid):
 	• Thumbnail Container: 16:9 aspect ratio with rounded corners (12px), bottom-right timestamp badge (04:22 in semi-transparent black pill).
-	• Metadata Row: bold video title (max 2 lines with ellipsis), relative publish time (120K views • 2 days ago), and a 3-dot menu icon on the far right.
+	• Metadata Row: bold video title (max 2 lines with ellipsis), relative publish time (Local • 2 days ago), and a 3-dot menu icon on the far right.
 • Bottom Navigation Bar (Fixed Mobile Shell):
 	• 5 core tabs with active red highlight and label
 
@@ -40,8 +40,8 @@ Objective: Design a sleek, responsive, and accessible mobile-first app Similar t
 	• Up Next / Recommended Vertical List: Compact horizontal thumbnail cards (120px width) stacked underneath.
 • Shorts Feed Flow:
 	• Full-screen vertical swipeable video player (9:16).
-	• Right-side floating action column: Like, Dislike, Share, and rotating audio disk.
-	• Bottom overlay: Channel name, track audio ticker, and multi-line caption with #hashtags.
+	• Right-side floating action column: Like, Dislike, Share, etc.
+	• Bottom overlay: title and other informations.
 
 4. Micro-interactions & Polish
 

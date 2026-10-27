@@ -211,9 +211,13 @@ abstract interface class VideoRepository {
   });
 
   /// Returns the video items in [collectionId] in the user's manual order.
+  ///
+  /// [limit] bounds the read in SQL for glance surfaces (the Discover browse
+  /// rows), which render only a handful of cards; omit it for the full list.
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  );
+    String collectionId, {
+    int? limit,
+  });
 
   /// Adds [videoId] to [collectionId] at the end. Idempotent.
   Future<Result<void>> addVideoToCollection({

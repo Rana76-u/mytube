@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
@@ -33,7 +34,12 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(home: child),
+        // The shell supplies the Scaffold and the branded header; the tab
+        // renders only its list (plan M3), so the harness mirrors that.
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: Scaffold(body: child),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -51,10 +57,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('No Collections'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('saved_new_collection')),
-        findsOneWidget,
-      );
+      // The FAB is gone: creating a collection is a shell-header action now
+      // (plan M3), while the empty state keeps its own entry point.
+      expect(find.text('New collection'), findsOneWidget);
     });
 
     testWidgets('lists existing collections newest-first with counts', (
@@ -90,13 +95,13 @@ void main() {
       expect(find.text('0 videos'), findsOneWidget);
     });
 
-    testWidgets('creating a collection through the FAB adds it to the list', (
-      tester,
-    ) async {
+    testWidgets('creating a collection from the empty state adds it to the '
+        'list', (tester) async {
       final repo = _FakeSavedRepository();
       await pump(tester, repo, const SavedScreen());
 
-      await tester.tap(find.byKey(const ValueKey('saved_new_collection')));
+      // The empty state's primary action shares the shell header's prompt.
+      await tester.tap(find.text('New collection'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('text_prompt_field')),
@@ -382,8 +387,9 @@ class _FakeSavedRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async {
+    String collectionId, {
+    int? limit,
+  }) async {
     final ids = _membership[collectionId] ?? const [];
     return Result.ok(
       ids.map((id) => _items.firstWhere((i) => i.id.value == id)).toList(),

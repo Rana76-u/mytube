@@ -280,6 +280,53 @@ blockers.
     `testWidgets` fake-async zone — same documented limitation as the Reels
     cross-source swap tests). Real-device codec playback from this screen is
     still unverified.
+-   [x] **P4-09b (addendum)** Fix direct-URL playback (cleartext policy and
+    request identity). --- Done. Two defects made URLs that were "added
+    successfully" unplayable: (1) `validateDirectUrl` accepts plain `http://`
+    (SEC-006 LAN exception) but the main manifest had no
+    `networkSecurityConfig`, so targetSdk 36 denied cleartext to the player's
+    platform HTTP stack while the `dart:io` probe (own socket stack) still
+    reported the URL as available — added
+    `android/app/src/main/res/xml/network_security_config.xml`
+    (`cleartextTrafficPermitted="true"`, documented) and wired it from the
+    manifest; (2) `IoUrlMetadataProber` declared a `userAgent` it never sent,
+    so the probe went out as `Dart/...` while the engine sent
+    `ExoPlayerLib/...` and UA-gated servers answered one and 403'd the other —
+    the probe now sets the header, `PlayableSource` carries `httpHeaders`, and
+    `VideoPlayerHandle` forwards them to
+    `VideoPlayerController.networkUrl`, with `DirectUrlAdapter` supplying the
+    same `directUrlRequestHeaders` it probes with. `AddUrlDialog` now warns
+    when a plain-`http` link is entered. New tests: prober sends the
+    configured UA (loopback server), adapter resolution carries the headers,
+    the engine data source receives them, and the dialog shows/hides the
+    warning. `flutter test` 1025 passing, `flutter analyze lib test` clean,
+    `flutter build apk --debug` succeeds and the merged manifest carries the
+    policy. Device confirmation of an `http://` LAN stream is still required
+    (see `docs/device_testing_p4.md`).
+-   [x] **P4-10** Thumbnail for stream-backed items. --- Done. A direct-URL
+    card always showed the placeholder because nothing ever produced preview
+    bytes for a stream: `DirectUrlService.addUrl` stores no `thumbnailUri`,
+    `ThumbnailService._resolveRef` deliberately refused to treat an `http(s)`
+    *source* URI as a preview ("downloading video bytes is not a thumbnail
+    strategy", correct when it was written), and `ThumbnailPlugin` could only
+    decode content-resolver URIs. Added a `frame` reference kind: a stream with
+    no stored preview routes to the new
+    `ThumbnailBridge.getNetworkThumbnail`, which the Kotlin plugin answers with
+    `MediaMetadataRetriever.setDataSource(url, headers)` plus the existing
+    scaled-frame/rotation/JPEG path — one synced frame, never the whole
+    stream, under the same two-decode permit as a local decode. The request
+    carries the source's playback identity (`networkHeaders`, wired from
+    `directUrlRequestHeaders`) so a UA-gated server cannot serve the player and
+    403 the preview; `NETWORK` failures map to `NetworkUnavailableError`. A
+    stored poster `thumbnailUri` still wins, and previews persist per URL in
+    the existing disk cache. New tests: service routes a stream item to the
+    network frame path at card resolution, headers come from the location's
+    provider, a stored poster still beats a frame grab, and the channel
+    contract (method name, arguments, error mapping, no URL in diagnostics) is
+    covered for both calls. `flutter test` 1032 passing, `flutter analyze lib
+    test` clean, `flutter build apk --debug` succeeds. Device confirmation that
+    a grid of `http(s)` cards shows frames after a restart (cache) is still
+    required — see `docs/device_testing_p4.md`.
 
 ## Phase 5 --- Library and Saved
 
@@ -1636,3 +1683,269 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
     `thumbnail_service_test.dart` (tier requested, stale-size entry not reused).
     Requires an APK build to compile the Kotlin; on-device sharpness not yet
     verified in this environment.
+
+## Full-project audit (code quality, architecture, UI/UX, performance)
+
+-   [x] **A1** Fix the `LibraryRefreshService` cancel/supersede race. ---
+    Done. Cause: a cancelled run still returned `Ok` as a completed success and,
+    on the way out, nulled `_activeCancellationToken` and reset
+    `_lastRefreshedAt` even when a newer run owned them. Now `LibraryRefreshResult`
+    carries `wasCancelled`, and only the run that still owns the token finalizes
+    (clears the token, updates the throttle, emits `RefreshIdle`) in both the
+    success and catch paths.
+-   [x] **A2** Do not de-index stale entries after a cancelled scan. --- Done.
+    `rescanAndDeindex()` now returns early on `Ok(:final value) when
+    value.wasCancelled`, so a scan the user stopped can never sweep library
+    entries it never actually verified.
+-   [x] **A3** Debounce Library search and scope its provider. --- Done.
+    `library_screen.dart` applies a 250 ms debounce (timer cancelled in
+    `_closeSearch` and `dispose`) and `_libraryItemsProvider` is now
+    `FutureProvider.autoDispose.family`, so each keystroke's query family entry is
+    released instead of accumulating for the app's lifetime.
+-   [x] **A4** Bound thumbnail provider memory. --- Done.
+    `videoThumbnailProvider` is `FutureProvider.autoDispose.family`; previews are
+    disk-cached, so releasing the in-memory entry costs nothing on re-scroll.
+-   [x] **A5** Persist the theme mode and expose it in Settings. --- Done.
+    `ThemeModeNotifier` now loads from and writes to `AppPreferenceKeys.themeMode`
+    via `AppPreferencesDao` (in-memory state stays authoritative; an explicit user
+    choice beats the late load; storage failures fall back silently). Settings
+    gained an Appearance section with a Theme dropdown (System / Light / Dark).
+    Covered by `theme_mode_notifier_test.dart` on an in-memory database.
+-   [x] **A6** Guard `DiscoverFeed.loadMore` against post-disposal writes. ---
+    Done. Added `ref.mounted` checks around the `_expose` await and a try/catch so
+    a failed exposure write cannot surface as an unhandled error.
+-   [x] **A7** Isolate per-section failures in Discover pull-to-refresh. ---
+    Done. `_refresh()` settles the feed, continue-watching, collections and tags
+    refreshes independently, so one failing query no longer aborts the gesture.
+-   [x] **A8** Replace unbounded Dart-side truncation with SQL-bounded reads. ---
+    Done. `CollectionsDao.itemsFor`, `VideoRepository.getCollectionItems` and
+    `DriftVideoRepository.getCollectionItems` take `{int? limit}`; the Discover
+    collection row and Discover search (`queryItems(LibraryQuery(search:,
+    limit: 30))` instead of the full `searchItems()` scan) now bound the read in
+    SQL. Covered by a new repository test and the existing card-cap test.
+-   [x] **A9** Cap single-column surfaces on wide windows. --- Done. New
+    `core/ui/content_width.dart` (`Center` + `ConstrainedBox(maxWidth: 720)`)
+    applied to the Library, Favorites, Collection and Discover-search lists so a
+    16:9 card is not stretched across a tablet or landscape window.
+-   [x] **A10** Verify. --- Done. `dart format` clean, `flutter analyze` reports
+    "No issues found!", `flutter test` reports 1022 passing tests.
+-   Deliberately not changed: no schema v7 index bump (marginal gain, migration
+    risk); no lazy `IndexedStack` tabs (keep-alive is intentional and
+    `main_scaffold_test` asserts all five screens mount at launch); the Discover
+    main feed `CustomScrollView` is not width-capped (its rows are already grid/
+    horizontally-scrolling compositions).
+
+## DESIGN.md visual system, player redesign and mini-player
+
+Implements `DESIGN.md` as the palette and layout source of truth over the older
+`Color Pallet.csv` values. Decisions: ADR-008 amendment (tokens), ADR-012
+amendment (bounded shimmer, always-on card overflow), ADR-013 (shell header and
+lifted library view state), ADR-014 (playback session and mini player), ADR-015
+(motion primitives and the shimmer test policy), ADR-016 (share seam without a
+dependency). No new package was added.
+
+### M1 --- Design tokens and themes
+
+-   [x] **M1.1** Add the DESIGN.md palette tokens to `AppTheme` (`surfaceDark`
+    `#212121`, `textPrimary` `#F1F1F1`, `accentSecondary` `#3EA6FF`, `hairline`
+    `#303030`) and map them onto `ColorScheme` (`surface*`, `secondary`,
+    `outline`/`outlineVariant`, `onSurface`). --- Done.
+-   [x] **M1.2** Add `lib/app/theme/app_tokens.dart` (`AppSpacing` 4/8/12/16/24/32,
+    `AppRadius` badge 4/card 12/sheet 16/pill 24, `AppSizes` header 56, nav 64,
+    mini player 56, min tap target 48, Up Next thumbnail 120, dock drag 96). ---
+    Done.
+-   [x] **M1.3** Write the explicit Roboto `TextTheme` for both brightnesses
+    (`titleLarge` 22/w700, `titleMedium` 16/w600, `titleSmall` 15/w600,
+    `bodyMedium` 14/w400, `bodySmall` 12/w400, `labelLarge` 14/w500,
+    `labelMedium` 13/w500). --- Done.
+-   [x] **M1.4** Add the component themes (flat `appBarTheme`, transparent-ripple
+    `navigationBarTheme` with red selected icon/label, filled pill
+    `inputDecorationTheme`, the three pill button themes at 44 minimum height,
+    `chipTheme`, 1-px `dividerTheme`, `bottomSheetTheme`, `popupMenuTheme`,
+    floating `snackBarTheme`, red `progressIndicatorTheme`, `iconTheme`,
+    `sliderTheme`). --- Done, derived from each brightness' own scheme.
+-   [x] **M1.5** Extend `test/widget/app_theme_test.dart` with the new hexes and
+    the nav-bar/button-shape assertions. --- Done.
+
+### M2 --- Motion and interaction primitives
+
+-   [x] **M2.1** `lib/core/ui/motion.dart`: `AppMotion` (`fast` 120 ms, `base`
+    200 ms, `emphasized` 300 ms, `standard`, `pressedScale` 0.95,
+    `skeletonSweeps` 3) and `reduceAnimations(context)`. --- Done.
+-   [x] **M2.2** `lib/core/ui/pressable.dart`: `PressableScale` with owning and
+    passive modes, press-down scale + haptic, restore on cancel/up, no-op under
+    reduced motion or when disabled. --- Done, wrapped around feed cards, action
+    pills, the logo and the nav taps.
+-   [x] **M2.3** `lib/core/ui/skeleton.dart` + `video_card_skeleton.dart`:
+    `SkeletonBox`, `SkeletonCircle`, a bounded `Shimmer` and a
+    `VideoCardSkeleton`/`VideoCardSkeletonList` clone of the card geometry. ---
+    Done; `DiscoverFeedSkeleton` was replaced and Library first load, Saved,
+    Favorites and search reuse it via `AsyncValueWidget`'s new `skeleton`
+    builder.
+-   [x] **M2.4** Amend ADR-012 with the shimmer test policy and add
+    `pressable_test`/`skeleton_test`. --- Done (`skeletonSweeps` is bounded so
+    `pumpAndSettle` still terminates).
+
+### M3 --- App shell and branded header
+
+-   [x] **M3.1** `lib/app/shell/my_tube_logo.dart`: red rounded play mark with
+    the `#3EA6FF` badge dot; tapping scrolls the active tab to top through
+    `shellScrollToTopProvider`. --- Done.
+-   [x] **M3.2** `lib/app/shell/app_header.dart`: `MyTubeTopBar` (56dp) with the
+    logo, an expandable pill search field and a per-tab action slot (Discover:
+    reshuffle; Library: add URL + scan/folders/filters; Saved: new collection;
+    Settings: none). No voice mic. --- Done.
+-   [x] **M3.3** `lib/features/library/library_view_state.dart`:
+    `LibraryViewStateNotifier` owns the search query (250 ms debounce),
+    `VideoFilter`, `LibrarySort` and `searchOpen`. --- Done; LIB-003/004/005
+    behaviour is unchanged, only relocated.
+-   [x] **M3.4** `MainScaffold` renders `MyTubeTopBar` for every tab except
+    Reels, keeps the five-destination `NavigationBar`, adds nav haptics and
+    keeps the existing audio-focus/media-session/watch-progress/PiP listeners.
+    --- Done.
+-   [x] **M3.5** Drop the per-screen `Scaffold`/`AppBar` from Discover, Library,
+    Saved and Settings; pushed routes keep their own. --- Done.
+
+### M4 --- Feed surfaces
+
+-   [x] **M4.1** Restyle `VideoItemCard`: `titleSmall` w600 title over two lines,
+    `Local · 2 days ago` metadata, always-on `⋮` when actions exist, `#000000`
+    @ 80% duration badge with `AppRadius.badge`, 8-px paddings and
+    `PressableScale`. --- Done; no Material `Card` (ADR-012 preserved).
+-   [x] **M4.2** `lib/features/library/video_item_actions.dart`: one
+    `VideoItemActions` bundle plus `videoItemActionsFor()` /
+    `showVideoItemActions()` shared by the card, Reels and the player toolbar;
+    every production surface supplies one. --- Done.
+-   [x] **M4.3** Library gains a sticky pill filter row (All / Favourites /
+    Unwatched plus the sort chips) wired to `LibraryViewStateNotifier`. ---
+    Done.
+-   [x] **M4.4** Restyle empty/error states to tokens, keeping a retry action. ---
+    Done.
+
+### M5 --- Player page redesign
+
+-   [x] **M5.1** `video_player_screen.dart` is a `CustomScrollView` with the
+    16:9 `VideoSurface` as a pinned `SliverPersistentHeader`. --- Done.
+-   [x] **M5.2** Overlay chrome over the video (tap toggles, auto-hide after 3 s:
+    play/pause, ±10 s, scrubber with elapsed/total, speed, display mode, PiP,
+    fullscreen) built from reusable `ScrubberBar`/`TransportButtons`/
+    `SpeedMenu`/`DisplayModeMenu` parts shared with Reels; every existing key is
+    preserved. --- Done.
+-   [x] **M5.3** Action toolbar of pills: Like (favourite), Save (collection
+    sheet), Share, Tags, Sources, Display mode. No Dislike/Download/Cast. ---
+    Done.
+-   [x] **M5.4** Metadata block (`titleMedium` title, `provider · relative time ·
+    availability`). --- Done.
+-   [x] **M5.5** `upNextProvider` (recommendations minus the current item,
+    `.take(10)`, recency fallback) rendered as rows with a 120-px 16:9 thumbnail;
+    tapping loads that item in place. --- Done.
+-   [x] **M5.6** `lib/features/player/fullscreen_controller.dart`: immersive
+    sticky + landscape, hidden chrome, and a defensive portrait/edge-to-edge
+    restore on dispose/deactivate/pop and on `AppLifecycleState.paused`. ---
+    Done.
+
+### M6 --- Mini-player dock
+
+-   [x] **M6.1** `lib/playback/playback_session.dart`: `PlaybackSessionController`
+    owns `item` + `idle|mini|expanded`, adopts on open, collapses on the way out
+    and stops only on an explicit close. --- Done.
+-   [x] **M6.2** The player collapses through `PopScope` (not `dispose`, because
+    Riverpod forbids provider writes from a life-cycle method) and also on a
+    vertical drag past 96 px, with a `Hero` handing the video box to the dock. ---
+    Done.
+-   [x] **M6.3** `lib/app/shell/mini_player.dart`: 56dp dock above the nav bar,
+    thumbnail + one-line title, play/pause, close, tap to reopen, drag to
+    dismiss (engine stop, progress flush, session and label clear). --- Done.
+-   [x] **M6.4** Reels conflict guard: activating the Reels tab ends the session
+    (engine stop, flush, label clear) and Reels playback clears it too. ---
+    Done; covered by `main_scaffold_test`.
+-   [x] **M6.5** The shell — not the page — feeds `nowPlayingProvider` and
+    `MediaSessionCoordinator`, so background audio/notification behaviour is
+    unchanged. --- Done.
+
+### M7 --- Reels action column
+
+-   [x] **M7.1** Move the persistent controls into a right-side vertical action
+    column anchored above the caption: Like, Save, Share, fit toggle, controls
+    toggle, PiP — 48dp circular scrim buttons with tooltips. --- Done.
+-   [x] **M7.2** Rewrite the caption as a bottom gradient scrim with the title
+    (15sp w600), `N / M` and the provider/age line, safe-area aware. --- Done.
+-   [x] **M7.3** Keep the gesture coordinator untouched (screen-level `Stack`
+    above the `Listener`, transient feedback stays `IgnorePointer`). --- Done;
+    `reel_gesture_coordinator.dart`/`reel_gesture_feedback.dart` unchanged.
+
+### M8 --- Share seam
+
+-   [x] **M8.1** `lib/platform/share_bridge.dart` + `share_bridge_impl.dart`
+    (`MethodChannel('com.example.mytube/share')`) and `shareBridgeProvider`;
+    reports `false` when the channel is missing. --- Done.
+-   [x] **M8.2** `lib/domain/services/share_service.dart`: direct URLs copy the
+    durable link, local/SAF/cloud files go through the bridge, everything else
+    (private scheme, blank URI, repository failure) degrades to a safe message.
+    --- Done.
+-   [x] **M8.3** Android `SharePlugin.kt` (`ACTION_SEND` +
+    `FLAG_GRANT_READ_URI_PERMISSION`) plus a `FileProvider`
+    (`res/xml/file_paths.xml` and the manifest `<provider>`). --- Done.
+
+### M9 --- Tests, documentation and verification
+
+-   [x] **M9.1** New tests: `pressable_test`, `skeleton_test`,
+    `library_view_state_test`, `up_next_provider_test`,
+    `fullscreen_controller_test`, `playback_session_test`, `mini_player_test`,
+    `share_service_test` (plus a shared `FakeVideoRepository`). --- Done.
+-   [x] **M9.2** Updated tests: `app_theme_test`, `main_scaffold_test` (header per
+    tab, Reels headerless, five destinations, Reels conflict guard),
+    `library_screen_test`, `discover_screen_test`, `video_item_card_test`,
+    `playback_controls_test`, `video_player_screen_test`,
+    `video_player_pip_test`, `reels_screen_test`, `saved_screen_test`,
+    `settings_screen_test`. --- Done.
+-   [x] **M9.3** `DECISIONS.md`: ADR-013, ADR-014, ADR-015, ADR-016 and the
+    ADR-008/ADR-012 amendments. --- Done.
+-   [x] **M9.4** `docs/device_testing_design.md`: on-device checklist for
+    haptics, swipe-down dock, fullscreen orientation restore, share intents and
+    the ripple-free nav bar. --- Done.
+-   [x] **M9.5** Verify with `dart format lib test`, `flutter analyze`,
+    `flutter test` (1098 passing) and `flutter build apk --debug` (the Kotlin
+    share plugin is only exercised by a build). --- Done, with one environment
+    caveat: the in-place `flutter build apk --debug` aborts at
+    `:app:generateDebugRFile` with `Couldn't delete …\build\…\R.jar` because the
+    IDE's Kotlin language server is holding that stale jar open; the same
+    sources build clean from a fresh copy (`flutter pub get` +
+    `flutter build apk --debug` → `Built build\app\outputs\flutter-apk\app-debug.apk`),
+    which is what proves `SharePlugin.kt`/`FileProvider` compile. Restarting the
+    IDE (or deleting `build/`) clears the lock for an in-place build.
+
+## Per-item delete in the card's overflow menu (ADR-017)
+
+-   [x] **D1** `lib/domain/models/source_deletion_report.dart` (per-id
+    deleted/kept report) and `lib/domain/services/item_removal_service.dart`:
+    `plan()` buckets each source location into `originalsToDelete` / `recordOnly`
+    so the dialog can state what will be destroyed, and `remove()` deletes the
+    originals before the record. Cloud providers with no `ItemOriginalDeleter`
+    stay record-only. --- Done.
+-   [x] **D2** `lib/domain/services/local_file_original_deleter.dart` +
+    `item_removal_service_provider.dart`: routes `content://media/` ids to
+    MediaStore and SAF document URIs to the SAF bridge. --- Done.
+-   [x] **D3** Bridges: `MediaStoreBridge.deleteVideos` (API 30+
+    `MediaStore.createDeleteRequest` with one batch confirmation, direct delete
+    below 30) and `SafBridge.deleteDocuments` (`DocumentsContract.deleteDocument`,
+    picker now requests and persists write access). `parseSourceDeletionReport`
+    keeps both channels on one reply shape. --- Done.
+-   [x] **D4** UI: `delete_<id>` as the last, error-coloured `⋮` entry (labelled
+    "Remove from library" for direct URLs) plus `item_action_delete` in the
+    shared action sheet; `_confirmRemoval` dialog built from the plan; outcome
+    snackbar; dock stop and provider invalidation after success. --- Done.
+-   [x] **D5** Tests: `item_removal_service_test` (15),
+    `local_file_original_deleter_test` (10), `video_item_delete_test` (12),
+    plus `deleteVideos`/`deleteDocuments` stubs in the existing bridge fakes and
+    a working `deleteItem` in `FakeVideoRepository`. --- Done, all passing.
+-   [x] **D6** `DECISIONS.md` ADR-017, the AGENTS.md data-integrity exception,
+    this section and a `docs/device_testing_design.md` checklist for the
+    destructive paths. --- Done.
+-   [x] **D7** Verified: `dart format lib test` (1 file reformatted),
+    `flutter analyze` --- No issues found!, `flutter test` --- **1135 passing**,
+    `flutter build apk --debug` --- `Built build\app\outputs\flutter-apk\app-debug.apk`
+    (36.5 s), which is what proves `MediaStorePlugin.kt`/`SaffBridgePlugin.kt`
+    compile. --- Done. On-device delete is still unchecked; see
+    `docs/device_testing_design.md` §7.
+

@@ -127,6 +127,7 @@ class PlayableSource {
     required this.sourceType,
     this.mimeType,
     this.canSeek = false,
+    this.httpHeaders = const {},
   });
 
   final Uri uri;
@@ -134,6 +135,15 @@ class PlayableSource {
   final ProviderType sourceType;
   final String? mimeType;
   final bool canSeek;
+
+  /// Extra headers the engine must send when opening [uri] (P4-02, P4-04).
+  ///
+  /// Resolved by the adapter next to the URI: whatever identity the provider
+  /// was probed or authorised with must reach the player too, otherwise a
+  /// server can serve the probe and reject playback (or vice versa). Empty
+  /// for local and anonymous sources. Never log these — they may carry
+  /// credentials (SEC-005).
+  final Map<String, String> httpHeaders;
 }
 
 /// Whether an app-managed offline download is permitted for a source item.

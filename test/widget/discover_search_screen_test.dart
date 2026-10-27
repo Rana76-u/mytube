@@ -47,6 +47,8 @@ void main() {
         find.byKey(const ValueKey('discover_search_field')),
         query,
       );
+      // Let the type-ahead debounce elapse before asserting results.
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
     }
   }
@@ -155,8 +157,8 @@ class _FakeRepository implements VideoRepository {
   final List<VideoItemSummary> items;
   final List<LibraryTag> tags;
 
-  /// The most recent [searchItems] query text, so tests can assert the
-  /// type-ahead pipeline re-queries on suggestion taps.
+  /// The most recent query text seen by the repository, so tests can assert
+  /// the type-ahead pipeline re-queries on suggestion taps.
   String? lastSearchQuery;
 
   List<VideoItemSummary> _apply(String query) {
@@ -177,6 +179,9 @@ class _FakeRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> queryItems(LibraryQuery query) async {
+    // The search screen queries through [queryItems] so the result limit is
+    // applied in SQL; record the text there too.
+    lastSearchQuery = query.search;
     return Ok(_apply(query.search));
   }
 

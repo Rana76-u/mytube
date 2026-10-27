@@ -2,6 +2,8 @@ import 'package:flutter/services.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
+import 'package:mytube/platform/deletion_report_mapping.dart';
 import 'package:mytube/platform/media_store_bridge.dart';
 
 /// Concrete [MediaStoreBridge] that communicates with [MediaStorePlugin] on
@@ -71,6 +73,33 @@ class MediaStoreBridgeImpl implements MediaStoreBridge {
       return _parsePermissionStatus(status);
     } catch (_) {
       return MediaStorePermissionStatus.denied;
+    }
+  }
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteVideos(
+    List<String> contentUris,
+  ) async {
+    try {
+      final raw = await _channel.invokeMethod<Object?>('deleteVideos', {
+        'contentUris': contentUris,
+      });
+      return Result.ok(parseSourceDeletionReport(raw, contentUris));
+    } on PlatformException catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage:
+              'MediaStore deleteVideos platform error [${e.code}]: ${e.message}',
+          cause: e,
+        ),
+      );
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'MediaStore deleteVideos unexpected error: $e',
+          cause: e,
+        ),
+      );
     }
   }
 

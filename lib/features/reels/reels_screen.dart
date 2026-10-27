@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/theme/app_tokens.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/async_value_widget.dart';
 import 'package:mytube/core/ui/empty_state.dart';
@@ -11,6 +12,8 @@ import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/playback_source_resolver.dart';
 import 'package:mytube/domain/services/playback_source_resolver_provider.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
+import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/playback_controls.dart';
 import 'package:mytube/features/reels/reel_gesture_coordinator.dart';
 import 'package:mytube/features/reels/reel_gesture_feedback.dart';
@@ -52,10 +55,13 @@ import 'package:mytube/sources/source_adapter.dart';
 /// single tap → play/pause, center double tap → favourite, side double tap →
 /// ±10s skip, and horizontal drag → precise-seek preview committed on release.
 /// The Listener never joins the gesture arena, so the [PageView]'s vertical
-/// paging is untouched (§3 rule 6), and the tappable controls (favourite,
-/// controls toggle, overlay) sit in a screen-level Stack *above* the pages —
-/// their pointers hit-test there first and structurally cannot reach the
-/// arbiter (§3 rule 1). Transient feedback ([ReelTapIndicator],
+/// paging is untouched (§3 rule 6), and the tappable controls sit in a
+/// screen-level Stack *above* the pages — their pointers hit-test there first
+/// and structurally cannot reach the arbiter (§3 rule 1). Since DESIGN.md §7
+/// those controls are one **right-side action column** anchored above the
+/// caption (Like, Save, Share, fit, playback controls, PiP), drawn above the
+/// controls overlay's scrim so the column stays usable while it is open.
+/// Transient feedback ([ReelTapIndicator],
 /// [ReelSeekFeedback], [ReelSeekPreviewBar]) is IgnorePointer-wrapped and
 /// display-only. The long-press speed actions (§2G/§2H) drive the shared
 /// [PlaybackController.setSpeed]: a hold ramps 1.0x→2.0x with a live
@@ -884,7 +890,7 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
         // The controller / feedback overlay is chrome: it must vanish while
         // floating so the PiP window shows only the video (PLAY-010).
         if (widget.active && !_inPip && queue.isNotEmpty)
-          ..._buildControllerLayer(),
+          ..._buildControllerLayer(queue.current),
       ],
     );
   }
@@ -894,7 +900,7 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
   /// covers a point, pointers on any control here never reach the pages'
   /// gesture Listener — interactive controls win first (§3 rule 1) without the
   /// coordinator needing any knowledge of where buttons live.
-  List<Widget> _buildControllerLayer() {
+  List<Widget> _buildControllerLayer(VideoItemSummary? current) {
     final layer = <Widget>[];
 
     // Transient feedback — purely decorative, so IgnorePointer keeps every
@@ -1013,18 +1019,6 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
                 // clearly.
                 const ColoredBox(color: Color(0x66000000)),
                 Positioned(
-                  top: 0,
-                  right: 0,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 8, right: 8),
-                    child: _FitToggle(
-                      controller: _controller,
-                      fitOverride: _fitOverride,
-                      onPressed: _toggleReelFit,
-                    ),
-                  ),
-                ),
-                Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
@@ -1033,7 +1027,8 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
                     padding: const EdgeInsets.only(bottom: 8),
                     // The app-wide display mode (including Stretch) belongs to
                     // the dedicated player; a reel replaces it with the aspect-
-                    // true [ReelsVideoSurface] plus the fit toggle above.
+                    // true [ReelsVideoSurface] plus the fit toggle in the
+                    // action column.
                     child: const PlaybackControls(showDisplayMode: false),
                   ),
                 ),
@@ -1042,39 +1037,37 @@ class _ReelsScreenState extends ConsumerState<ReelsScreen>
           ),
         ),
       );
-    } else {
-      // Persistent on-video controls (§2B): the favourite toggle and the
-      // controls reveal. Small, corner-anchored, and above the gesture layer.
+    }
+
+    // The persistent right-side action column (§7): always up, and drawn after
+    // the scrim above so its buttons keep working while the controls overlay is
+    // open. Every entry is a real action or is omitted — no dead buttons.
+    if (current != null) {
+      final actions = videoItemActionsFor(context, ref, current);
       layer.add(
         Positioned(
-          top: 8,
-          right: 8,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ReelFavoriteButton(
-                favourite: _favourite,
-                onPressed: () => unawaited(_toggleFavourite()),
+          right: AppSpacing.sm,
+          top: AppSpacing.sm,
+          bottom: _ReelActionColumn.captionReserve,
+          child: SingleChildScrollView(
+            // Anchored to the bottom of its slot and scrollable, so a short
+            // landscape surface reaches every button instead of overflowing.
+            reverse: true,
+            child: _ReelActionColumn(
+              favourite: _favourite,
+              onFavourite: () => unawaited(_toggleFavourite()),
+              onSave: actions.onSaveToCollection,
+              onShare: actions.onShare,
+              fitToggle: _FitToggle(
+                controller: _controller,
+                fitOverride: _fitOverride,
+                onPressed: _toggleReelFit,
               ),
-              IconButton(
-                key: const ValueKey('reels_controls_toggle'),
-                tooltip: 'Playback controls',
-                onPressed: _toggleControls,
-                icon: const Icon(Icons.tune, color: Colors.white),
-              ),
+              onControls: _toggleControls,
               // PiP is offered only where the host supports it (feature-detected
               // through the coordinator), so no dead button appears otherwise.
-              if (_pipSupported)
-                IconButton(
-                  key: const ValueKey('reels_pip_button'),
-                  tooltip: 'Picture-in-picture',
-                  onPressed: () => unawaited(_pip.enter()),
-                  icon: const Icon(
-                    Icons.picture_in_picture_alt,
-                    color: Colors.white,
-                  ),
-                ),
-            ],
+              onPip: _pipSupported ? () => unawaited(_pip.enter()) : null,
+            ),
           ),
         ),
       );
@@ -1143,7 +1136,7 @@ class _ReelPage extends StatelessWidget {
     final caption = _Caption(
       position: position,
       total: total,
-      title: item.title,
+      item: item,
       error: error,
     );
     if (showSurface && error == null) {
@@ -1167,9 +1160,129 @@ class _ReelPage extends StatelessWidget {
         ),
       );
     }
-    return ColoredBox(
-      color: Colors.black,
-      child: Align(alignment: Alignment.bottomLeft, child: caption),
+    // The still frame (inactive tab, or a reel whose source failed) keeps the
+    // same bottom-anchored caption so a swipe does not shift the text.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Colors.black),
+        Positioned(left: 0, right: 0, bottom: 0, child: caption),
+      ],
+    );
+  }
+}
+
+/// The persistent right-side action column (DESIGN.md §7).
+///
+/// One vertical stack of 48dp circular scrim buttons anchored above the caption:
+/// Like (the favourite toggle, red when active), Save (collection sheet), Share
+/// (plan M8), the fit toggle, the playback-controls reveal and PiP. Icons only,
+/// each labelled by its tooltip and its `Semantics` — a label under every glyph
+/// would eat the video. Actions the item cannot perform are omitted, so the
+/// column never grows a dead button.
+class _ReelActionColumn extends StatelessWidget {
+  const _ReelActionColumn({
+    required this.favourite,
+    required this.onFavourite,
+    required this.fitToggle,
+    required this.onControls,
+    this.onSave,
+    this.onShare,
+    this.onPip,
+  });
+
+  /// Vertical space left for the caption the column sits above.
+  static const double captionReserve = 112;
+
+  final bool favourite;
+  final VoidCallback onFavourite;
+
+  /// The current reel's fit control; a widget because it renders itself from the
+  /// controller's live video size.
+  final Widget fitToggle;
+  final VoidCallback onControls;
+  final VoidCallback? onSave;
+  final VoidCallback? onShare;
+  final VoidCallback? onPip;
+
+  @override
+  Widget build(BuildContext context) {
+    final buttons = <Widget>[
+      _ReelFavoriteButton(favourite: favourite, onPressed: onFavourite),
+      if (onSave case final action?)
+        _ReelScrimButton(
+          key: const ValueKey('reels_save_button'),
+          icon: Icons.playlist_add,
+          tooltip: 'Save to collection',
+          onPressed: action,
+        ),
+      if (onShare case final action?)
+        _ReelScrimButton(
+          key: const ValueKey('reels_share_button'),
+          icon: Icons.share_outlined,
+          tooltip: 'Share',
+          onPressed: action,
+        ),
+      fitToggle,
+      _ReelScrimButton(
+        key: const ValueKey('reels_controls_toggle'),
+        icon: Icons.tune,
+        tooltip: 'Playback controls',
+        onPressed: onControls,
+      ),
+      if (onPip case final action?)
+        _ReelScrimButton(
+          key: const ValueKey('reels_pip_button'),
+          icon: Icons.picture_in_picture_alt,
+          tooltip: 'Picture-in-picture',
+          onPressed: action,
+        ),
+    ];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < buttons.length; i++) ...[
+          if (i > 0) const SizedBox(height: AppSpacing.sm),
+          buttons[i],
+        ],
+      ],
+    );
+  }
+}
+
+/// A 48dp circular scrim button used by the Reels action column: a translucent
+/// black disc keeps the white glyph legible over any frame without a Material
+/// ripple competing with the video.
+class _ReelScrimButton extends StatelessWidget {
+  const _ReelScrimButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: const Color(0x80000000),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox(
+            width: AppSizes.minTapTarget,
+            height: AppSizes.minTapTarget,
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1200,12 +1313,11 @@ class _FitToggle extends StatelessWidget {
         final fullBleed =
             reelsBoxFit(videoSize: state.videoSize, override: fitOverride) ==
             BoxFit.cover;
-        return IconButton(
+        return _ReelScrimButton(
           key: const ValueKey('reels_fit_toggle'),
           tooltip: fullBleed ? 'Fit to screen' : 'Fill screen',
           onPressed: onPressed,
-          icon: Icon(fullBleed ? Icons.fit_screen : Icons.crop_free),
-          color: Colors.white,
+          icon: fullBleed ? Icons.fit_screen : Icons.crop_free,
         );
       },
     );
@@ -1275,17 +1387,29 @@ class _ReelFavoriteButtonState extends State<_ReelFavoriteButton>
     return Semantics(
       button: true,
       selected: widget.favourite,
-      child: IconButton(
-        key: const ValueKey('reels_favorite_button'),
-        tooltip: widget.favourite
+      child: Tooltip(
+        message: widget.favourite
             ? 'Remove from favorites'
             : 'Add to favorites',
-        onPressed: widget.onPressed,
-        icon: ScaleTransition(
-          scale: _scale,
-          child: Icon(
-            widget.favourite ? Icons.favorite : Icons.favorite_border,
-            color: widget.favourite ? kReelsFavoriteColor : Colors.white,
+        child: Material(
+          key: const ValueKey('reels_favorite_button'),
+          color: const Color(0x80000000),
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onPressed,
+            child: SizedBox(
+              width: AppSizes.minTapTarget,
+              height: AppSizes.minTapTarget,
+              child: ScaleTransition(
+                scale: _scale,
+                child: Icon(
+                  widget.favourite ? Icons.favorite : Icons.favorite_border,
+                  color: widget.favourite ? kReelsFavoriteColor : Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1293,62 +1417,98 @@ class _ReelFavoriteButtonState extends State<_ReelFavoriteButton>
   }
 }
 
-/// Bottom-anchored position + title (and any reel-local error) caption. Shared
-/// by the still and playing pages so a swipe keeps the same text layout.
+/// Bottom-anchored caption shared by the still and playing pages so a swipe
+/// keeps the same text layout.
+///
+/// DESIGN.md §7: a `#0F0F0F` → transparent scrim behind the block keeps the text
+/// readable over any frame, the title is 15sp w600, and the counter shares its
+/// line with the item's provider and relative age (the same line the feed and
+/// the player print). It is safe-area aware, and every text is line-clipped with
+/// an ellipsis so a landscape page or an enlarged system font can never grow the
+/// column past the screen into a RenderFlex overflow (§4 "overlays work in
+/// portrait and landscape").
 class _Caption extends StatelessWidget {
   const _Caption({
     required this.position,
     required this.total,
-    required this.title,
+    required this.item,
     this.error,
   });
 
   final int position;
   final int total;
-  final String title;
+  final VideoItemSummary item;
   final String? error;
 
   @override
   Widget build(BuildContext context) {
-    // Layout-safe for every orientation and text scale: the caption
-    // shrink-wraps from the bottom, and both the title and the error are
-    // line-clipped with an ellipsis so a landscape page or an enlarged system
-    // font can never grow the column past the screen into a RenderFlex overflow
-    // (§4 "overlays work in portrait and landscape", "controls sized for
-    // touchscreen interaction").
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.end,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$position / $total',
-            style: const TextStyle(color: Colors.white60, fontSize: 14),
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Color(0xE60F0F0F), Color(0x000F0F0F)],
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.xxl,
+            AppSpacing.lg,
+            AppSpacing.md,
           ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Row(
+                children: [
+                  Text(
+                    '$position / $total',
+                    style: const TextStyle(color: Colors.white60, fontSize: 13),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      VideoItemCard.metadataLine(item),
+                      key: const ValueKey('reels_caption_metadata'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (error case final message?) ...[
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  message,
+                  key: const ValueKey('reels_reel_error'),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+              ],
+            ],
           ),
-          if (error case final message?) ...[
-            const SizedBox(height: 12),
-            Text(
-              message,
-              key: const ValueKey('reels_reel_error'),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

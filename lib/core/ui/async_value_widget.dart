@@ -33,6 +33,7 @@ class AsyncValueWidget<T> extends StatelessWidget {
     required this.onData,
     this.loadingMessage,
     this.onLoading,
+    this.skeleton,
     this.onError,
     this.onRetry,
   });
@@ -50,6 +51,13 @@ class AsyncValueWidget<T> extends StatelessWidget {
   /// ignored.
   final Widget? onLoading;
 
+  /// Loading placeholder for list/grid surfaces — typically a shimmering
+  /// `VideoCardSkeletonList`.
+  ///
+  /// Takes precedence over [onLoading] so a screen can opt into a skeleton
+  /// without repeating the loading branch in its own `when(...)`.
+  final WidgetBuilder? skeleton;
+
   /// Override the default [ErrorState].  Receives the safe user-facing
   /// message; return any widget.
   final Widget Function(String message, VoidCallback? retry)? onError;
@@ -61,7 +69,10 @@ class AsyncValueWidget<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return value.when(
-      loading: () => onLoading ?? LoadingIndicator(message: loadingMessage),
+      loading: () =>
+          skeleton?.call(context) ??
+          onLoading ??
+          LoadingIndicator(message: loadingMessage),
       error: (err, _) {
         final safeMessage = AsyncValueWidget.safeMessage(err);
         final retry = onRetry;

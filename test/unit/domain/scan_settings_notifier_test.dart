@@ -6,6 +6,7 @@ import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/database/tables/app_preferences_table.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/library_refresh_service_provider.dart';
@@ -100,6 +101,11 @@ class FakeSafBridge implements SafBridge {
 
   @override
   Future<Result<bool>> checkFolderAccess(String uri) async => const Ok(true);
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteDocuments(
+    List<String> uris,
+  ) async => Ok(SourceDeletionReport(deleted: uris));
 }
 
 /// Lets the deferred microtask load in [ScanSettingsNotifier.build] run to

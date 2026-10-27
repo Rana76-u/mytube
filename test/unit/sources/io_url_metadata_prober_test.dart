@@ -168,6 +168,22 @@ void main() {
       expect(failure.isTransient, isTrue);
     });
 
+    test('sends the app User-Agent, never Dart\'s default', () async {
+      final seen = <String?>[];
+      final server = await _startServer((request) async {
+        seen.add(request.headers.value(HttpHeaders.userAgentHeader));
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      await prober.probe(_url(server));
+      await IoUrlMetadataProber(userAgent: 'Custom/9').probe(_url(server));
+
+      // The player engine presents the same identity (directUrlRequestHeaders),
+      // so a UA-gated server cannot pass the probe and reject playback.
+      expect(seen, [directUrlUserAgent, 'Custom/9']);
+    });
+
     test(
       'connection refused maps to a transient NetworkUnavailableError',
       () async {

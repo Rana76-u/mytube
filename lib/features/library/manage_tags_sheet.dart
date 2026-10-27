@@ -4,8 +4,7 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
-import 'package:mytube/features/library/library_screen.dart'
-    show libraryTagsProvider;
+import 'package:mytube/features/library/library_providers.dart';
 
 /// Bottom sheet for creating tags and assigning them to a single video
 /// (P5-06, LIB-004/LIB-009).

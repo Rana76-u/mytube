@@ -124,7 +124,7 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
   }
 
   /// Returns the video items in [collectionId] in the user's manual order.
-  Future<List<VideoItem>> itemsFor(String collectionId) {
+  Future<List<VideoItem>> itemsFor(String collectionId, {int? limit}) {
     final query =
         select(db.videoItems).join([
           innerJoin(
@@ -136,6 +136,9 @@ class CollectionsDao extends DatabaseAccessor<AppDatabase>
           OrderingTerm.asc(collectionItems.sortOrder),
           OrderingTerm.asc(collectionItems.addedAt),
         ]);
+    // Bounded in SQL when the caller only needs a head (the Discover browse
+    // rows), so a large collection is never shipped row-by-row for nothing.
+    if (limit case final limit?) query.limit(limit);
     return query.map((row) => row.readTable(db.videoItems)).get();
   }
 

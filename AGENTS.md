@@ -37,7 +37,10 @@ changing behavior.
 -   Never modify, move, rename, or delete original videos as a side
     effect of indexing or organization.
 -   Removing a library entry removes app metadata/references, not the
-    original.
+    original. The one exception is the explicit per-item delete
+    (ADR-017): it is a separate action, it asks first, its dialog names
+    the files and providers it will destroy, and it reports any file it
+    could not delete. Never route other flows through it.
 -   Removing one duplicate source must not remove other sources.
 -   Cache cleanup must never delete explicit downloads or originals.
 -   Keep offline downloads separate from cache.

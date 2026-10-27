@@ -35,6 +35,12 @@ class FakeThumbnailBridge implements ThumbnailBridge {
   /// requests a card-resolution preview instead of a postage stamp.
   final List<int> requestedMaxSide = [];
 
+  /// Network frame grabs, kept apart from [requested] so a test can prove a
+  /// stream never goes down the local decode path (and vice versa).
+  final List<String> networkRequests = [];
+  final List<Map<String, String>> networkHeaders = [];
+  final List<int> networkMaxSide = [];
+
   @override
   Future<Result<Uint8List>> getThumbnail(
     String uri, {
@@ -43,6 +49,18 @@ class FakeThumbnailBridge implements ThumbnailBridge {
     requested.add(uri);
     requestedMaxSide.add(maxSidePx);
     return responses[uri] ?? Ok(_kBytes);
+  }
+
+  @override
+  Future<Result<Uint8List>> getNetworkThumbnail(
+    String url, {
+    Map<String, String> headers = const {},
+    int maxSidePx = ThumbnailBridge.defaultMaxSidePx,
+  }) async {
+    networkRequests.add(url);
+    networkHeaders.add(headers);
+    networkMaxSide.add(maxSidePx);
+    return responses[url] ?? Ok(_kBytes);
   }
 }
 
@@ -181,8 +199,41 @@ void main() {
       },
     );
 
-    test('a remote sourceUri is NEVER used as a thumbnail fallback', () async {
-      // No stored thumbnailUri and an http source → nothing to preview.
+    test(
+      'an http source with no stored preview decodes one frame natively',
+      () async {
+        // A direct URL has no local file to decode; the bridge grabs a frame
+        // of the stream instead of leaving the card blank (P4-10).
+        await _seed(
+          repo,
+          itemId: 'v1',
+          locationId: 'loc1',
+          sourceUri: 'https://cdn.example.com/video.mp4',
+          providerType: ProviderType.directUrl,
+        );
+
+        final bytes = await service.thumbnailForVideo('v1');
+
+        expect(bytes, _kBytes);
+        expect(bridge.networkRequests, ['https://cdn.example.com/video.mp4']);
+        expect(bridge.networkMaxSide, [ThumbnailService.decodeMaxSidePx]);
+        // The stream must not be handed to the local decode path, and the
+        // video bytes are never fetched through the poster fetcher either.
+        expect(bridge.requested, isEmpty);
+        expect(fetcher.requested, isEmpty);
+      },
+    );
+
+    test('a network frame presents the same identity as playback', () async {
+      final withHeaders = ThumbnailService(
+        repository: repo,
+        bridge: bridge,
+        remoteFetcher: fetcher,
+        networkHeaders: (location) =>
+            location.providerType == ProviderType.directUrl
+            ? const {'User-Agent': 'MyTube/0.1'}
+            : const {},
+      );
       await _seed(
         repo,
         itemId: 'v1',
@@ -191,11 +242,30 @@ void main() {
         providerType: ProviderType.directUrl,
       );
 
-      final bytes = await service.thumbnailForVideo('v1');
+      await withHeaders.thumbnailForVideo('v1');
 
-      expect(bytes, isNull);
-      expect(bridge.requested, isEmpty);
-      expect(fetcher.requested, isEmpty);
+      expect(bridge.networkHeaders, [
+        {'User-Agent': 'MyTube/0.1'},
+      ]);
+    });
+
+    test('a stored preview wins over decoding the stream itself', () async {
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'loc1',
+        sourceUri: 'https://cdn.example.com/video.mp4',
+        thumbnailUri: 'https://cdn.example.com/preview.jpg',
+        providerType: ProviderType.directUrl,
+      );
+
+      await service.thumbnailForVideo('v1');
+
+      expect(bridge.networkRequests, isEmpty);
+      expect(
+        fetcher.requested.single.toString(),
+        'https://cdn.example.com/preview.jpg',
+      );
     });
 
     test('unsupported scheme yields no thumbnail', () async {

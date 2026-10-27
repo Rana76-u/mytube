@@ -92,22 +92,80 @@ void main() {
       expect(materialApp().themeMode, ThemeMode.dark);
     });
 
-    testWidgets('dark theme applies the YouTube palette from Color Pallet.csv', (
-      tester,
-    ) async {
+    testWidgets('dark theme applies the DESIGN.md palette', (tester) async {
       final scheme = AppTheme.dark.colorScheme;
 
-      // Primary — Red (#FF0000).
+      // Accent Primary — Red (#FF0000); Accent Secondary — blue (#3EA6FF).
       expect(scheme.primary, const Color(0xFFFF0000));
-      // Background (Dark) — Dark Charcoal (#0F0F0F) drives surface + scaffold.
+      expect(scheme.secondary, const Color(0xFF3EA6FF));
+      // Background Primary (#0F0F0F) drives surface + scaffold.
       expect(scheme.surface, const Color(0xFF0F0F0F));
       expect(AppTheme.dark.scaffoldBackgroundColor, const Color(0xFF0F0F0F));
-      // Surface (Dark) — Medium Charcoal (#272727) for search bar / chips.
-      expect(scheme.surfaceContainerHigh, const Color(0xFF272727));
-      expect(scheme.surfaceContainerHighest, const Color(0xFF272727));
-      // Text Primary — Pure White; Text Secondary — Medium Grey (#AAAAAA).
-      expect(scheme.onSurface, const Color(0xFFFFFFFF));
+      // Background Secondary (#212121) for search bar / chips / sheets.
+      expect(scheme.surfaceContainerLow, const Color(0xFF212121));
+      expect(scheme.surfaceContainerHigh, const Color(0xFF212121));
+      expect(scheme.surfaceContainerHighest, const Color(0xFF212121));
+      // Text Primary (#F1F1F1), Text Secondary (#AAAAAA), hairline (#303030).
+      expect(scheme.onSurface, const Color(0xFFF1F1F1));
       expect(scheme.onSurfaceVariant, const Color(0xFFAAAAAA));
+      expect(scheme.outlineVariant, const Color(0xFF303030));
+    });
+
+    testWidgets('navigation bar uses the red active tab without an M3 pill', (
+      tester,
+    ) async {
+      final nav = AppTheme.dark.navigationBarTheme;
+
+      expect(nav.indicatorColor, Colors.transparent);
+      expect(nav.labelBehavior, NavigationDestinationLabelBehavior.alwaysShow);
+      expect(nav.height, 64);
+      expect(
+        nav.iconTheme?.resolve({WidgetState.selected})?.color,
+        AppTheme.primary,
+      );
+      expect(
+        nav.iconTheme?.resolve(const <WidgetState>{})?.color,
+        AppTheme.textSecondary,
+      );
+      expect(
+        nav.labelTextStyle?.resolve({WidgetState.selected})?.color,
+        AppTheme.primary,
+      );
+      expect(
+        nav.labelTextStyle?.resolve(const <WidgetState>{})?.color,
+        AppTheme.textSecondary,
+      );
+    });
+
+    testWidgets('buttons and the search field are pill-shaped (radius 24)', (
+      tester,
+    ) async {
+      final theme = AppTheme.dark;
+
+      RoundedRectangleBorder shapeOf(ButtonStyle? style) =>
+          style!.shape!.resolve(const <WidgetState>{})!
+              as RoundedRectangleBorder;
+
+      expect(
+        shapeOf(theme.filledButtonTheme.style).borderRadius,
+        BorderRadius.circular(24),
+      );
+      expect(
+        shapeOf(theme.outlinedButtonTheme.style).borderRadius,
+        BorderRadius.circular(24),
+      );
+      expect(
+        shapeOf(theme.textButtonTheme.style).borderRadius,
+        BorderRadius.circular(24),
+      );
+
+      final input = theme.inputDecorationTheme;
+      expect(input.filled, isTrue);
+      expect(input.fillColor, const Color(0xFF212121));
+      final border = input.enabledBorder! as OutlineInputBorder;
+      expect(border.borderRadius, BorderRadius.circular(24));
+      expect(border.borderSide.color, const Color(0xFF303030));
+      expect(border.borderSide.width, 1);
     });
 
     testWidgets('light theme derives the brand red primary from the seed', (
@@ -130,10 +188,10 @@ void main() {
       expect(darkChips.shape, isA<StadiumBorder>());
       expect(darkChips.side, BorderSide.none);
       expect(darkChips.showCheckmark, isFalse);
-      // Resting on the medium charcoal, inverting to white with a dark label.
-      expect(darkChips.backgroundColor, const Color(0xFF272727));
-      expect(darkChips.selectedColor, const Color(0xFFFFFFFF));
-      expect(darkChips.labelStyle?.color, const Color(0xFFFFFFFF));
+      // Resting on the elevated surface, inverting to white with a dark label.
+      expect(darkChips.backgroundColor, const Color(0xFF212121));
+      expect(darkChips.selectedColor, const Color(0xFFF1F1F1));
+      expect(darkChips.labelStyle?.color, const Color(0xFFF1F1F1));
       expect(darkChips.secondaryLabelStyle?.color, const Color(0xFF0F0F0F));
 
       // The light theme keeps the same relationship with its own scheme.

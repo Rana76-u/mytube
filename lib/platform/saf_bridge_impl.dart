@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
+import 'package:mytube/platform/deletion_report_mapping.dart';
 import 'package:mytube/platform/saf_bridge.dart';
 
 /// Concrete [SafBridge] that communicates with [SaffBridgePlugin] on the
@@ -117,6 +119,33 @@ class SafBridgeImpl implements SafBridge {
       return Result.err(
         UnexpectedError(
           diagnosticMessage: 'SAF listVideosInFolder unexpected error: $e',
+          cause: e,
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<Result<SourceDeletionReport>> deleteDocuments(
+    List<String> uris,
+  ) async {
+    try {
+      final raw = await _channel.invokeMethod<Object?>('deleteDocuments', {
+        'uris': uris,
+      });
+      return Result.ok(parseSourceDeletionReport(raw, uris));
+    } on PlatformException catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage:
+              'SAF deleteDocuments platform error [${e.code}]: ${e.message}',
+          cause: e,
+        ),
+      );
+    } catch (e) {
+      return Result.err(
+        UnexpectedError(
+          diagnosticMessage: 'SAF deleteDocuments unexpected error: $e',
           cause: e,
         ),
       );

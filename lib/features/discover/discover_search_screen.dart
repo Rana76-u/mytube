@@ -1,12 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/async_value_widget.dart';
+import 'package:mytube/core/ui/content_width.dart';
 import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/features/library/video_item_actions.dart';
 import 'package:mytube/features/library/video_item_card.dart';
 import 'package:mytube/features/player/video_player_screen.dart';
+
+/// Upper bound on the video results shown at once. Search is a lookup, not a
+/// full library dump, so a head keeps the scroll cheap on large libraries.
+/// The limit is applied in SQL by [discoverSearchProvider], so the database
+/// never ships rows the screen would only throw away (NFR-001/003).
+const int _searchResultLimit = 30;
 
 /// Discover smart-search screen (LIB-003, DISC-001).
 ///
@@ -23,7 +33,12 @@ import 'package:mytube/features/player/video_player_screen.dart';
 /// A result tap opens the dedicated player, matching every other card surface
 /// (PLAY-001).
 class DiscoverSearchScreen extends ConsumerStatefulWidget {
-  const DiscoverSearchScreen({super.key});
+  const DiscoverSearchScreen({super.key, this.initialQuery = ''});
+
+  /// Pre-fills the field and runs the search immediately. The shell header
+  /// submits a typed term rather than opening an empty search box, so the
+  /// results are already on screen when the route animates in.
+  final String initialQuery;
 
   @override
   ConsumerState<DiscoverSearchScreen> createState() =>
@@ -31,43 +46,77 @@ class DiscoverSearchScreen extends ConsumerStatefulWidget {
 }
 
 class _DiscoverSearchScreenState extends ConsumerState<DiscoverSearchScreen> {
-  /// Upper bound on the video results shown at once. Search is a lookup, not a
-  /// full library dump, so a head keeps the scroll cheap on large libraries.
-  static const int _videoLimit = 30;
+  /// Pause after the last keystroke before the type-ahead re-queries. Without
+  /// it every character issues its own search; 250 ms keeps the results live
+  /// while collapsing a typed word into a single query (same window as the
+  /// Library tab's title search).
+  static const Duration _searchDebounce = Duration(milliseconds: 250);
 
   final TextEditingController _controller = TextEditingController();
+
+  /// Fires once typing pauses; cancelled on apply, clear, and dispose.
+  Timer? _debounce;
 
   /// The active search text. Empty means "show suggestions" (browse-by-tag).
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    // A submitted term seeds both the field and the active query, so the first
+    // frame already shows results instead of the suggestion list.
+    final initial = widget.initialQuery.trim();
+    if (initial.isEmpty) return;
+    _controller.text = initial;
+    _controller.selection = TextSelection.collapsed(offset: initial.length);
+    _query = initial;
+  }
+
+  @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  void _onChanged(String value) => setState(() => _query = value);
+  /// Applies [value] once typing pauses; clearing is immediate because there is
+  /// nothing to wait for.
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    if (value.isEmpty) {
+      if (_query.isEmpty) return;
+      setState(() => _query = '');
+      return;
+    }
+    _debounce = Timer(_searchDebounce, () {
+      if (!mounted || value == _query) return;
+      setState(() => _query = value);
+    });
+  }
 
   /// Tapping a suggestion writes the term into the field and re-runs the search
   /// so a tag tap narrows to that vocabulary instead of just displaying it.
   void _applySuggestion(String term) {
+    // A discrete choice, not typing: apply it now and drop any pending
+    // keystroke debounce.
+    _debounce?.cancel();
     _controller.value = TextEditingValue(
       text: term,
       selection: TextSelection.collapsed(offset: term.length),
     );
+    if (term == _query) return;
     setState(() => _query = term);
   }
 
   void _clear() {
+    _debounce?.cancel();
     _controller.clear();
     setState(() => _query = '');
   }
 
   /// Result taps open the dedicated player screen (PLAY-001).
   void _openItem(VideoItemSummary item) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => VideoPlayerScreen(item: item)),
-    );
+    Navigator.of(context).push(VideoPlayerScreen.route(item));
   }
 
   @override
@@ -126,30 +175,35 @@ class _DiscoverSearchScreenState extends ConsumerState<DiscoverSearchScreen> {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      children: [
-        // Suggestions lead so a partial term still offers a way to narrow.
-        if (hasTags) ...[
-          const _Header('Tags'),
-          _TagWrap(tags: data.tags, onTap: _applySuggestion),
-          const SizedBox(height: 16),
-        ],
-        if (hasVideos) ...[
-          const _Header('Videos'),
-          for (final item in data.videos.take(_videoLimit))
-            Padding(
-              // Flat tiles carry no surface of their own, so the list supplies
-              // the separation between them (ADR-009).
-              padding: const EdgeInsets.only(bottom: 16),
-              child: VideoItemCard(
-                key: ValueKey('discover_search_item_${item.id.value}'),
-                item: item,
-                onTap: () => _openItem(item),
+    return ContentWidth(
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        children: [
+          // Suggestions lead so a partial term still offers a way to narrow.
+          if (hasTags) ...[
+            const _Header('Tags'),
+            _TagWrap(tags: data.tags, onTap: _applySuggestion),
+            const SizedBox(height: 16),
+          ],
+          if (hasVideos) ...[
+            const _Header('Videos'),
+            for (final item in data.videos.take(_searchResultLimit))
+              Padding(
+                // Flat tiles carry no surface of their own, so the list supplies
+                // the separation between them (ADR-009).
+                padding: const EdgeInsets.only(bottom: 16),
+                child: VideoItemCard(
+                  key: ValueKey('discover_search_item_${item.id.value}'),
+                  item: item,
+                  // Search results carry the same action bundle as every other
+                  // card surface (plan M4).
+                  actions: videoItemActionsFor(context, ref, item),
+                  onTap: () => _openItem(item),
+                ),
               ),
-            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -164,12 +218,14 @@ class _DiscoverSearchScreenState extends ConsumerState<DiscoverSearchScreen> {
         icon: Icons.search,
       );
     }
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      children: [
-        const _Header('Browse by tag'),
-        _TagWrap(tags: tags, onTap: _applySuggestion),
-      ],
+    return ContentWidth(
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        children: [
+          const _Header('Browse by tag'),
+          _TagWrap(tags: tags, onTap: _applySuggestion),
+        ],
+      ),
     );
   }
 }
@@ -235,8 +291,9 @@ class DiscoverSearchResults {
 /// Keyed on the trimmed, lower-cased query so identical text reuses one cached
 /// load and each distinct term is fetched once. A blank query returns the tag
 /// vocabulary (suggestions); a non-blank query returns title matches from
-/// [VideoRepository.searchItems] plus the tags whose name contains the term
-/// (tags are stored lower-cased, so the substring match is case-insensitive).
+/// [VideoRepository.queryItems] (bounded to [_searchResultLimit] rows in SQL)
+/// plus the tags whose name contains the term (tags are stored lower-cased, so
+/// the substring match is case-insensitive).
 ///
 /// `autoDispose` so a transient search session does not keep result lists
 /// alive after the screen closes. Tests override [videoRepositoryProvider].
@@ -255,7 +312,11 @@ final discoverSearchProvider = FutureProvider.autoDispose
         return DiscoverSearchResults(videos: const [], tags: allTags);
       }
 
-      final videos = switch (await repository.searchItems(query)) {
+      final videos = switch (await repository.queryItems(
+        // Bounded in SQL, like the browse rows: the screen never renders more
+        // than [_searchResultLimit] cards.
+        LibraryQuery(search: query, limit: _searchResultLimit),
+      )) {
         Ok(:final value) => value,
         Err(:final error) => throw StateError(error.diagnosticMessage),
       };

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mytube/core/ui/video_card_skeleton.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/discover_feed_filter.dart';
 import 'package:mytube/domain/services/discover_feed_mode.dart';
@@ -315,10 +316,11 @@ class ContinueWatchingTile extends StatelessWidget {
   }
 }
 
-/// Static placeholder tiles shown while the feed's first page resolves
-/// (ADR-009). It deliberately has **no shimmer or repeating animation**: an
-/// endless controller never lets `pumpAndSettle` finish, which would hang every
-/// widget test that pumps the Discover screen.
+/// Shimmering placeholder tiles shown while the feed's first page resolves
+/// (DESIGN.md §4, ADR-015). It delegates to the shared
+/// [VideoCardSkeletonList] so Discover, Library and Saved share one skeleton
+/// geometry; the sweep is bounded, which keeps `pumpAndSettle` terminating in
+/// widget tests.
 class DiscoverFeedSkeleton extends StatelessWidget {
   const DiscoverFeedSkeleton({super.key, this.tileCount = 3});
 
@@ -327,51 +329,9 @@ class DiscoverFeedSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final blockColor = colorScheme.surfaceContainer;
-
-    Widget bar({required double widthFactor, required double height}) =>
-        FractionallySizedBox(
-          widthFactor: widthFactor,
-          alignment: Alignment.centerLeft,
-          child: Container(
-            height: height,
-            decoration: BoxDecoration(
-              color: blockColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-        );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (var i = 0; i < tileCount; i++)
-          Padding(
-            key: ValueKey('discover_feed_skeleton_tile_$i'),
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: blockColor,
-                      borderRadius: BorderRadius.circular(
-                        VideoThumbnail.radius,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                bar(widthFactor: 0.8, height: 14),
-                const SizedBox(height: 6),
-                bar(widthFactor: 0.4, height: 12),
-              ],
-            ),
-          ),
-      ],
+    return VideoCardSkeletonList(
+      tileCount: tileCount,
+      keyPrefix: 'discover_feed_skeleton',
     );
   }
 }

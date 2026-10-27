@@ -764,6 +764,37 @@ void main() {
       expect(items.map((i) => i.id.value).toList(), equals(['a', 'b']));
     });
 
+    test(
+      'getCollectionItems bounds the read in SQL when a limit is given',
+      () async {
+        final collection =
+            (await repo.createCollection(name: 'C') as Ok<CollectionSummary>)
+                .value;
+        for (final id in ['a', 'b', 'c']) {
+          await _insertItem(db, id, title: id.toUpperCase());
+          await repo.addVideoToCollection(
+            collectionId: collection.id,
+            videoId: VideoItemId(id),
+          );
+        }
+
+        // The head keeps the collection's manual order — the Discover browse row
+        // relies on the limit being applied by the query, not by the caller.
+        final head =
+            (await repo.getCollectionItems(collection.id, limit: 2)
+                    as Ok<List<VideoItemSummary>>)
+                .value;
+        expect(head.map((i) => i.id.value).toList(), equals(['a', 'b']));
+
+        // Omitting the limit still returns the whole collection.
+        final all =
+            (await repo.getCollectionItems(collection.id)
+                    as Ok<List<VideoItemSummary>>)
+                .value;
+        expect(all, hasLength(3));
+      },
+    );
+
     test('addVideoToCollection is idempotent', () async {
       final collection =
           (await repo.createCollection(name: 'C') as Ok<CollectionSummary>)

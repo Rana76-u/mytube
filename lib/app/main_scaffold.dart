@@ -1,7 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mytube/app/shell/app_header.dart';
+import 'package:mytube/app/shell/mini_player.dart';
+import 'package:mytube/app/shell/shell_scroll_signal.dart';
+import 'package:mytube/app/shell/shell_tabs.dart';
 import 'package:mytube/domain/services/watch_progress_service.dart';
 import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 import 'package:mytube/features/discover/discover_screen.dart';
@@ -13,6 +18,7 @@ import 'package:mytube/playback/audio_focus_coordinator.dart';
 import 'package:mytube/playback/media_session_coordinator.dart';
 import 'package:mytube/playback/now_playing.dart';
 import 'package:mytube/playback/playback_provider.dart';
+import 'package:mytube/playback/playback_session.dart';
 
 /// Five-tab bottom-navigation host (NAV-001, NAV-002).
 ///
@@ -23,16 +29,22 @@ import 'package:mytube/playback/playback_provider.dart';
 /// [IndexedStack] keeps each tab alive so scroll positions and ephemeral state
 /// survive tab switches without re-running expensive builds. This is important
 /// once real content lands in later phases.
+///
+/// Since DESIGN.md's visual system landed, the shell also owns the **branded
+/// header** ([MyTubeTopBar]): Discover, Library, Saved and Settings render it,
+/// while Reels stays full-bleed black with no chrome. The tabs no longer carry
+/// their own `Scaffold`/`AppBar` — that is what keeps the header fixed instead
+/// of sliding with each page.
 class MainScaffold extends ConsumerStatefulWidget {
   const MainScaffold({super.key});
 
   // Tab index constants — reference these instead of raw integers to keep
   // tab-switching logic readable and refactor-safe.
-  static const int tabDiscover = 0;
-  static const int tabReels = 1;
-  static const int tabLibrary = 2;
-  static const int tabSaved = 3;
-  static const int tabSettings = 4;
+  static const int tabDiscover = ShellTab.discover;
+  static const int tabReels = ShellTab.reels;
+  static const int tabLibrary = ShellTab.library;
+  static const int tabSaved = ShellTab.saved;
+  static const int tabSettings = ShellTab.settings;
 
   @override
   ConsumerState<MainScaffold> createState() => _MainScaffoldState();
@@ -127,6 +139,40 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     ),
   ];
 
+  /// The brand mark is a control: it scrolls the active tab back to the top
+  /// (DESIGN.md §2). One shell-wide signal; each tab decides whether the bump
+  /// applies to it (only the visible tab scrolls).
+  void _scrollActiveTabToTop() {
+    ref.read(shellScrollToTopProvider.notifier).bump();
+  }
+
+  void _onDestinationSelected(int index) {
+    if (index == _currentIndex) {
+      // Re-tapping the current tab keeps the established "scroll to top"
+      // affordance users expect from the bottom bar.
+      _scrollActiveTabToTop();
+      return;
+    }
+    // Reels brings its own autoplaying surface, and the app owns exactly one
+    // engine: handing the tab the player means the previous session must stop
+    // rather than fight it for the engine (ADR-014 conflict guard).
+    if (index == ShellTab.reels) _stopPlaybackSession();
+    HapticFeedback.selectionClick();
+    setState(() => _currentIndex = index);
+  }
+
+  /// Ends the current playback session and clears its now-playing label.
+  void _stopPlaybackSession() {
+    final session = ref.read(playbackSessionProvider);
+    final item = session.item;
+    if (item != null) {
+      ref.read(playbackControllerProvider).stop();
+      unawaited(_watchProgress.flush(item.id));
+    }
+    ref.read(playbackSessionProvider.notifier).stop();
+    ref.read(nowPlayingProvider.notifier).setTitle(null);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Feed the media notification its now-playing label. The coordinator is a
@@ -136,33 +182,45 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
       nowPlayingProvider,
       (_, next) => _mediaSession.setNowPlaying(next),
     );
+    // Reels is the one full-bleed surface: a header would break its 9:16
+    // paging and its own on-video chrome.
+    final showHeader = _currentIndex != ShellTab.reels;
     return Scaffold(
+      appBar: showHeader
+          ? MyTubeTopBar(tab: _currentIndex, onLogoTap: _scrollActiveTabToTop)
+          : null,
       body: IndexedStack(
         index: _currentIndex,
         children: [
           // Discover offers recently-added videos, suggestions, and smart
           // search; Reels keeps its own bottom-nav tab for quick access.
-          const DiscoverScreen(),
+          DiscoverScreen(active: _currentIndex == ShellTab.discover),
           // Reels autoplays only while it is the visible tab (PLAY-002), so it
           // needs to know when the host switched to it.
-          ReelsScreen(active: _currentIndex == MainScaffold.tabReels),
-          const LibraryScreen(),
-          const SavedScreen(),
+          ReelsScreen(active: _currentIndex == ShellTab.reels),
+          LibraryScreen(active: _currentIndex == ShellTab.library),
+          SavedScreen(active: _currentIndex == ShellTab.saved),
           const SettingsScreen(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          setState(() => _currentIndex = index);
-        },
-        destinations: [
-          for (final tab in _tabs)
-            NavigationDestination(
-              icon: Icon(tab.icon),
-              selectedIcon: Icon(tab.selectedIcon),
-              label: tab.label,
-            ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The mini player docks directly above the nav bar, so a docked item
+          // is reachable from every tab (DESIGN.md §6, ADR-014).
+          const MiniPlayerDock(),
+          NavigationBar(
+            selectedIndex: _currentIndex,
+            onDestinationSelected: _onDestinationSelected,
+            destinations: [
+              for (final tab in _tabs)
+                NavigationDestination(
+                  icon: Icon(tab.icon),
+                  selectedIcon: Icon(tab.selectedIcon),
+                  label: tab.label,
+                ),
+            ],
+          ),
         ],
       ),
     );

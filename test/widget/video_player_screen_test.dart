@@ -187,7 +187,14 @@ void main() {
       // Surface and shared controls are on screen.
       expect(find.byType(VideoSurface), findsOneWidget);
       expect(find.byType(PlaybackControls), findsOneWidget);
-      expect(find.text('My Video'), findsOneWidget);
+      // The title appears twice by design: in the app bar and in the metadata
+      // block under the docked player (plan M5).
+      expect(find.text('My Video'), findsNWidgets(2));
+      expect(find.byKey(const ValueKey('player_title')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('player_action_toolbar')),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a failed resolution shows the user-safe error, never plays', (

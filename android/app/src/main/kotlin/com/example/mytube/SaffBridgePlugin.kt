@@ -92,6 +92,7 @@ class SaffBridgePlugin :
             "releasePersistedUri" -> releasePersistedUri(call, result)
             "listVideosInFolder" -> listVideosInFolder(call, result)
             "checkFolderAccess" -> checkFolderAccess(call, result)
+            "deleteDocuments" -> deleteDocuments(call, result)
             else -> result.notImplemented()
         }
     }
@@ -107,7 +108,17 @@ class SaffBridgePlugin :
                 return
             }
         pendingFolderPickerResult = result
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        // Write access is requested up front: deleting an original from a
+        // selected folder needs it, and the grant can only be asked for while
+        // the picker is open (ADR-017). Providers that refuse it fall back to
+        // the read-only grant in onActivityResult.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+            )
+        }
         activity.startActivityForResult(intent, FOLDER_PICKER_REQUEST_CODE)
     }
 
@@ -122,13 +133,27 @@ class SaffBridgePlugin :
 
         if (resultCode == Activity.RESULT_OK && data?.data != null) {
             val uri = data.data!!
+            val resolver = flutterPluginBinding.applicationContext.contentResolver
             try {
-                flutterPluginBinding.applicationContext.contentResolver
-                    .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                resolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
             } catch (e: SecurityException) {
-                // Permission could not be persisted; return null so caller can retry.
-                pending.success(null)
-                return true
+                // Some providers grant read only; browsing must still work, so
+                // retry with the narrowest grant rather than failing the pick.
+                try {
+                    resolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (e2: SecurityException) {
+                    // Permission could not be persisted; return null so caller
+                    // can retry.
+                    pending.success(null)
+                    return true
+                }
             }
             pending.success(uri.toString())
         } else {
@@ -156,11 +181,25 @@ class SaffBridgePlugin :
                 return
             }
         try {
-            flutterPluginBinding.applicationContext.contentResolver
-                .releasePersistableUriPermission(
+            val resolver = flutterPluginBinding.applicationContext.contentResolver
+            try {
+                resolver.releasePersistableUriPermission(
                     Uri.parse(uriString),
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
+            } catch (e: SecurityException) {
+                // A read-only grant (or an already-released write flag) throws;
+                // release whatever is left.
+                try {
+                    resolver.releasePersistableUriPermission(
+                        Uri.parse(uriString),
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (e2: SecurityException) {
+                    // Already released or never granted — treat as success.
+                }
+            }
         } catch (e: SecurityException) {
             // Already released or never granted — treat as success (idempotent).
         }
@@ -323,6 +362,46 @@ class SaffBridgePlugin :
         val name = file.name ?: return false
         val ext = name.substringAfterLast('.', "").lowercase()
         return ext in listOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "ts", "m4v", "wmv", "flv")
+    }
+
+    // -------------------------------------------------------------------------
+    // Deletion (ADR-017)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Deletes the given SAF documents.
+     *
+     * Deletion is authorised by the containing folder's grant, so a read-only
+     * grant (a folder picked before write access was requested) throws
+     * SecurityException per document. That is reported as "kept" rather than an
+     * error: the caller degrades to removing the library entry only.
+     */
+    private fun deleteDocuments(call: MethodCall, result: MethodChannel.Result) {
+        val requested = call.argument<List<String>>("uris")
+        if (requested.isNullOrEmpty()) {
+            result.error("INVALID_ARGUMENT", "Missing 'uris' argument", null)
+            return
+        }
+        val resolver = flutterPluginBinding.applicationContext.contentResolver
+
+        ioScope.launch {
+            val deleted = mutableListOf<String>()
+            val failed = mutableListOf<String>()
+            for (id in requested) {
+                try {
+                    if (DocumentsContract.deleteDocument(resolver, Uri.parse(id))) {
+                        deleted.add(id)
+                    } else {
+                        failed.add(id)
+                    }
+                } catch (e: Exception) {
+                    failed.add(id)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                result.success(mapOf("deleted" to deleted, "failed" to failed))
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -11,12 +11,16 @@ import 'package:mytube/platform/thumbnail_bridge.dart';
 /// LIB-007, ARCHITECTURE §10).
 ///
 /// Routing rules for one [SourceLocation]:
-///  1. Prefer the location's stored `thumbnailUri` (a durable provider/local
-///     preview reference); fall back to the `sourceUri` itself, which the
-///     native bridge can decode for local content.
-///  2. `http(s)://` references go through [RemoteThumbnailFetcher];
-///     `content://`, `file://`, and SAF `document://` references go through
-///     the native [ThumbnailBridge]. Anything else yields no thumbnail.
+///  1. Prefer the location's stored `thumbnailUri` (a durable provider video
+///     preview reference); otherwise fall back to the `sourceUri` itself.
+///  2. A `thumbnailUri` that is `http(s)://` is a *poster image* and goes
+///     through [RemoteThumbnailFetcher]; `content://`, `file://`, and SAF
+///     `document://` references go through the native [ThumbnailBridge].
+///  3. A `sourceUri` that is `http(s)://` (a stream) has no local file to
+///     decode, so the bridge grabs one frame of it over HTTP
+///     ([ThumbnailBridge.getNetworkThumbnail], P4-10) under the same request
+///     identity the player uses ([networkHeaders]). Anything else yields no
+///     thumbnail.
 ///
 /// Thumbnails are SOFT-FAIL data: every failure path (missing grant, deleted
 /// file, network error, unsupported scheme) returns `null` so the UI shows
@@ -36,6 +40,7 @@ class ThumbnailService {
     required RemoteThumbnailFetcher remoteFetcher,
     ThumbnailDiskCache? diskCache,
     int cacheLimit = defaultCacheLimit,
+    Map<String, String> Function(SourceLocation location)? networkHeaders,
   }) : _repository = repository, // ignore: prefer_initializing_formals
        // ignore: prefer_initializing_formals
        _bridge = bridge,
@@ -44,7 +49,9 @@ class ThumbnailService {
        // ignore: prefer_initializing_formals
        _diskCache = diskCache,
        // ignore: prefer_initializing_formals
-       _cacheLimit = cacheLimit;
+       _cacheLimit = cacheLimit,
+       // ignore: prefer_initializing_formals
+       _networkHeaders = networkHeaders;
 
   final VideoRepository _repository;
   final ThumbnailBridge _bridge;
@@ -55,6 +62,11 @@ class ThumbnailService {
   final ThumbnailDiskCache? _diskCache;
 
   final int _cacheLimit;
+
+  /// Request headers a network frame grab must present for [location]
+  /// (P4-10), so a preview is fetched under the same identity as playback.
+  /// `null` means anonymous — local and future tokenless sources.
+  final Map<String, String> Function(SourceLocation location)? _networkHeaders;
 
   /// Default number of decoded previews kept for the session — roughly a
   /// few screenfuls of grid tiles.
@@ -123,7 +135,7 @@ class ThumbnailService {
         _store(key, persisted);
         return persisted;
       }
-      final bytes = await _fetch(ref);
+      final bytes = await _fetch(ref, location);
       _store(key, bytes);
       await _persist(key, bytes);
       return bytes;
@@ -155,25 +167,32 @@ class ThumbnailService {
     await _diskCache.write(key, bytes);
   }
 
-  Future<Uint8List?> _fetch(_ThumbnailRef ref) async {
-    if (ref.isRemote) {
-      final uri = Uri.tryParse(ref.key);
-      if (uri == null) return null;
-      final result = await _remoteFetcher.fetch(uri);
-      return switch (result) {
-        Ok(:final value) => value,
-        Err() => null,
-      };
+  Future<Uint8List?> _fetch(_ThumbnailRef ref, SourceLocation location) async {
+    switch (ref.kind) {
+      case _ThumbnailKind.poster:
+        final uri = Uri.tryParse(ref.key);
+        if (uri == null) return null;
+        return _bytesOrNull(await _remoteFetcher.fetch(uri));
+      case _ThumbnailKind.local:
+        return _bytesOrNull(
+          await _bridge.getThumbnail(ref.key, maxSidePx: decodeMaxSidePx),
+        );
+      case _ThumbnailKind.frame:
+        return _bytesOrNull(
+          await _bridge.getNetworkThumbnail(
+            ref.key,
+            headers: _networkHeaders?.call(location) ?? const {},
+            maxSidePx: decodeMaxSidePx,
+          ),
+        );
     }
-    final result = await _bridge.getThumbnail(
-      ref.key,
-      maxSidePx: decodeMaxSidePx,
-    );
-    return switch (result) {
-      Ok(:final value) => value,
-      Err() => null,
-    };
   }
+
+  /// Soft-fail: a preview that could not be produced is simply absent.
+  static Uint8List? _bytesOrNull(Result<Uint8List> result) => switch (result) {
+    Ok(:final value) => value,
+    Err() => null,
+  };
 
   void _store(String key, Uint8List? bytes) {
     if (bytes == null) return;
@@ -212,34 +231,48 @@ class ThumbnailService {
     if (stored != null && stored.isNotEmpty) {
       return _ThumbnailRef.of(stored);
     }
-    // Local content URIs double as thumbnail references for the native
-    // bridge. Remote source URIs do NOT — downloading video bytes is not a
-    // thumbnail strategy, so URL rows without a stored preview yield none.
-    return _ThumbnailRef.ofLocalOnly(location.sourceUri);
+    return _ThumbnailRef.ofSourceUri(location.sourceUri);
   }
 }
 
-/// A resolved thumbnail reference: the durable key plus where to fetch it.
+/// How a preview reference is turned into bytes.
+enum _ThumbnailKind {
+  /// A local `content://`, `file://`, or `document://` reference the native
+  /// bridge decodes from disk.
+  local,
+
+  /// A URL of a *preview image* the app downloads (a provider's poster).
+  poster,
+
+  /// A playback URL whose frame the native bridge grabs over HTTP (P4-10).
+  frame,
+}
+
+/// A resolved thumbnail reference: the durable key plus how to fetch it.
 class _ThumbnailRef {
-  const _ThumbnailRef._(this.key, this.isRemote);
+  const _ThumbnailRef._(this.key, this.kind);
 
   final String key;
-  final bool isRemote;
+  final _ThumbnailKind kind;
 
   /// Key for the in-memory and on-disk preview caches.
   ///
-  /// A local preview is an image this app produced, so its decode size is part
-  /// of its identity: changing the tier must not keep serving previews encoded
-  /// at the old size for the life of the install. A remote preview is the
-  /// provider's own image, so its key stays the plain URL (which is also how
-  /// earlier releases cached it).
-  String cacheKey(int maxSidePx) => isRemote ? key : '$key@${maxSidePx}px';
+  /// A preview this app produced (local decode or network frame) is an image
+  /// whose decode size is part of its identity: changing the tier must not
+  /// keep serving previews encoded at the old size for the life of the
+  /// install. A poster is the provider's own image, so its key stays the
+  /// plain URL (which is also how earlier releases cached it).
+  String cacheKey(int maxSidePx) => switch (kind) {
+    _ThumbnailKind.poster => key,
+    _ThumbnailKind.local => '$key@${maxSidePx}px',
+    // `#frame` keeps a decoded frame from colliding with a poster that
+    // happens to be stored under the same URL.
+    _ThumbnailKind.frame => '$key@${maxSidePx}px#frame',
+  };
 
+  /// A stored `thumbnailUri`: a poster image URL, or a local reference.
   static _ThumbnailRef? of(String uri) {
-    final lowered = uri.toLowerCase();
-    if (lowered.startsWith('http://') || lowered.startsWith('https://')) {
-      return _ThumbnailRef._(uri, true);
-    }
+    if (_isHttp(uri)) return _ThumbnailRef._(uri, _ThumbnailKind.poster);
     return ofLocalOnly(uri);
   }
 
@@ -248,8 +281,26 @@ class _ThumbnailRef {
     if (lowered.startsWith('content://') ||
         lowered.startsWith('file://') ||
         lowered.startsWith('document://')) {
-      return _ThumbnailRef._(uri, false);
+      return _ThumbnailRef._(uri, _ThumbnailKind.local);
     }
     return null;
+  }
+
+  /// A location's playback reference, used when no preview is stored.
+  ///
+  /// A local URI doubles as a decodable frame reference. An http(s) URL does
+  /// not — but it is not unusable either: the bridge can grab a single frame
+  /// of the stream, which is what a stream-only item needs (P4-10). Anything
+  /// else (a bare provider id) yields nothing.
+  static _ThumbnailRef? ofSourceUri(String uri) {
+    final local = ofLocalOnly(uri);
+    if (local != null) return local;
+    if (_isHttp(uri)) return _ThumbnailRef._(uri, _ThumbnailKind.frame);
+    return null;
+  }
+
+  static bool _isHttp(String uri) {
+    final lowered = uri.toLowerCase();
+    return lowered.startsWith('http://') || lowered.startsWith('https://');
   }
 }

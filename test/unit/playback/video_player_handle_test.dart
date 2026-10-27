@@ -185,6 +185,25 @@ void main() {
       expect(platform.created[0]!.uri, 'https://example.com/v.mp4');
     });
 
+    test('network sources carry adapter headers into the engine', () async {
+      final handle = VideoPlayerHandle(
+        source: PlayableSource(
+          uri: Uri.parse('https://example.com/v.mp4'),
+          sourceId: 'https://example.com/v.mp4',
+          sourceType: ProviderType.directUrl,
+          httpHeaders: const {'User-Agent': 'MyTube/0.1'},
+        ),
+      );
+      addTearDown(handle.dispose);
+
+      final initializing = handle.initialize();
+      await pumpEventQueue();
+      platform.emit(0, VideoEvent(eventType: VideoEventType.initialized));
+      await initializing;
+
+      expect(platform.created[0]!.httpHeaders, {'User-Agent': 'MyTube/0.1'});
+    });
+
     test('file:// routes to the engine file data source', () async {
       final handle = VideoPlayerHandle(
         source: _source('file:///storage/emulated/0/DCIM/v.mp4'),

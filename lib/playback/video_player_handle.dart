@@ -29,7 +29,13 @@ class VideoPlayerHandle implements PlayerHandle {
       case PlaybackKind.file:
         _controller = VideoPlayerController.file(File.fromUri(source.uri));
       case PlaybackKind.network:
-        _controller = VideoPlayerController.networkUrl(source.uri);
+        // Adapter-resolved headers travel with the source (P4-02): the engine
+        // must present the same identity the probe did, or a server that
+        // answered the probe can still answer 403 here.
+        _controller = VideoPlayerController.networkUrl(
+          source.uri,
+          httpHeaders: source.httpHeaders,
+        );
       case PlaybackKind.unsupported:
         // Defensive: the controller validates schemes before creating a
         // handle, so this only fires on a wiring bug.

@@ -467,7 +467,7 @@ app-wide shared-card decision and the chip/shelf vocabulary still stand.)
 
 ## ADR-008 --- YouTube colour palette as the app-wide theme
 
-**Status:** Accepted (implemented).
+**Status:** Accepted (implemented). Amended by DESIGN.md tokens (see below).
 
 **Context and problem.** The app needed a single, recognisable visual
 identity for the whole UI (SET-001 dark-first) rather than the earlier
@@ -510,6 +510,27 @@ the exact palette hex values on the dark scheme (replacing the earlier
 override intentionally superseded). The one limitation is that light mode
 inherits Material tonal neutrals rather than a bespoke YouTube light
 palette, because the supplied CSV defines dark neutrals only.
+
+**Amended by DESIGN.md tokens.** `DESIGN.md` is now the palette source of
+truth and refines four values the CSV stated differently or not at all:
+background `#0F0F0F` (unchanged), **surface `#212121`** (was `#272727`),
+**primary text `#F1F1F1`** (was `#FFFFFF`), secondary text `#AAAAAA`
+(unchanged), accent `#FF0000` (unchanged), plus two new tokens — **accent
+secondary `#3EA6FF`** (`ColorScheme.secondary`) and **hairline `#303030`**
+(`ColorScheme.outline`/`outlineVariant`). `AppTheme` keeps them as named
+statics (`surfaceDark`, `textPrimary`, `accentSecondary`, `hairline`) and
+maps them onto the scheme so widgets still read `Theme.of` and never a hex.
+The amendment also promotes the palette from "a colour scheme" to a visual
+system: `lib/app/theme/app_tokens.dart` adds `AppSpacing` (8-px grid:
+4/8/12/16/24/32), `AppRadius` (`card` 12, `pill` 24, `sheet` 16, `badge` 4)
+and `AppSizes` (header 56, nav bar 64, mini player 56), an explicit Roboto
+`TextTheme` replaces the default type scale, and `ThemeData` now carries
+component themes (`appBarTheme`, `navigationBarTheme`,
+`inputDecorationTheme`, the three button themes, `chipTheme`,
+`dividerTheme`, `bottomSheetTheme`, `popupMenuTheme`, `snackBarTheme`,
+`progressIndicatorTheme`, `iconTheme`, `sliderTheme`) so no widget invents
+its own chrome. `test/widget/app_theme_test.dart` asserts the hexes and the
+nav/button shapes.
 
 ## ADR-009 --- App-driven MediaSessionCompat for notification controls
 
@@ -723,3 +744,310 @@ moving it past the page size would make shelves jump as pages append. The
 cost is that the app bar and tab tap remain "stock" Material: this decision
 covers the feed surface only, not brand chrome or scroll-to-top, which were
 explicitly declined.
+
+**Amended by the DESIGN.md visual system.** Two parts of this decision are
+superseded, and two are confirmed.
+
+-   **The loading skeleton shimmers.** The static `DiscoverFeedSkeleton` is
+    replaced by `VideoCardSkeleton` built on `SkeletonBox`/`Shimmer`
+    (`lib/core/ui/skeleton.dart`). The original rejection was about test
+    hygiene, not about the look: an unbounded `AnimationController.repeat()`
+    makes `pumpAndSettle` time out. `Shimmer` therefore runs a **bounded**
+    sweep (`AppMotion.skeletonSweeps` = 3) and then rests, honours
+    `TickerMode` and `MediaQuery.disableAnimationsOf`, and the test policy is
+    explicit: tests that touch a skeleton pump fixed durations
+    (`pump(Duration(milliseconds: 300))`) instead of settling, and
+    `test/widget/skeleton_test.dart` proves the sweep terminates and the
+    controller disposes. **No shimmer in production code may loop forever.**
+-   **The card's ⋮ is always visible when actions exist.** ADR-012 left the
+    tile without an overflow; the tile now renders its `⋮` whenever the
+    caller supplies a `VideoItemActions` bundle (favourite / tags / sources /
+    save-to-collection / share), which every production surface does, and
+    only hides it on a read-only card. Titles are `titleSmall` w600 over two
+    lines, the duration badge is `#000000` @ 80% with `AppRadius.badge`, and
+    the whole tile is wrapped in `PressableScale` (ADR-015).
+-   **Unchanged:** tiles still carry no Material `Card` surface (an `InkWell`
+    over a flat `Column`), and the shared-card decision of ADR-006 still
+    stands — the restyle lands in `VideoItemCard` and therefore reaches
+    Library, Saved, Favorites, collection detail and search at once.
+
+## ADR-013 --- One branded shell header, and the Library's view state lifted out of the tab
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** DESIGN.md puts a brand mark and a search field at the
+top of every browsing surface. The app instead painted a per-screen `AppBar`
+inside each tab, so the header slid with the page, Discover showed a search
+icon that opened another route, and Library kept its own toolbar (add URL,
+scan, folders, filter, sort) plus a 250 ms debounce timer inside the widget.
+Two tabs therefore owned duplicate toolbar code and the search field meant
+different things in different places.
+
+**Decision.** `MainScaffold` owns **one** header — `MyTubeTopBar`
+(`lib/app/shell/app_header.dart`, a `PreferredSizeWidget` of height 56) — and
+the tabs lose their `Scaffold`/`AppBar` entirely. The header is left: the
+`MyTubeLogo` mark; centre: an expandable pill search field; right: a per-tab
+action slot plus the tab's overflow menu. Discover gets search + reshuffle,
+Library gets add-URL + scan/folders/filters, Saved gets "New collection",
+Settings gets none. Reels stays full-bleed black with no header at all,
+because the 9:16 pager and its own on-video chrome cannot share a toolbar.
+
+The header is also **tab-aware about what search means**: while Library is
+active the field edits `libraryViewStateProvider` (the same 250 ms debounce,
+now in `LibraryViewStateNotifier`), while on Discover/Saved submitting the
+field pushes the existing `DiscoverSearchScreen` prefilled. A tab switch
+collapses the field so a query typed for one tab never filters another. The
+logo is a control, not decoration: tapping it bumps
+`shellScrollToTopProvider`, and each tab scrolls its own list only while
+visible.
+
+**Alternatives considered.** Keep each tab's `AppBar` and style all five
+(rejected: five copies of one toolbar, and the header would still scroll away
+on Discover). Hoist only the logo and leave search per-screen (rejected:
+two search entry points with different semantics is exactly the confusion
+DESIGN.md removes). Put the Library toolbar in the pinned filter row instead
+of the header (rejected: the row is already the filter/mode surface, and
+scan/add-URL are not filters). Move Library's debounce into the screen and
+have the header call into it through a callback (rejected: the header and the
+tab would own half the state each).
+
+**Consequences.** Chrome is written once and behaves identically on every
+browsing tab; LIB-003/004/005 behaviour is unchanged but relocated, so the
+library tests now drive the header. Pushed routes (Favorites, collection
+detail, search, the player) keep their own `AppBar` and cover the header —
+which is also why the player could stay a normal route. The header renders
+`PopupMenuButton`s, so a widget test that taps a Library overflow item must
+tap `shell_library_more` first; `test/widget/main_scaffold_test.dart` pins
+the per-tab affordances and the Reels exception.
+
+## ADR-014 --- App-owned playback session and the mini-player dock
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** The player page owned playback: closing it called
+`controller.stop()` from `dispose`, so a back press or a swipe-down killed
+the video and the position. DESIGN.md asks for a dockable player — collapsing
+the page into a 56dp bar that keeps playing — and the app owns exactly **one**
+engine shared with Reels, so a second surface holding "what is playing" would
+let two surfaces fight for it.
+
+**Decision.** `PlaybackSessionController` (`lib/playback/playback_session.dart`)
+is the single owner of "what is playing": `item` plus a mode of `idle`,
+`mini` or `expanded`. The player page *adopts* its item when it opens,
+*collapses* on the way out (back, app-bar chevron, or a vertical drag past
+`AppSizes.dockDragThreshold` = 96 px) and never stops the engine itself;
+only the dock's close button or a downward drag *stops* — engine stop,
+`WatchProgressService.flush`, session clear and `nowPlayingProvider` label
+clear, in that order. The dock (`lib/app/shell/mini_player.dart`) renders
+only in `mini` mode, sits directly above the `NavigationBar` in
+`MainScaffold.bottomNavigationBar`, and reopens the page on tap. The page
+uses a `Hero` keyed `player_surface_<id>` so the video box hands over to the
+dock's thumbnail.
+
+Two consequences are load-bearing. First, Riverpod forbids mutating a
+provider from a widget life-cycle method, so the collapse runs from the
+route's `PopScope.onPopInvokedWithResult` (and from the drag handler), with
+a `_sessionHandedOff` latch keeping it to one call — `dispose` no longer
+touches the session at all. Second, the **Reels conflict guard**: activating
+the Reels tab calls `session.stop()` (plus engine stop, progress flush and
+label clear) and starting Reels playback clears the session, so the two
+surfaces can never own the engine simultaneously.
+
+**Alternatives considered.** Keep the engine alive inside the page's state
+and render a separate dock widget that pushes the page again (rejected: two
+sources of truth for "what is playing", and the surviving page state leaks
+the engine). Keep the page as the owner and only *pause* on close (rejected:
+DESIGN.md asks for playback to continue, and a paused engine behind the
+shell is indistinguishable from a leak). Stop Reels when the dock is tapped
+(rejected: the dock exists to resume the session, not to fight it — the tab
+switch is the documented breaking point). A `Navigator` route observer
+instead of `PopScope` (rejected: it fires after teardown, so the item to
+collapse is already gone).
+
+**Consequences.** Background audio, the media notification and PiP keep
+working because the shell — not the page — feeds `nowPlayingProvider` and
+`MediaSessionCoordinator`, so their P13-02/P13-03 behaviour is unchanged. The
+costs: the session must be cleared by whoever takes the engine (documented
+above and covered by tests in `playback_session_test`,
+`mini_player_test` and `main_scaffold_test`), and the engine stop is
+asynchronous, so a widget test asserting the release pumps the real futures
+(`tester.runAsync(() => Future<void>.delayed(Duration.zero))` followed by
+`tester.pump()`).
+
+## ADR-015 --- Motion primitives, and an explicit test policy for animation
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** DESIGN.md's interaction language (a press that scales
+to 0.95, haptics on primary actions, a shimmering skeleton) needs duration,
+curve and feedback constants shared across surfaces. Hand-rolling
+`AnimatedScale` + `HapticFeedback` per widget duplicates the numbers and
+scatters haptic calls; unbounded animation loops break `pumpAndSettle`. The
+app also supports reduced motion, which no widget was honouring.
+
+**Decision.** Three small primitives under `lib/core/ui/`.
+
+-   `motion.dart`: `AppMotion` (`fast` 120 ms, `base` 200 ms, `emphasized`
+    300 ms, `standard` = `Curves.easeOutCubic`, `pressedScale` 0.95,
+    `skeletonSweeps` 3) plus `reduceAnimations(context)`, which reads
+    `MediaQuery.disableAnimationsOf`.
+-   `pressable.dart`: `PressableScale` scales to 0.95 on press-down, fires
+    `HapticFeedback.selectionClick()` on press-down (light impact for primary
+    CTAs) and restores on cancel/up. It has an owning mode (it handles the
+    tap) and a passive mode (the child keeps its own gesture, the wrapper
+    only mirrors the press), and it degrades to a no-op scale with no haptic
+    when reduced motion is on or the control is disabled.
+-   `skeleton.dart` + `video_card_skeleton.dart`: `SkeletonBox`,
+    `SkeletonCircle` and a bounded `Shimmer` around a clone of
+    `VideoItemCard`'s geometry, used by Discover, Library's first load and
+    Saved. `AsyncValueWidget` takes an optional `skeleton` builder so a
+    screen opts in without duplicating its loading branch.
+
+**Test policy (binding).** A test that puts a skeleton on screen pumps fixed
+durations and **never** `pumpAndSettle`s while the sweep is in flight; the
+sweep itself is bounded, so `pumpAndSettle` after the last sweep still
+terminates (asserted in `test/widget/skeleton_test.dart`). `PressableScale`
+behaviour — scale, haptic, cancel, passive mode, reduced motion, disabled —
+is pinned in `test/widget/pressable_test.dart`. No new dependency was added:
+both primitives are a few dozen lines over `AnimatedScale`,
+`AnimationController` and `HapticFeedback`.
+
+**Alternatives considered.** `flutter_animate` or `shimmer` (rejected: a
+package for ~80 lines, and the package shimmer loops forever). Use
+`InkWell` splash as the only feedback (rejected: it is invisible over a
+thumbnail and gives no haptic). Encode durations in `ThemeData`
+`PageTransitionsTheme` (rejected: that covers page transitions only, not
+press feedback or skeletons). Ask every call site to check
+`disableAnimationsOf` (rejected: one forgotten site is a broken reduced-motion
+experience).
+
+**Consequences.** Every surface shares one motion vocabulary, reduced motion
+is honoured in one place, and tests have a written rule instead of tribal
+knowledge. The cost is that a skeleton test that settles too early
+(`pumpAndSettle` inside a sweep) will hang, so reviewers must apply the rule
+above; and `PressableScale` in passive mode silently drops the press if the
+child never reports it, which is why the wrap order in `VideoItemCard`
+matters.
+
+## ADR-016 --- A share seam with no new dependency
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** DESIGN.md's action row includes Share, but the app
+deliberately carries no `share_plus` (every dependency is audited, and
+`share_plus` would be the only reason to add a plugin channel). The library
+holds two very different kinds of item: **direct-URL** items, whose durable
+address is the source URL itself, and **local/SAF/cloud-file** items, whose
+`content://` or `file://` URI is only meaningful through a granted
+permission.
+
+**Decision.** A narrow, testable seam with the platform.
+
+-   `lib/platform/share_bridge.dart` declares `ShareBridge.shareFile(uri,
+    mimeType)` and returns `false` when the channel is missing, so widget
+    tests, desktop and (for now) iOS degrade instead of throwing.
+    `share_bridge_impl.dart` implements it over the
+    `MethodChannel('com.example.mytube/share')` served by `SharePlugin.kt`,
+    the same registrar pattern the audio-focus, media-session, PiP and
+    thumbnail bridges use.
+-   `lib/domain/services/share_service.dart` decides the path: a direct-URL
+    item has its trimmed source URL copied with `Clipboard.setData`
+    (`ShareOutcome.linkCopied`); a `content://`, `file://` or other
+    file-ish location goes to the bridge (`ShareOutcome.sheetOpened`); a
+    provider-private scheme (`r2token://…`), a blank URI, a missing location
+    or a repository failure is `ShareOutcome.unavailable` — the UI shows a
+    safe message and never a raw URI.
+-   Android: `SharePlugin.kt` (`ACTION_SEND` with
+    `FLAG_GRANT_READ_URI_PERMISSION`) registered through the existing plugin
+    registrar pattern, plus a `FileProvider` (`res/xml/file_paths.xml` and the
+    `<provider>` manifest entry) for file paths.
+
+**Alternatives considered.** Add `share_plus` (rejected: one dependency + one
+channel for a feature two `ACTION_SEND` variants cover). Share the URL for
+local files too (rejected: a `file://` path is meaningless off-device and a
+`content://` URI is unusable without the grant). Copy every URI to the
+clipboard as a fallback (rejected: it silently leaks a provider-internal
+address). Throw on a missing channel (rejected: turns an optional platform
+feature into a crash).
+
+**Consequences.** Share is testable in pure Dart with a fake bridge —
+`test/unit/domain/share_service_test.dart` pins the clipboard path, the sheet
+path, the fail-soft path and the private-scheme refusal — while the native
+half is verified by an APK build, because Dart tests never execute Kotlin.
+The cost is that iOS sharing is not implemented yet (the bridge reports
+`false`), and that the sheet path is only as good as the MIME hint, so the
+service sends `video/*` unless a location says otherwise.
+
+## ADR-017 --- Per-item delete is a separate, confirmed destructive action
+
+**Status:** Accepted (implemented).
+
+**Context and problem.** The card's `⋮` had every action except the one a user
+reaches for after watching something: delete. `VideoRepository.deleteItem`
+exists but only unlinks the app's row, and AGENTS.md's data-integrity rule —
+"removing a library entry removes app metadata/references, not the original" —
+is there to stop *indexing* and *refresh* from silently destroying files.
+Sending a delete through the same path would either break that rule or create
+a second, unstated one. Cloud providers (OneDrive, Google Drive, R2) are also
+not implemented yet, so a naive "delete everywhere" button would advertise a
+capability the app does not have.
+
+**Decision.** Two actions, one entry point, and an explicit seam for who can
+actually destroy an original.
+
+-   **Plan, then ask, then act.** `ItemRemovalService.plan(item)` is a pure
+    read that buckets each source location into `originalsToDelete` (a deleter
+    is registered for its provider) or `recordOnly` (a direct URL, a location
+    already `missing`, or a provider with no deleter yet). The dialog is
+    generated from that plan — "This permanently deletes 2 files from this
+    device" vs "This removes the video from your library" — so the wording can
+    never over-promise. `remove(plan)` runs only after confirmation.
+-   **`ItemOriginalDeleter` is the only destructive seam.**
+    `LocalFileOriginalDeleter` is the only implementation today; it routes
+    `content://media/` ids to `MediaStoreBridge.deleteVideos` and everything
+    else to `SafBridge.deleteDocuments`. Cloud adapters add a deleter to
+    `itemOriginalDeletersProvider` when they land; until then their copies are
+    unlinked and the dialog says so. `VideoSourceAdapter` gained nothing, so
+    read-only adapters never carry a delete method they do not implement.
+-   **Originals first, record second.** A failed `deleteItem` after a
+    successful file delete leaves a listed item with a missing file, which the
+    next scan deindexes; the opposite order would orphan files with nothing in
+    the app pointing at them.
+-   **Deletion is per-id, not boolean.** `SourceDeletionReport` records which
+    ids went and which were kept, so a dismissed Android confirmation, a
+    read-only SAF grant or one already-gone file becomes an honest message
+    ("1 of 2 files couldn't be deleted") instead of a false success.
+-   **Android.** `MediaStore.createDeleteRequest` on API 30+ (one system
+    confirmation for the whole batch, reported from
+    `onActivityResult`); a direct `ContentResolver.delete` per URI below 30.
+    The SAF folder picker now requests `FLAG_GRANT_WRITE_URI_PERMISSION` and
+    persists read+write, falling back to read-only for older grants, and
+    `DocumentsContract.deleteDocument` does the delete. A revoked/read-only
+    grant reports "kept", never an exception.
+-   **UI.** `delete_<id>` is the last `⋮` entry, error-coloured, labelled
+    "Remove from library" when the primary provider is a direct URL. It also
+    appears in the shared action sheet (`item_action_delete`). After success
+    the flow stops the dock if it is playing the removed item and invalidates
+    every list that could still show it.
+
+**Alternatives considered.** Reuse `Delete` as "remove from library" only
+(rejected: the user asked for real deletion, and the two outcomes need
+different words). Delete originals as part of the existing unlink
+(rejected: breaks AGENTS.md's data-integrity rule and gives an unrelated
+action a destructive side effect). Add `delete` to `VideoSourceAdapter` and
+call it through the registry (rejected: churns every adapter fake and makes a
+destructive capability look mandatory). Delete the record first, then the file
+(rejected: orphans files on failure). Per-file confirmations (rejected: a
+20-file item would mean 20 dialogs; the OS already shows one batch prompt).
+
+**Consequences.** Removal is testable without a device:
+`test/unit/domain/item_removal_service_test.dart` pins the plan/outcome matrix
+(direct URL, local, mixed, missing, cloud, partial, under-reporting deleter,
+failed `deleteItem`), `local_file_original_deleter_test.dart` pins the routing
+and the "one owner failing does not hide the other" rule, and
+`test/widget/video_item_delete_test.dart` pins the menu label, the dialog copy
+and every snackbar. The native half is only verifiable by an APK build and a
+device run. The cost is that cloud deletion is unimplemented-but-advertised:
+the dialog explicitly says so, and the removable-provider list is the single
+place to extend.
+

@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mytube/app/shell/app_header.dart';
+import 'package:mytube/app/shell/shell_tabs.dart';
+import 'package:mytube/app/theme/app_theme.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/core/ui/empty_state.dart';
 import 'package:mytube/data/database/app_database.dart' show AppDatabase;
@@ -76,10 +79,18 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    // The shell owns the branded header and the Material ancestor; the tab is
+    // a chrome-free body under it (plan M3).
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: MaterialApp(home: DiscoverScreen()),
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: const Scaffold(
+            appBar: MyTubeTopBar(tab: ShellTab.discover),
+            body: DiscoverScreen(),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -150,13 +161,22 @@ void main() {
       );
     });
 
-    testWidgets('the app-bar search button opens the smart-search screen', (
+    testWidgets('the header search action opens the smart-search screen', (
       tester,
     ) async {
       await pumpDiscover(tester, _FakeRepository(items: [_item(id: 'a')]));
 
-      await tester.tap(find.byKey(const ValueKey('discover_search_button')));
+      // Search lives in the shell header now: expanding it and submitting the
+      // query pushes the smart-search screen (plan M3).
+      await tester.tap(find.byKey(const ValueKey('shell_search_button')));
       await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('shell_search_field')),
+        'video',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+
       expect(
         find.byKey(const ValueKey('discover_search_field')),
         findsOneWidget,
@@ -825,8 +845,9 @@ class _FakeRepository implements VideoRepository {
 
   @override
   Future<Result<List<VideoItemSummary>>> getCollectionItems(
-    String collectionId,
-  ) async => Ok(collectionItems[collectionId] ?? const []);
+    String collectionId, {
+    int? limit,
+  }) async => Ok(collectionItems[collectionId] ?? const []);
 
   @override
   Future<Result<List<SourceLocation>>> getSourceLocationsForVideo(

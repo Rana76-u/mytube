@@ -4,6 +4,17 @@ import 'package:mytube/sources/source_adapter.dart' show CancellationToken;
 /// Default wall-clock budget for one probe (connection + response headers).
 const defaultProbeTimeout = Duration(seconds: 10);
 
+/// The HTTP identity every direct-URL request presents (P4-02).
+///
+/// The probe and the player engine must send the SAME identity: a server that
+/// lets the probe through must not then answer 403 to the engine because it
+/// saw a different client. Defining it once keeps the two paths from drifting.
+const directUrlUserAgent = 'MyTube/0.1 (personal video hub)';
+
+/// Headers a resolved direct URL carries into the player engine
+/// ([PlayableSource.httpHeaders]), mirroring [directUrlUserAgent].
+const directUrlRequestHeaders = {'User-Agent': directUrlUserAgent};
+
 /// Metadata obtained from a successful probe of a direct URL (P4-02, URL-003).
 ///
 /// Every field except [statusCode] is optional — URL-003 requires that we do

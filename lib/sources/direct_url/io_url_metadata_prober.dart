@@ -44,7 +44,7 @@ class _Attempt {
 /// | SocketException                 | NetworkUnavailableError   | yes       |
 /// | timeout                         | UnexpectedError           | yes       |
 class IoUrlMetadataProber implements UrlMetadataProber {
-  IoUrlMetadataProber({this.userAgent = 'MyTube/0.1 (personal video hub)'});
+  IoUrlMetadataProber({this.userAgent = directUrlUserAgent});
 
   final String userAgent;
 
@@ -92,6 +92,9 @@ class IoUrlMetadataProber implements UrlMetadataProber {
   }) async {
     try {
       final request = await client.openUrl(method, url).timeout(timeout);
+      // Identify like the player engine will (directUrlRequestHeaders), so a
+      // server that gates on User-Agent answers the probe and playback alike.
+      request.headers.set(HttpHeaders.userAgentHeader, userAgent);
       request.followRedirects = true;
       request.maxRedirects = 5;
       if (ranged) {

@@ -1,5 +1,6 @@
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/availability_state.dart';
+import 'package:mytube/domain/models/source_deletion_report.dart';
 
 /// Interface for the Android Storage Access Framework folder-pick and
 /// persistable-access bridge (LOCAL-003, P3-02).
@@ -29,6 +30,16 @@ abstract interface class SafBridge {
 
   /// Returns [true] if the app can currently access [folderUri].
   Future<Result<bool>> checkFolderAccess(String folderUri);
+
+  /// Deletes the SAF documents at [uris] (ADR-017).
+  ///
+  /// Deletion goes through the containing folder's grant, so a folder picked
+  /// before the app asked for write access reports every URI as kept instead of
+  /// throwing — the caller turns that into "remove from library only".
+  ///
+  /// Destructive: callers must hold explicit user consent. Widgets must never
+  /// call this directly; the domain removal service does.
+  Future<Result<SourceDeletionReport>> deleteDocuments(List<String> uris);
 }
 
 /// Metadata for a single video file discovered via SAF.
