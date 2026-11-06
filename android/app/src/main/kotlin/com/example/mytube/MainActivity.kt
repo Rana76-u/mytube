@@ -31,6 +31,17 @@ class MainActivity : FlutterActivity() {
         CaptionsPlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
+        // Link-downloader extraction bridge (DL2.3). Wraps the youtubedl-android
+        // engine behind com.example.mytube/extractor.
+        ExtractorPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
+        // Link-downloader destination publisher (DL3.2/DL3.3). MediaStore and
+        // SAF-tree copies behind com.example.mytube/publish; app storage stays
+        // in Dart (dart:io rename).
+        PublishPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
     }
 
     // PiP enter/leave is reported by the framework on the activity, not on a

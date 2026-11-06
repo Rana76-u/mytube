@@ -118,3 +118,147 @@ final class RefreshThrottledError extends AppError {
   /// The last time a successful refresh completed.
   final DateTime? lastRefreshedAt;
 }
+
+// ── Link-downloader typed errors (ARCHITECTURE §15.10, DL1.2) ──────────────
+//
+// Each maps one engine failure mode to user-safe text plus a privacy-safe
+// diagnostic. Rate limiting reuses [RateLimitError] and OAuth re-login reuses
+// [AuthenticationRequiredError]; the extractor-specific failures below are new.
+// `LoginRequired`, `AgeRestricted`, `GeoBlocked` and [RateLimitError] are the
+// four that enter the recovery ladder (§15.13) *before* they are shown to the
+// user — that routing lives with the runner, not here.
+
+/// The extraction engine is not present or failed to initialise (§15.10).
+final class ExtractorUnavailableError extends AppError {
+  const ExtractorUnavailableError({
+    super.userMessage =
+        'The downloader engine is not ready yet. Try again in a moment.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The engine is too old to parse this site; an update is available (§15.10).
+final class ExtractorOutOfDateError extends AppError {
+  const ExtractorOutOfDateError({
+    super.userMessage =
+        'The downloader engine is out of date. Update it in Settings.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// No extractor exists for this site (§15.10).
+final class UnsupportedSiteError extends AppError {
+  const UnsupportedSiteError({
+    super.userMessage = "This site isn't supported by the downloader.",
+    required super.diagnosticMessage,
+  });
+}
+
+/// The media needs the owner signed in to the site (import or use cookies);
+/// distinct from [AuthenticationRequiredError], which is about app OAuth.
+final class LoginRequiredError extends AppError {
+  const LoginRequiredError({
+    super.userMessage =
+        'This needs you signed in to the site. Sign in or import cookies in '
+        'Settings, then retry.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The media is private or has been removed (§15.10).
+final class PrivateOrRemovedError extends AppError {
+  const PrivateOrRemovedError({
+    super.userMessage = "This item is private or no longer available.",
+    required super.diagnosticMessage,
+  });
+}
+
+/// The media is age-restricted and needs a verified signed-in account.
+final class AgeRestrictedError extends AppError {
+  const AgeRestrictedError({
+    super.userMessage =
+        'This item is age-restricted. Sign in to the site with an eligible '
+        'account to download it.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The media is blocked in the current region (§15.10).
+final class GeoBlockedError extends AppError {
+  const GeoBlockedError({
+    super.userMessage =
+        'This item is not available in your region. A proxy may help.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The stream is DRM-encrypted; it is never decrypted (AGENTS DRM line).
+final class DrmProtectedError extends AppError {
+  const DrmProtectedError({
+    super.userMessage = 'This stream is protected (DRM) and cannot be saved.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// Live streams are out of scope for this milestone (§15.10, DL12).
+final class LiveStreamUnsupportedError extends AppError {
+  const LiveStreamUnsupportedError({
+    super.userMessage = 'Live streams cannot be downloaded here.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// Playlists are handled by their own flow, not single-format selection
+/// (§15.10, DL11).
+final class PlaylistUnsupportedError extends AppError {
+  const PlaylistUnsupportedError({
+    super.userMessage = 'Playlists are downloaded from the playlist screen.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The chosen destination is gone: revoked SAF grant, unwritable folder, or a
+/// provider not yet connected (§15.7, §15.10).
+final class DestinationUnavailableError extends AppError {
+  const DestinationUnavailableError({
+    super.userMessage =
+        'That folder is no longer available. Pick a destination and retry.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// Not enough free storage to stage or publish the file (§15.10).
+final class LowStorageError extends AppError {
+  const LowStorageError({
+    super.userMessage = 'Not enough free space. Free up storage and try again.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// Post-processing (merge or audio convert) failed after the bytes arrived;
+/// the staged file is kept (§15.10).
+final class PostProcessingFailedError extends AppError {
+  const PostProcessingFailedError({
+    super.userMessage =
+        'The file downloaded but could not be finished. Retry from Settings.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// The user cancelled the job; the job's own partial file is removed (§15.10).
+final class DownloadCancelledError extends AppError {
+  const DownloadCancelledError({
+    super.userMessage = 'Download cancelled.',
+    required super.diagnosticMessage,
+  });
+}
+
+/// Stored site cookies have expired; the owner must sign in or re-import.
+final class CookiesExpiredError extends AppError {
+  const CookiesExpiredError({
+    super.userMessage =
+        'Your saved sign-in for that site has expired. Sign in again or '
+        're-import cookies.',
+    required super.diagnosticMessage,
+  });
+}

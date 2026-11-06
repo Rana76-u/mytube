@@ -1340,7 +1340,9 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
 > adapters land). A library item whose only source is MediaStore/SAF is never
 > downloadable or exportable --- the file is already on the device. The
 > concrete breakdown, including the player-side entry, is VP6 at the end of
-> this file.
+> this file. Web-link downloads (YouTube, Facebook, Instagram and similar, through an
+> extractor) extend this scope: see the Link downloader block (DL) at the end of
+> this file and ADR-021 to ADR-026.
 
 -   [x] **P12-01** Define per-provider download eligibility. --- Done
     (VP6.1: `SourceCapabilities.canDownload` + typed `checkDownloadEligibility`;
@@ -2671,3 +2673,506 @@ restart (VP3.2, VP5.5); Up Next with badges, overflow menu, now-playing state
 and autoplay (VP3.5); pluralised relative dates (VP1.5); accessibility verified
 (VP7.1); no jank, leaks or console errors (VP7.2, VP7.4).
 
+## Link downloader --- web links, extractor-backed (ADR-021 to ADR-026)
+
+Source of truth: `ARCHITECTURE.md` §15, `REQUIREMENTS.md` `DLK-*`,
+`DECISIONS.md` ADR-021 to ADR-026, and the "Link downloader" section of
+`AGENTS.md`. Feature summary: download video or audio from supported web
+links (YouTube, Facebook, Instagram and similar) with Best or custom quality,
+a download-location setting, clipboard link detection that always asks
+Download / Stream / Dismiss, share-to-app that always downloads, and a saved
+download configuration in Settings. This block splits the work into `DL0` to
+`DL9` so no single agent run builds it all at once. Do not start a phase until
+the previous one is green. DL0 is a gate: nothing else begins until the owner
+has confirmed the ADRs and DL0.2 has passed.
+
+### Ground rules (apply to every task below)
+
+-   **Extend, do not replace.** Reuse `HttpDownloadManager`,
+    `DownloadRepository`/`DriftDownloadRepository`, `DownloadController`,
+    `DownloadPill`, `providerIsDownloadable`, `PlaybackSourceResolver` with
+    `OfflineDownloadResolver`, `ScanMergeService`, `ItemRemovalService`,
+    `MediaStoreBridge`, `SafBridge`, `AppPreferencesDao`/`AppPreferenceKeys`,
+    `DiagnosticRedactor`, `PrivacySafeLogger`, `storagePathsProvider`,
+    `VideoSourceAdapter`, `SourceCapabilities`. Do not regenerate the project
+    or rewrite these; add seams and small edits.
+-   **One extractor.** The engine is reached only through `MediaExtractor`.
+    No second downloader, no `ffmpeg_kit_flutter`, no WebView scraping.
+-   **State and UI.** `flutter_riverpod` 3.x, theme tokens only (no hex in
+    widgets), `PressableScale`, skeletons through `AsyncValueWidget`, bridges
+    behind interfaces that fail soft off-device. Widgets never touch the
+    database, the extractor or a bridge.
+-   **Safety rules from `AGENTS.md` apply in full:** never log or persist stream URLs, signed URLs or raw clipboard text, and
+    never log cookies (they live only in secure storage, ADR-027); never overwrite
+    or delete files you did not create; Clear Cache never reaches downloads or
+    staging; deleting a download is explicit and names the file.
+-   **Never weaken a test.** Existing keys and tests stay. New behaviour gets
+    new tests in the same change.
+-   **Checks per task:** `dart format lib test`, `flutter analyze lib test`,
+    the relevant `flutter test`. Any Kotlin, manifest or Gradle change also
+    needs `flutter build apk --debug` (a Dart test never compiles Kotlin).
+    Report the commands you actually ran and their real results. Mark a task
+    done only when its acceptance criteria and checks pass, and record what
+    changed here in the same style as the entries above.
+-   **Stop and ask** the owner if the code contradicts a task, if the engine
+    fails DL0.2, or if a task would need DRM decryption.
+
+### DL0 --- Decision gate and repository inspection
+
+-   [x] **DL0.1** Inspect and record. --- Done 2026-11-06. Read
+    `pubspec.yaml`, `AndroidManifest.xml`, `MainActivity.kt` + registrar,
+    `build.gradle.kts`, `Downloads`/`DownloadsDao`/`DownloadRecord`,
+    `HttpDownloadManager`, `DownloadController`, `DownloadPill` status gate,
+    `ProviderType` and every switch over it, `AppPreferenceKeys`,
+    `ScanMergeService`, `StorageOfflineDownloadResolver`, `MediaStorePlugin.kt`,
+    `SaffBridgePlugin.kt`, `SharePlugin.kt`, `MediaPlaybackService.kt`,
+    `MainScaffold`/`MyTubeTopBar`, the Settings screen and the Library header
+    actions. Findings table written under "DL0 findings" in `DECISIONS.md`:
+    schema v7, `provider_type`/`status` stored as enum names, `MainActivity`
+    `singleTop` with no `ACTION_SEND` filter, the just-in-time
+    `POST_NOTIFICATIONS` flow, and all 7 exhaustive `ProviderType` switches
+    plus the non-switch lookup sites. Acceptance met: the table exists and
+    DL0.2/DL0.3 and later tasks cite it.
+-   [x] **DL0.2** Verify the extraction engine. --- Done 2026-11-06.
+    Documentation half done and recorded in `DECISIONS.md` under ADR-022
+    ("DL0.2 engine verification"): original and
+    `io.github.junkfood02.youtubedl-android` coordinates are the same
+    maintained project (0.18.1, 2025-11-16; GPL-3.0; `minSdk 24`; 16 KB
+    page support claimed since 0.18.0; AAR sizes library 59.2 MB / ffmpeg
+    139.4 MB / aria2c 20.3 MB across 4 ABIs; yt-dlp update fetches official
+    yt-dlp releases and restores the bundled binary on failure). ADR-022
+    moved to **Accepted** for the gate criteria; ADR-027/028 statuses updated
+    with the same evidence. **Device spike PASSED on the CPH2719 (Android 16,
+    arm64-v8a) 2026-11-06** on scratch branch `spike/dl0-2-engine`: deps + AGP 9
+    `jniLibs.useLegacyPackaging=true` (the manifest `extractNativeLibs="true"`
+    attribute is rejected; universal APK 246.2 MB, arm64 114.2 MB), installed via
+    wireless ADB and the one-shot `SPIKE_DL02` thread ran. Verified on-device:
+    engine/FFmpeg/aria2c init ok, bundled yt-dlp `2025.11.12`, **YouTube
+    extraction + download PASS**, **FFmpeg video+audio merge PASS**, **aria2c
+    `-x 4 -s 4` PASS**, and **`updateYoutubeDL(STABLE)` → `2026.10.26` PASS**
+    (persisted; next start `ALREADY_UP_TO_DATE`). Facebook/Instagram/direct-MP4
+    did **not** pass but came back **inconclusive, not proven reachable**: the FB
+    probe used a fabricated/unparseable id, IG failed exactly as ADR-027 predicts
+    (login/`--cookies`) but was never retried *with* cookies, and the direct-MP4
+    `[generic]` 403 was dropped rather than re-run. Broad-site reach is therefore
+    **unproven** and stays an open remedial item (real public URLs + a cookie
+    rerun) landed in DL9/DL10. What the spike proved is the site-agnostic engine
+    *mechanism* on real YouTube — the only thing the engine *choice* had to
+    validate — so DL1 (pure Dart, engine-agnostic) is cleared to start. Full
+    results table + honest scope note in ADR-022.
+    **Engine choice validated on YouTube; broad-site reach pending DL9/DL10;
+    DL1 cleared.** The scratch branch is throwaway and
+    must NOT be merged — DL1 re-adds the dependency behind the `MediaExtractor`
+    seam.
+-   [x] **DL0.3** Android platform decisions. --- Done 2026-11-06. Confirmed
+    against current developer.android.com pages and recorded under ADR-026:
+    `dataSync` type + `FOREGROUND_SERVICE_DATA_SYNC` + `POST_NOTIFICATIONS`
+    reuse; the 6 h/24 h quota is scoped to apps targeting API 35+ (this app
+    targets 36), foregrounding resets the timer, `onTimeout` exists only on
+    Android 15+ and must `stopSelf()` within seconds; quota exhaustion throws
+    `ForegroundServiceStartNotAllowedException` on new starts; API 24-28
+    `DeviceFolder` needs `WRITE_EXTERNAL_STORAGE` `maxSdkVersion="28"`
+    just-in-time with AppStorage fallback; the share filter is
+    `ACTION_SEND`/`text/plain`/`DEFAULT` on `singleTop` `MainActivity`
+    (`onCreate` + `onNewIntent`); UIDT jobs are API 34+ only so the service
+    stays the single mechanism for `minSdk 24`. ADR-026 moved to
+    **Accepted** with these facts; ADR-024 stays Proposed pending the same
+    owner sign-off as DL0.4 (its clipboard/share semantics are owner rules,
+    and the Android 12 read-notice + timestamp-check design it relies on is
+    confirmed). Acceptance met except the ADR-024 status flip, which waits
+    for DL0.4.
+-   [ ] **DL0.4** Owner confirmation. --- Todo. The owner confirms or changes
+    the proposed defaults: default destination (visible device folder),
+    audio not mixed into the video library, Stream adds a web-link library
+    item, playlists/channels/live in scope (DL11, DL12), cookie import in scope (DL10), extractor
+    wrapper licence accepted for personal use. Record the answers in ADR-021
+    to ADR-026 and move them to **Accepted**.
+
+### DL1 --- Domain models and pure logic (no native code, no UI)
+
+-   [x] **DL1.1** Link handling. --- Done 2026-11-06. `link_extraction.dart`:
+    `extractFirstHttpUrl(String)` (first `http(s)` URL in free text, trailing
+    punctuation and brackets trimmed, 2048-char length limit, rejects other
+    schemes via a validated `Uri` gate), `WebLink` value type (original input,
+    validated `Uri`, host; equality on scheme + normalised URL), and
+    `describeLinkForDisplay` (host plus path clipped to 32 chars, never query
+    or fragment). 17 tests green: messy share text, multiple URLs, no URL,
+    `javascript:`/`file:` rejected, very long input, uppercase scheme, IDN
+    host, query never shown.
+-   [x] **DL1.2** Models. --- Done 2026-11-06. `web_media.dart`:
+    `WebMediaInfo`, `WebFormat`, `FormatChoice` (video and audio),
+    `FormatSelectionNote` (`qualityLowered`, `codecMayNotPlay`, `needsMerge`,
+    `mp4Unavailable`), `DownloadSourceKind`, `DownloadDestination` (sealed:
+    app storage, device folder, picked folder, OneDrive) — value equality and
+    `toString` that never prints URLs with query strings. 15 typed download
+    errors from ARCHITECTURE §15.10 appended to `app_error.dart` (rate-limit
+    and OAuth re-login reuse the existing `RateLimitError`/
+    `AuthenticationRequiredError`). 16 tests green.
+-   [x] **DL1.3** `FormatSelector`. --- Done 2026-11-06. Pure,
+    framework-free, exactly as ARCHITECTURE §15.6 (live/playlist routed to
+    their own flows before selection; DRM ignored; MP4-only, height cap,
+    compatibility codec, fps/bitrate order, video+audio merge pairing, M4A/
+    Opus copy vs MP3 re-encode, unknown sizes give null not 0). 32 tests
+    green (>= 25 required).
+-   [x] **DL1.4** `DownloadPreset`. --- Done 2026-11-06. Value type with
+    `sanitize`/`normalized`/`copyWith`, §15.9 defaults, `download.*` keys
+    added to `AppPreferenceKeys`, `DownloadPresetCodec`, and
+    `DownloadPresetNotifier` over `AppPreferencesDao` with graceful fallback
+    when the database is unavailable (async-load race guarded by `_alive`/
+    `_userChose`). 13 model/codec tests + 5 notifier tests green; asserts no
+    URL or credential field is ever stored.
+-   [x] **DL1.5** File naming and queue. --- Done 2026-11-06.
+    `file_name_sanitizer.dart` (strips separators/control characters, collapses
+    whitespace, UTF-8-byte-bounded length that never splits a code point, quality
+    suffix, numeric suffix on collision, reserved-device names, never empty) and
+    `DownloadQueue` (pure: FIFO ordering, `maxConcurrent`, pause, cancel,
+    promotion when a slot frees, cap on queued jobs). 13 + 11 tests green,
+    including emoji, very long titles, reserved names and RTL text.
+-   [x] **DL1.6** `ClipboardLinkPolicy`. --- Done 2026-11-06. Pure decision
+    function `decideClipboardLink`: ignore empty/non-URL text, ignore the last
+    handled hash, ignore when detection is off, route direct media-file URLs to
+    the Add URL flow, otherwise prompt. Hashing reuses a shared FNV-1a helper
+    extracted to `core/util/fnv1a_hash.dart` (`disk_cache_store.dart` now
+    delegates to it — behaviour identical). 12 tests green for every branch.
+-   [x] **DL1 verification.** --- Done 2026-11-06. `dart format` clean;
+    `flutter analyze` -> No issues found; full `flutter test` -> 1635 tests
+    pass (`--concurrency=1`). 119 new DL1 unit tests total. `git status`
+    confirms no native (`android/`, `.kt`/`.java`) and no widget/UI file
+    changed; the only non-domain touches are the data-layer
+    `disk_cache_store.dart` (hash delegation) and `app_preferences_table.dart`
+    (preference keys), both pure Dart.
+
+### DL2 --- Extractor bridge (Dart seam and Android plugin)
+
+-   [x] **DL2.1** Dart seam and fake. --- Done 2026-11-06.
+    `lib/platform/extractor/media_extractor.dart`: `MediaExtractor` interface
+    plus `ExtractorJob` (factory validates the http(s) scheme; privacy
+    `toString` shows host only, never path/query/cookies/extraArgs),
+    `ExtractorJobEvent` (`ExtractorProgress`/`ExtractorDone`/`ExtractorFailed`),
+    `ExtractorStatus`, `ExtractorUpdate`, `StreamPreference`/`StreamMode`, and
+    an extractor-owned `ExtractorStream` (deliberately not `PlayableSource` —
+    §15.3 "names can change" — so no platform→sources layering violation and no
+    premature `ProviderType.webLink`, which is DL4.2's job).
+    `fake_media_extractor.dart` (deterministic, injectable, records calls,
+    `hangUntilCancelled`) and `extractor_providers.dart`
+    (`mediaExtractorProvider`). 15 seam tests green
+    (`media_extractor_seam_test.dart`).
+-   [x] **DL2.2** Dependency and build wiring. --- Done 2026-11-06.
+    `android/app/build.gradle.kts` adds the DL0.2 engine and nothing else
+    (`io.github.junkfood02.youtubedl-android` `library`/`ffmpeg`/`aria2c`
+    0.18.1) plus `testImplementation junit`. Native libs packaged with
+    `packaging { jniLibs { useLegacyPackaging = true } }` (AGP 9 rejects the
+    manifest attribute); `splits.abi` emits the four per-ABI APKs plus a
+    universal; R8 keep rules wired to `proguard-rules.pro` (minify still off —
+    the DL gate is the debug build). `ExtractorPlugin` registered in
+    `MainActivity.configureFlutterEngine`. Acceptance met: `flutter build apk
+    --debug` is green and per-ABI sizes are recorded in `DECISIONS.md` ADR-022.
+-   [x] **DL2.3** `ExtractorPlugin.kt`. --- Done 2026-11-06.
+    MethodChannel `com.example.mytube/extractor` + EventChannel
+    `.../extractor/events`; lazy off-main-thread engine init with a `preparing`
+    state; `status`, `probe` (`--dump-single-json --no-playlist
+    --skip-download`), `resolveStream`, `run`, `cancel`
+    (`destroyProcessById`), `version`, `checkForUpdate`, `update`
+    (`updateYoutubeDL(STABLE)`). All args come from the pure,
+    framework-free `ExtractorArgsBuilder` (structured fields; URL is the sole
+    trailing token after `--`; denylist blocks `--exec*`/`--config*`/
+    `--netrc*`/`--plugin-dirs`/caller `--cookies`; `--cookies` only from the
+    app-generated DL10.2 path; owner extra args validated and placed before
+    `--`). Throttled progress (~2/sec) parsed from the yt-dlp line; raw output
+    is never forwarded — failures reduce to the §15.10 codes
+    `extractor_error_map.dart` reads. Compiled against the real engine API
+    (confirmed by the green APK build). Gradle unit test
+    `ExtractorArgsBuilderTest.kt` (JVM, `./gradlew :app:testDebugUnitTest`):
+    rejects a URL starting with `-`, rejects non-http schemes, asserts no
+    forbidden flag ever leaks — 11 assertions across 9 tests, all green.
+-   [x] **DL2.4** Dart implementation and contract tests. --- Done 2026-11-06.
+    `media_extractor_impl.dart` (MethodChannel `.../extractor` + injectable
+    event source + `CancelWatchFactory`; `_invokeGuarded` cancellation; JSON
+    probe decode incl. live/playlist classification; `MissingPluginException`
+    tolerated as a safe unavailable) and `extractor_error_map.dart`.
+    Contract tests over a fake channel (`media_extractor_impl_test.dart`, 16)
+    cover argument shapes, error mapping, redaction (no URL query in
+    diagnostics), cancellation, and missing-plugin tolerance.
+-   [x] **DL2 verification.** --- Done 2026-11-06. `dart format` clean;
+    `flutter analyze` -> No issues found (whole tree); full
+    `flutter test --concurrency=1` -> **1670** pass, 0 fail (1635 baseline +
+    35 DL2); `./gradlew :app:testDebugUnitTest` arg-builder test green;
+    `flutter build apk --debug` green (universal 297.9 MB; arm64-v8a 114.2,
+    armeabi-v7a 101.7, x86_64 113.1, x86 93.1 MB). Device-only behaviour
+    recorded in `docs/device_testing_downloader.md`.
+
+### DL3 --- Destinations and publishing
+
+-   [x] **DL3.1** Publisher interface and AppStorage. --- Done 2026-11-06.
+    `lib/domain/services/destination_publisher.dart`: `DestinationPublisher`,
+    `StoredFile` (one locator: filePath *or* content URI; `toString` leaks no
+    query), `StagingLayout` (`<downloadsRoot>/staging/<jobId>/`), `FreeSpaceProbe`,
+    and `AppStoragePublisher` (same-volume atomic rename with copy+delete
+    fallback, collision-resolved name, optional free-space check, staging
+    sweep only after success). 9 temp-dir tests: collision, low space keeps
+    staging, missing staged file, cross-dir rename fallback, success removes
+    staging, misrouted destination, never overwrites.
+-   [x] **DL3.2** DeviceFolder (MediaStore). --- Done 2026-11-06. Kotlin
+    `PublishPlugin.kt` (`com.example.mytube/publish`) inserts into
+    `Movies/MyTube` / `Music/MyTube` with `IS_PENDING` 1->0 on API 29+, streams
+    the staged bytes, deletes the half-written row on failure, and returns the
+    content URI. Pre-Q (24-28) seeds `DATA` and gates on `WRITE_EXTERNAL_STORAGE`
+    (`maxSdkVersion="28"` added to the manifest), reporting `PERMISSION_DENIED`
+    when absent. Dart `PublishBridge` + fail-soft `PublishBridgeImpl` (missing
+    plugin / native code -> typed `Result.err`). `DownloadPublisher` dispatcher
+    falls back to AppStorage on that denial (result carries a filePath, not a
+    URI). Registered in `MainActivity`; APK green. The just-in-time permission
+    *prompt* is a download-pipeline (DL4/DL5) concern; the denial->fallback path
+    is implemented here.
+-   [x] **DL3.3** PickedFolder (SAF). --- Done 2026-11-06. `PublishPlugin.kt`
+    `publishToPickedFolder` uses `DocumentFile.fromTreeUri`; a missing / revoked
+    / read-only grant (`!canWrite()`) or `SecurityException` yields
+    `DESTINATION_UNAVAILABLE` and keeps staging; `createFile` never overwrites.
+    Dispatcher discards staging only on success, guarded to the staging tree.
+-   [x] **DL3.4** OneDrive placeholder. --- Done 2026-11-06. `DownloadPublisher`
+    returns `DestinationUnavailableError` ("Connect OneDrive first") for
+    `OneDriveDestination`; real upload is `DLOD-1` (Phase 9). The destination
+    stays in the model/UI; wiring the disabled control is DL5.
+-   [x] **DL3 verification.** --- Done 2026-11-06. `dart format` clean;
+    `flutter analyze` -> No issues found (whole tree); full
+    `flutter test --concurrency=1` -> **1693** pass, 0 fail (1670 baseline +
+    23 DL3: 9 AppStorage + 8 dispatcher + 6 bridge); `flutter build apk --debug`
+    green with `PublishPlugin.kt` compiled. Device-only behaviour recorded in
+    `docs/device_testing_downloader.md`.
+
+### DL4 --- Pipeline, persistence and library integration
+
+-   [ ] **DL4.1** Schema. --- Todo. Reconcile ARCHITECTURE §15.4 with the real
+    `Downloads` table; add only the missing columns and new states; one
+    migration with row preservation; update the schema, migration and DAO
+    tests. Do not discard user data.
+-   [ ] **DL4.2** `ProviderType.webLink` and `WebLinkAdapter`. --- Todo. Add the
+    value, update every exhaustive switch the analyzer reports, register the
+    adapter in `source_registry.dart` with honest capabilities (streaming,
+    download; no search), `checkDownloadEligibility`, availability mapping.
+    Tests with the fake extractor.
+-   [ ] **DL4.3** `ExtractorDownloadRunner`. --- Todo. Plug into the manager as
+    a runner strategy; map `ExtractorJobEvent` to records and the existing event
+    stream; states `queued`, `downloading`, `merging`, `saving`, `paused`,
+    `completed`, `failed`, `interrupted`; resume re-runs with the same staging
+    directory; `pruneInterrupted` handles extractor jobs. Tests with the fake
+    extractor and a temp directory.
+-   [ ] **DL4.4** `DownloadLibraryRegistrar`. --- Todo. Implement the table in
+    ARCHITECTURE §15.4: reuse an existing item by canonical URL, primary file
+    source plus `webLink` second source, preserve user metadata, audio creates
+    no item. Tests with the real in-memory Drift repository, including: scan
+    after publish creates no second item (real `ScanMergeService`), favourites
+    and tags survive, duplicate link reuses the item.
+-   [ ] **DL4.5** Offline playback and removal. --- Todo. Extend
+    `OfflineDownloadResolver` to content and picked-folder URIs with the same
+    soft-degrade rules; route delete through the ADR-017 flow (`webLink` is
+    record-only; the stored file is deleted only by the explicit
+    "Delete file" action that names it). Tests.
+-   [ ] **DL4.6** Safety regression. --- Todo. Extend the VP6.5 style suite:
+    Clear Cache and eviction leave staging and downloads untouched; deleting
+    one download leaves other downloads, other sources and originals;
+    cancelling removes only that job's staging; a failed publish keeps staging.
+-   [ ] **DL4 verification.** --- Todo. Format, analyze, full tests, APK build.
+
+### DL5 --- Intake: share, clipboard, paste
+
+-   [ ] **DL5.1** Share intake. --- Todo. Manifest `intent-filter` for
+    `ACTION_SEND` `text/plain`; `ShareIntakePlugin.kt` (`onCreate` and
+    `onNewIntent`, clear the intent after delivery); Dart bridge;
+    `ShareIntakeCoordinator` with URL extraction, rate limit, queue cap and the
+    "always Download" route. Edit `MainActivity` minimally. Tests: cold start,
+    warm start, no URL, two URLs, replay after rotation, rate limit, queue cap.
+    Build the APK.
+-   [ ] **DL5.2** Clipboard watcher. --- Todo. `ClipboardProbePlugin.kt`
+    (description and timestamp without reading content) with a
+    `Clipboard.hasStrings()` fallback; `ClipboardWatcher` observing app
+    lifecycle in the shell: read only on `resumed`, after the first frame, with
+    one short retry for window focus; apply `ClipboardLinkPolicy`; store the
+    hash for Download, Stream and Dismiss. Tests with a fake bridge and clock:
+    no read in the background, no repeat for the same value, setting off, new
+    value prompts again, direct media URL routed elsewhere.
+-   [ ] **DL5.3** Paste entry. --- Todo. "Download from link" sheet with
+    field, Paste button, validation and the same flow; reachable from the
+    Library header action slot and from Settings -> Downloads. Update the
+    header per-tab action test.
+-   [ ] **DL5.4** Flow orchestration. --- Todo. `startDownloadFlow(link,
+    origin)`: duplicate check (queue and library), probe, options sheet or
+    immediate start according to "ask before each download", error sheets with
+    actions (retry, update extractor, choose another folder). Tests over fakes.
+-   [ ] **DL5 verification.** --- Todo. Format, analyze, tests, APK build.
+
+### DL6 --- Interface
+
+-   [ ] **DL6.1** Clipboard prompt sheet. --- Todo. Host and shortened path
+    only, three pill actions (Download, Stream, Dismiss), accessible, no query
+    string anywhere. Widget tests.
+-   [ ] **DL6.2** Options sheet. --- Todo. Thumbnail, title, uploader and
+    duration; Video | Audio switch; quality rows (Best available first, then
+    heights with size or "Size unknown" and codec notes); audio format and
+    bitrate rows; destination row; "Use these settings next time"; pinned
+    Download button. Pre-filled from the preset. Widget tests including text
+    scale 2.0 and reduced motion.
+-   [ ] **DL6.3** Downloads screen. --- Todo. Under Settings -> Downloads (no
+    sixth tab). Active, queued, completed and failed sections, 120 px thumbnail,
+    status line, 2 dp progress line, row menu (Pause, Resume, Cancel, Retry,
+    Play, Share, Delete file), skeleton, empty and error states. Play opens the
+    existing player; audio plays through the same player in audio mode or, if
+    that is not feasible, opens in the system player (record the choice).
+-   [ ] **DL6.4** Settings section. --- Todo. "Downloads" section with: ask
+    before each download, type, quality, container, compatibility, audio
+    format and bitrate, destination (with SAF picker and disabled OneDrive),
+    embed metadata, concurrency, clipboard detection, extractor version and
+    "Check for update", the responsibility notice (DLK-063), and a link to the
+    Downloads list. Every control writes through `DownloadPresetNotifier`.
+-   [ ] **DL6.5** Player integration. --- Todo. The existing `DownloadPill`
+    works for `webLink` items (start, progress, cancel, retry, completed) via
+    the runner strategy; local-only items still never show it.
+-   [ ] **DL6 verification.** --- Todo. Format, analyze, tests. Update
+    `DESIGN.md` §5 if the final UI differs from it.
+
+### DL7 --- Background execution and notifications
+
+-   [ ] **DL7.1** `DownloadService.kt`. --- Todo. Foreground service (type per
+    ADR-026), notification channel, progress, Pause and Cancel actions,
+    completion notification opening the Downloads screen, `onTimeout` marks
+    jobs `interrupted` and calls `stopSelf()`. Manifest permissions. Just-in-
+    time notification permission through the existing flow.
+-   [ ] **DL7.2** Dart coordinator. --- Todo. Start the service on the first
+    active job and stop it when the queue empties; reconcile state when the
+    engine reattaches; throttle notification updates.
+-   [ ] **DL7.3** Interrupted handling. --- Todo. Network loss, process death,
+    timeout and storage-full all end in `interrupted` or `failed` with Resume
+    or Retry; no phantom completed record. Tests over fakes; device steps in
+    the checklist.
+-   [ ] **DL7 verification.** --- Todo. Format, analyze, tests, APK build.
+
+### DL8 --- Stream
+
+-   [ ] **DL8.1** Stream resolution. --- Todo. `WebLinkAdapter.resolveForPlayback`
+    chooses HLS or a progressive muxed stream per ARCHITECTURE §15.5, returns a
+    `PlayableSource` with headers, never stores it, re-resolves on retry.
+-   [ ] **DL8.2** Stream action. --- Todo. Clipboard "Stream": probe, create or
+    reuse the `webLink` item, open the player. No stream available gives the
+    "Streaming isn't available for this link" message with a Download action.
+-   [ ] **DL8.3** Reels exclusion. --- Todo. Web-link-only items (no stored
+    file) are excluded from the Reels queue; Library, Discover and Saved show
+    them normally. Tests.
+-   [ ] **DL8 verification.** --- Todo. Format, analyze, tests.
+
+### DL9 --- Verification, documentation, acceptance
+
+-   [ ] **DL9.1** `docs/device_testing_downloader.md`. --- Todo. Checklist for:
+    clipboard on cold and warm resume, Android 12+ notice, no read in the
+    background, share cold and warm start, background download and
+    notification actions, `onTimeout`, MediaStore and SAF writes on API 36 and
+    one lower API, real sites (public YouTube, Facebook, Instagram), DRM and
+    login failures, extractor update, low storage, airplane mode.
+-   [ ] **DL9.2** README prerequisites. --- Todo. Add a short section: the
+    engine, its licence, APK size and ABI splits, what needs a physical device.
+-   [ ] **DL9.3** Final gate. --- Todo. `dart format lib test`,
+    `flutter analyze lib test`, full `flutter test`, `flutter build apk
+    --debug`; tick the "Link downloader acceptance checklist" in
+    `REQUIREMENTS.md` only for items actually verified; list what is still
+    device-only. Move ADR-021 to ADR-026 to **Accepted (implemented)**.
+
+### DL10 --- Accounts and cookies (ADR-027)
+
+-   [ ] **DL10.1** Cookie model and parser. --- Todo. Pure `CookieEntry`,
+    Netscape parser/writer, registrable-domain scoping. Tests: malformed lines,
+    expired cookies, secure and httpOnly flags, huge file, other domains
+    filtered out.
+-   [ ] **DL10.2** Secure store and per-job cookie file. --- Todo. Secure-storage
+    bridge (Keystore-backed), `AccountStore`, materialise
+    `<downloadsRoot>/.run/<jobId>/cookies.txt`, write refreshed cookies back,
+    shred in `finally`, sweep `.run/` at startup. The argument builder takes the
+    path only from this component. Tests: file gone after success, failure,
+    cancel and simulated process death. APK build.
+-   [ ] **DL10.3** `cookies.txt` import and Accounts list. --- Todo. SAF picker,
+    validation, Settings -> Downloads -> Accounts with Remove; excluded from
+    backup. Widget tests.
+-   [ ] **DL10.4** In-app sign-in. --- Todo. Kotlin WebView activity capturing
+    cookies for the chosen site with `CookieManager`, no new dependency; fail-soft
+    bridge. Tests over a fake bridge. APK build.
+-   [ ] **DL10 verification.** --- Todo. Format, analyze, tests, APK build.
+    Device test: an age-restricted or login-gated link fails without cookies and
+    succeeds with them.
+
+### DL11 --- Playlists and channels (ADR-029)
+
+-   [ ] **DL11.1** Models and flat probe. --- Todo. `WebEntry`, playlist/channel
+    probe with `--flat-playlist`, paging. Tests with the fake extractor.
+-   [ ] **DL11.2** Pick sheet. --- Todo. Select all, range, Download all, count
+    and estimated size where known. Widget tests, text scale 2.0.
+-   [ ] **DL11.3** Batch enqueue. --- Todo. One job per entry, shared folder
+    where the destination allows, configurable pause between items, one library
+    item each via `DownloadLibraryRegistrar`. Tests.
+-   [ ] **DL11.4** Single video in a playlist. --- Todo. Download that video and
+    offer "Download whole playlist". Tests.
+-   [ ] **DL11 verification.** --- Todo. Format, analyze, tests.
+
+### DL12 --- Live streams, subtitles, extras (ADR-029)
+
+-   [ ] **DL12.1** Live recording. --- Todo. Detect `isLive`, `--live-from-start`
+    where supported, `--wait-for-video`, Stop keeps the partial file,
+    `onTimeout` finalises a part. Tests over the fake extractor; device steps in
+    the checklist.
+-   [ ] **DL12.2** Subtitles. --- Todo. Language picker (manual and automatic),
+    embed or sidecar, sidecars picked up by the existing caption loader where
+    feasible. Tests.
+-   [ ] **DL12.3** Embeds and SponsorBlock. --- Todo. Thumbnail, metadata,
+    chapters (default on); SponsorBlock off/mark/remove with a category
+    allow-list. Tests for argument shapes.
+-   [ ] **DL12 verification.** --- Todo. Format, analyze, tests, APK build.
+
+### DL13 --- Reach and performance (ADR-028, ADR-030)
+
+-   [ ] **DL13.1** `RecoveryLadder`. --- Todo. Pure ladder per ARCHITECTURE
+    §15.13 plus runner integration, bounded to one pass, DRM skips it. Tests: a
+    fake extractor failing in each class reaches the expected rung and the final
+    typed error names the next action.
+-   [ ] **DL13.2** Performance options and benchmark. --- Todo. Wire aria2c (if
+    DL0.2 verified it), `--concurrent-fragments`, chunking, retries, throttle
+    re-extract. On the CPH2719 download the same video with single stream,
+    fragments 8, fragments 16 and aria2c; record the speeds in `DECISIONS.md`
+    and set the defaults from the result.
+-   [ ] **DL13.3** Network options. --- Todo. Proxy (secure storage), Wi-Fi-only,
+    speed limit, up to five concurrent jobs.
+-   [ ] **DL13.4** Extra arguments. --- Todo. Owner-typed field with the denylist
+    from ARCHITECTURE §15.13; Gradle and Dart tests that it is never filled from
+    share, clipboard, links or restore.
+-   [ ] **DL13.5** Automatic engine updates. --- Todo. Weekly check on Wi-Fi,
+    default on, version visible, previous version kept on failure.
+-   [ ] **DL13 verification.** --- Todo. Format, analyze, tests, APK build.
+
+### Blocked on Phase 9 (OneDrive)
+
+-   [ ] **DLOD-1** OneDrive destination. --- Blocked until P9-01 to P9-05.
+    Upload from staging with a resumable session, verify, delete the staged
+    copy only after verification, keep it and offer retry on failure; library
+    item gets the `onedrive` primary source with the `webLink` second source;
+    enable the destination in Settings only while connected.
+
+### Suggestions (not required; do not start without the owner)
+
+-   [x] **DLX-1** Playlists and channels. --- Promoted to DL11.
+-   [x] **DLX-2** Subtitle download and embedding. --- Promoted to DL12.2.
+-   [x] **DLX-3** Wi-Fi-only switch and a speed limit. --- Promoted to DL13.3.
+-   [x] **DLX-4** Automatic extractor update check. --- Promoted to DL13.5 (default on).
+-   [ ] **DLX-5** User-initiated data transfer jobs instead of a service. ---
+    Todo (optional; see ADR-026)
+-   [ ] **DLX-6** Per-site presets and preset export in backup (BACKUP-001). ---
+    Todo (optional)
+
+### Sequencing and definition of done
+
+Order: DL0 -> DL1 -> DL2 -> DL3 -> DL4 -> DL5 -> DL6 -> DL7 -> DL8, then DL10 (after DL4),
+DL11 (after DL6), DL12 (after DL7), DL13 (DL13.2 may start right after DL2) -> DL9;
+`DLOD-1` after Phase 9. DL5.1 and DL5.2 may not ship before DL4.3 so an intake
+never leads to a dead flow. DL6.5 must not ship before DL4.3 so the pill is
+never dead. Definition of done for the whole block: every `DLK-*` requirement is
+either verified by a test or listed as device-only in
+`docs/device_testing_downloader.md`; DRM links fail with `DrmProtected`, and login-gated, age-restricted and blocked links go through the recovery
+ladder and fail only with a message naming the next action; no stream URL, cookie or query string
+is persisted or logged; the device-folder destination produces exactly one
+library item per download; Clear Cache leaves downloads and staging alone; the
+commands actually run and their results are recorded in this file.

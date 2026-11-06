@@ -25,6 +25,11 @@ personal videos. It is not a social network.
     backend in the MVP.
 -   Build modularly so a future public release is possible without
     overengineering the first version.
+-   Download video or audio from supported web links (YouTube, Facebook,
+    Instagram and similar) with quality choice, a saved download
+    configuration and a choice of destination, as a bounded milestone (see Link downloader). This is a personal-use build
+    that will not be published on Google Play, so the downloader aims for
+    maximum reach, speed and quality (ADR-021, ADR-027 to ADR-030).
 
 ## Platform and stack
 
@@ -128,6 +133,77 @@ and a metadata line of relative date plus a single source/provider label
 (from the item's primary source location). Pinning is a durable
 organization preference that changes neither membership nor favourites.
 
+## Link downloader
+
+A bounded milestone that lets the user save **video or audio** from supported
+web links (YouTube, Facebook, Instagram and similar sites) in the style of a
+desktop downloader such as 4K Video Downloader. It is built on the existing
+download engine, adapter boundary and library; it is not a second app.
+Decisions: ADR-021 to ADR-026. Design: `ARCHITECTURE.md` §15. Work: the `DL`
+block in `TASKS.md`.
+
+**What the user can do**
+
+-   Paste a link, share a link from another app, or accept a link the app
+    finds in the clipboard.
+-   Choose **Video** or **Audio**; for video choose **Best available** or a
+    maximum quality (for example 1080p); for audio choose the format
+    (M4A / Opus / MP3) and bitrate.
+-   Choose where the file goes: a visible device folder (default), app
+    storage, a folder picked with the Storage Access Framework, or OneDrive
+    once OneDrive exists (Phase 9).
+-   **Save the download configuration** in Settings -> Downloads so the
+    choices need not be repeated, with an "Ask before each download" switch
+    to bring the options sheet back.
+-   Watch queued, running and finished downloads in a Downloads list, with
+    pause, resume, cancel, retry, play, share and delete-file actions.
+
+-   Download whole **playlists and channels** (pick which videos, or all) and
+    **record live streams**; each finished video becomes its own library item.
+-   Download **subtitles**, embed chapters/thumbnail/metadata, and optionally
+    mark or skip SponsorBlock segments.
+-   Sign in to a site inside the app, or import a `cookies.txt`, so
+    login-required, members-only and age-restricted media of the owner's own
+    account can be fetched (ADR-027).
+-   Get maximum speed and reliability: segmented/parallel downloading
+    (aria2c or concurrent fragments), automatic retries and resume, an
+    automatic recovery ladder when a site blocks or throttles, an optional
+    proxy, Wi-Fi-only and speed-limit switches, and automatic engine updates
+    (ADR-028).
+
+**Intake rules (confirmed)**
+
+-   Link found in the clipboard: the app **asks every time**: Download,
+    Stream or Dismiss. It never starts on its own and never reads the
+    clipboard in the background.
+-   Link shared from another app: it **always means Download**.
+-   Stream means: add the link to the library as a web-link item and play it
+    through the existing player using a freshly resolved, temporary stream
+    URL. The temporary URL is never stored.
+
+**Result in the library**
+
+A finished video download becomes one library item. When the file lands in a
+visible device folder or a picked folder, that file is the item's primary
+source and the web page link is kept as a second source (so the item can be
+re-streamed or re-downloaded). Audio downloads are listed in Downloads and
+are not mixed into the video library, Discover or Reels.
+
+**Out of scope for this milestone**
+
+A hosted extraction server, scheduled downloads, DRM decryption, and iOS.
+(Playlists, channels, live streams, subtitles and the owner's own logins and
+cookies are now in scope: ADR-027 to ADR-030.)
+
+**Personal-use note.** The owner has decided this app is for personal use only
+and will never be published on Google Play, so site terms and similar
+content-access limits are not design constraints for the downloader (ADR-021).
+Two things stay fixed: DRM-encrypted streams are not decrypted, and
+credentials and cookies are handled only as ADR-027 says. The app shows a
+one-time notice that downloading can breach a site's terms, that the owner is
+responsible, and that using account cookies can get that account limited by the
+site.
+
 ## Privacy and security
 
 -   Keep metadata, favorites, tags, collections, history, progress, and
@@ -150,6 +226,8 @@ organization preference that changes neither membership nor favourites.
 5.  Downloads, background playback, notifications, PiP.
 6.  OneDrive, then Google Drive, then R2.
 7.  Backup/restore and release hardening.
+8.  Link downloader (the `DL` block in `TASKS.md`); its OneDrive destination
+    waits for step 6.
 
 ## MVP success criteria
 

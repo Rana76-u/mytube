@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show Uint8List;
 import 'package:path/path.dart' as p;
 
 import 'package:mytube/core/result.dart';
+import 'package:mytube/core/util/fnv1a_hash.dart';
 import 'package:mytube/data/cache/cache_usage.dart';
 import 'package:mytube/domain/models/app_error.dart';
 
@@ -233,28 +234,9 @@ class FileDiskCacheStore implements DiskCacheStore {
       UnexpectedError(diagnosticMessage: '$what: $error', cause: error);
 
   /// 128-bit FNV-1a over the key's UTF-16 code units, rendered as 32 hex
-  /// characters. Two independent offset bases keep accidental collisions out
-  /// of the "wrong thumbnail" range while staying dependency-free and
-  /// deterministic across runs and platforms.
-  static String _hashKey(String key) {
-    const prime = 0x100000001b3;
-    var h1 = 0xcbf29ce484222325;
-    var h2 = 0x84222325cbf29ce4;
-    for (final unit in key.codeUnits) {
-      h1 = (h1 ^ unit) * prime;
-      h2 = (h2 ^ unit) * prime;
-    }
-    return '${_hex32(h1)}${_hex32(h2)}';
-  }
-
-  /// Unsigned 32-bit hex of both halves of a 64-bit hash (Dart ints are signed,
-  /// so the halves are masked before formatting).
-  static String _hex32(int value) {
-    final high = (value >> 32) & 0xFFFFFFFF;
-    final low = value & 0xFFFFFFFF;
-    return high.toRadixString(16).padLeft(8, '0') +
-        low.toRadixString(16).padLeft(8, '0');
-  }
+  /// characters. Delegates to the shared helper (also used by the clipboard
+  /// policy, DL1.6) so there is exactly one implementation of the hash.
+  static String _hashKey(String key) => fnv1a128Hex(key);
 }
 
 /// One managed entry, as seen by eviction.

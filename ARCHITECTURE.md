@@ -38,11 +38,13 @@ lib/
     source_registry.dart
     local/
     direct_url/
+    web_link/          # canonical page URL source, extractor-backed (§15)
     onedrive/
     google_drive/
     cloudflare_r2/
   playback/            # app-owned player service/controller interfaces
   platform/            # MediaStore, SAF, thumbnails, PiP, media session
+    extractor/         # MediaExtractor seam and yt-dlp bridge (§15)
 test/
   unit/
   widget/
@@ -395,6 +397,441 @@ privacy-safe diagnostics.
 -   R2 public/pre-signed-only versus trusted backend.
 -   Backup merge/replace behavior.
 -   Hashing strategy and when content fingerprints are computed.
+-   Link downloader: extraction engine and licence, foreground-service type
+    versus user-initiated transfer jobs, default destination, audio handling
+    (ADR-021 to ADR-026, DL0).
 
 Check current dependency maintenance, licensing, and Android
 compatibility when implementation begins.
+
+## 15. Link downloader
+
+Implements `DLK-*` (REQUIREMENTS) under ADR-021 to ADR-026. It extends the
+existing download engine (ADR-019), adapter boundary (§6), offline resolver
+and removal flow (ADR-017). It does not replace them. Inspect the real code
+before changing anything: names below describe intent, and the data-model
+section must be reconciled with the actual `Downloads` table.
+
+### 15.1 Boundaries
+
+-   **Extractor seam.** Everything that knows how to turn a web page link into
+    formats, a stream or a file sits behind `MediaExtractor`
+    (`lib/platform/extractor/`). The first implementation drives an embedded
+    yt-dlp through `ExtractorPlugin.kt` (ADR-022). Nothing outside that
+    folder and the Kotlin plugin imports the engine.
+-   **One pipeline, two engines.** The existing `HttpDownloadManager` keeps
+    handling direct file URLs. A second runner, `ExtractorDownloadRunner`,
+    handles web links. Both write `DownloadRecord`s through the same
+    `DownloadRepository`, publish events through the same stream, and are
+    shown by the same `DownloadController` (ADR-023). Add a small runner
+    strategy keyed by `DownloadSourceKind`; do not rewrite the manager.
+-   **Web-link source.** `WebLinkAdapter` (`lib/sources/web_link/`, provider
+    type `webLink`) is an ordinary `VideoSourceAdapter`: its durable source id
+    is the canonical page URL; `resolveForPlayback` asks the extractor for a
+    temporary stream; `checkDownloadEligibility` is eligible when probing
+    works and prohibited for DRM.
+-   **Intake coordinators** (`lib/features/downloads/intake/`) turn raw
+    input (shared text, clipboard text, pasted text) into one validated
+    `WebLink` and a route decision. They hold no UI.
+
+### 15.2 New and changed files (suggested)
+
+``` text
+lib/
+  domain/
+    models/        web_link.dart, web_media_info.dart, web_format.dart,
+                   format_choice.dart, download_preset.dart,
+                   download_destination.dart, download_source_kind.dart
+    services/      format_selector.dart, link_extraction.dart,
+                   file_name_sanitizer.dart, download_queue.dart,
+                   download_preset_notifier.dart, clipboard_link_policy.dart,
+                   destination_publisher.dart, download_library_registrar.dart
+  platform/
+    extractor/     media_extractor.dart, media_extractor_impl.dart,
+                   extractor_error_map.dart
+    share_intake_bridge.dart (+ _impl), clipboard_probe_bridge.dart (+ _impl),
+    publish_bridge.dart (+ _impl)          # MediaStore/SAF writes
+  sources/web_link/ web_link_adapter.dart
+  features/downloads/
+    intake/        share_intake_coordinator.dart, clipboard_watcher.dart
+    ui/            download_from_link_sheet.dart, download_options_sheet.dart,
+                   clipboard_prompt_sheet.dart, downloads_screen.dart,
+                   download_row.dart
+  features/settings/ downloads_settings_section.dart
+android/app/src/main/kotlin/.../
+  ExtractorPlugin.kt, DownloadService.kt, ShareIntakePlugin.kt,
+  ClipboardProbePlugin.kt, PublishPlugin.kt
+```
+
+Create only what the current task needs. Register plugins through the
+existing registrar pattern in `MainActivity`; edit `MainActivity` and the
+manifest minimally, and only in the tasks that require it.
+
+### 15.3 Seams (conceptual; names can change)
+
+``` dart
+abstract interface class MediaExtractor {
+  Future<Result<ExtractorStatus>> status();            // ready? version?
+  Future<Result<WebMediaInfo>> probe(Uri link,
+      {required CancellationToken cancellationToken});
+  Future<Result<PlayableSource>> resolveStream(Uri link,
+      {required StreamPreference preference,
+       required CancellationToken cancellationToken});
+  Stream<ExtractorJobEvent> run(ExtractorJob job);     // progress, phase, done
+  Future<void> cancel(String jobId);
+  Future<Result<ExtractorUpdate>> checkForUpdate();
+  Future<Result<ExtractorUpdate>> update();
+}
+
+final class WebMediaInfo {
+  Uri canonicalUrl; String extractorKey; String title; String? uploader;
+  Duration? duration; Uri? thumbnail; bool isLive; bool isPlaylist;
+  List<WebEntry>? entries;      // playlist/channel entries (flat probe)
+  List<WebSubtitle> subtitles;  // manual and automatic tracks
+  List<WebFormat> formats;
+}
+final class WebFormat {
+  String id; int? width; int? height; double? fps; String? videoCodec;
+  String? audioCodec; String ext; int? bitrateKbps; int? sizeBytes;
+  bool sizeIsEstimate; bool hasVideo; bool hasAudio; bool isDrm;
+  String? dynamicRange;
+}
+sealed class FormatChoice { /* VideoChoice | AudioChoice, plus notes */ }
+```
+
+`ExtractorJobEvent` carries only: phase (`downloading`, `merging`,
+`converting`), bytes done, bytes total (nullable), speed, ETA and a final
+`done` or typed failure. It never carries raw tool output.
+
+### 15.4 Data model
+
+Reconcile with the real schema first (read `Downloads`, its DAO, the
+`DownloadRecord` model and how `provider_type` is persisted), then add only
+what is missing, with one migration (v7 to v8 at the time of writing) that
+preserves every existing row and a migration test.
+
+Per download record the feature needs: source kind (`directHttp` or
+`extractor`), media kind (`video` or `audio`), canonical page URL (durable
+identity, never a stream URL), title, thumbnail reference, a short format
+summary for display, the immutable choice/preset snapshot, destination kind
+and a non-secret destination reference (tree URI, folder id), staging path,
+stored file URI, byte counters, an error code, and timestamps. Status keeps
+being stored as the enum **name**; new states are `queued`, `merging`,
+`saving`, `interrupted` alongside the existing ones.
+
+`ProviderType` gains `webLink`. Adding an enum value touches every
+exhaustive `switch`: provider label, source avatar glyph,
+`providerIsDownloadable`, the delete-dialog bucketing in `ItemRemovalService`
+(`webLink` is record-only), thumbnails and backup. Find them all with the
+analyzer, do not guess.
+
+Library registration (`DownloadLibraryRegistrar`):
+
+| Result | Library effect |
+| --- | --- |
+| Video to a device folder or picked folder | One logical item. Primary source is the stored file (`localMediaStore` or `selectedFolder` as appropriate); second source is `webLink` with the canonical URL. |
+| Video to app storage | One logical item with a `webLink` source; the file is an offline copy tracked by the download record (ADR-019 behaviour). |
+| Video to OneDrive (later) | `onedrive` primary once the adapter exists; `webLink` second source. |
+| Audio | No library item; the download record is the only entry. |
+| Link already in the library | Reuse that item (lookup by canonical URL); add sources, never a duplicate. |
+
+The registrar must preserve favourites, tags, collections and progress, and
+use the same insert-or-ignore semantics as scanning. A later scan of the same
+file must match the existing source URI and create nothing new; prove it with
+a test using the real scan-merge service.
+
+### 15.5 Flows
+
+**Share intake (always Download).** `ShareIntakePlugin.kt` reads
+`EXTRA_TEXT` from `ACTION_SEND` (`text/plain`) in `onCreate` and
+`onNewIntent`, hands it to Dart once, then clears the intent so rotation or
+resume cannot replay it. `ShareIntakeCoordinator` extracts the first `http(s)`
+URL, validates it, rate-limits (for example 5 shares per minute) and checks the
+queue cap, then starts the download flow. The share target is exported, so any
+app can call it: the coordinator never starts unbounded work and never skips
+the free-space check.
+
+**Clipboard (always ask).** `ClipboardWatcher` is a lifecycle observer owned
+by the shell. On `resumed` (after the first frame, with one short retry
+because Android only grants clipboard access once the window has focus) it
+asks `ClipboardProbeBridge` for the clip description and timestamp, which does
+not read the content, and reads the text only when the timestamp changed.
+Android 12 and later show a system notice when an app reads another app's
+clip, so the timestamp check is what keeps that to genuine changes. If
+`ClipboardProbeBridge` is unavailable, fall back to `Clipboard.hasStrings()`
+and the hash check. `ClipboardLinkPolicy` (pure) decides: ignore empty or
+non-URL text, ignore a hash equal to the last handled value, ignore when the
+setting is off, ignore a direct media-file URL (route that to the existing
+Add URL dialog instead). The prompt shows host and shortened path only. Each
+of Download, Stream and Dismiss stores the hash. Hashing reuses the existing
+FNV-1a helper from the disk cache; do not add a crypto dependency.
+
+**Paste.** The "Download from link" sheet has a text field, a Paste button
+and the same validation, then enters the download flow.
+
+**Download flow.** link -> validate -> (queue/library duplicate check) ->
+probe -> if "ask before each download" is on, show the options sheet
+pre-filled from the preset, otherwise select with `FormatSelector` and start
+-> create `DownloadRecord` with the immutable choice snapshot -> queue ->
+runner -> staging -> `DestinationPublisher` -> registrar -> notification.
+
+**Stream flow.** Clipboard "Stream" -> probe -> choose a single playable
+stream (HLS, or a progressive muxed format, at or below the preset height,
+else at or below 720p) -> create or reuse the `webLink` library item ->
+open the player. The resolved URL and headers live only in memory for that
+session; each later play resolves again. `video_player` takes one URI, so a
+link with only separate video and audio tracks cannot be streamed: show
+"Streaming isn't available for this link" with a Download action
+(DLK-052). Web-link-only items (no stored file) are excluded from the Reels
+queue in this milestone because each swipe would need a fresh resolve; they
+still appear in Library, Discover and Saved.
+
+### 15.6 Format selection (pure function)
+
+`FormatSelector.select(WebMediaInfo, DownloadPreset) -> FormatSelection`
+returns a `FormatChoice` plus notes. It is framework-free and heavily unit
+tested (NFR-005). Rules:
+
+1.  Ignore formats flagged DRM. If nothing is left, fail with
+    `DrmProtected`.
+2.  **Video.** Candidates have video. Height cap = preset max height, or
+    unlimited for Best. Pick the greatest height at or below the cap; if none
+    exists pick the lowest available and add `QualityLowered`.
+3.  Within a height prefer, in order: the container/codec the compatibility
+    option asks for (H.264 with AAC for MP4), then higher frame rate, then
+    higher bitrate. AV1 and VP9 and HDR add a `CodecMayNotPlay` note.
+4.  A video-only pick is paired with the best audio for the container (AAC
+    for MP4, Opus otherwise) and marked `needsMerge`. Output container is MP4
+    when the pair is H.264/AAC, otherwise MKV, unless the preset says "MP4
+    only", in which case drop to the best H.264 height and add a note.
+5.  **Audio.** Pick the best audio-only format. M4A and Opus are copied
+    without re-encoding when the source already matches; MP3 always
+    re-encodes; bitrate applies only when re-encoding.
+6.  Size estimate = sum of the chosen formats' sizes when all are known;
+    otherwise unknown. Mark estimates as estimates.
+
+The Kotlin side receives the resulting structured fields (format ids, merge
+container, audio codec and bitrate, output template). It never receives a
+free-form expression from the UI or the user.
+
+### 15.7 Destinations and publishing
+
+``` dart
+sealed class DownloadDestination {
+  AppStorage();
+  DeviceFolder(kind: movies | music);   // MediaStore, "MyTube" subfolder
+  PickedFolder(treeUri);               // SAF, persisted write grant
+  OneDrive(folderId);                  // blocked on Phase 9
+}
+```
+
+The runner always writes to `<downloadsRoot>/staging/<jobId>/`. When the
+extractor finishes, `DestinationPublisher` moves the file to the destination
+and returns a `StoredFile` (URI, size, display name):
+
+-   **AppStorage:** atomic rename inside the downloads root.
+-   **DeviceFolder:** `MediaStore` insert with `RELATIVE_PATH`
+    (`Movies/MyTube` or `Music/MyTube`), `IS_PENDING=1` while copying, then
+    `0`. No storage permission is needed on API 29 and later. On API 24 to 28
+    this needs `WRITE_EXTERNAL_STORAGE` (declared with
+    `android:maxSdkVersion="28"`), requested just in time; if denied, fall
+    back to AppStorage and say so.
+-   **PickedFolder:** create the document in the granted tree and copy. A
+    missing, revoked or read-only grant yields `DestinationUnavailable` and
+    keeps the staged file.
+-   **OneDrive:** not implemented in this milestone. The publisher returns
+    `Unavailable` and the UI shows the option disabled with "Connect OneDrive
+    first". When Phase 9 lands, upload with a resumable session from staging,
+    verify, then delete staging.
+
+The publisher never overwrites, never deletes anything it did not create, and
+removes the staged file only after a successful publish.
+
+### 15.8 Execution and Android
+
+-   `DownloadQueue` (pure) owns ordering and the concurrency limit. Records
+    are persisted; on launch run `pruneInterrupted`, then show interrupted
+    jobs with Resume.
+-   Resume re-runs the extractor with the same staging directory and output
+    template so partial files continue. Expired stream URLs are not a problem
+    because the extractor re-extracts on every run.
+-   Progress events from Kotlin are throttled (about 4 per second to Dart,
+    about 1 per second to the notification).
+-   `DownloadService.kt` is a foreground service of type `dataSync`,
+    started by user action while the app is in the foreground. Declare
+    `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC`; reuse the
+    existing just-in-time `POST_NOTIFICATIONS` flow. On Android 15 and later
+    the system allows 6 hours of `dataSync` per 24 hours and then calls
+    `onTimeout`; the service must mark running jobs `interrupted` and call
+    `stopSelf()` there, or the app crashes. User-initiated data transfer jobs
+    are the documented alternative; ADR-026 records why the service is used
+    first.
+-   Minimising the app must not interrupt a download. Swiping the app away is
+    best effort but must leave a consistent state (`interrupted`, resumable,
+    no phantom completed record).
+-   The extractor engine initialises lazily on first use, off the main
+    thread, and reports a "preparing" state so the first probe does not look
+    frozen.
+-   Android build: the engine needs `android:extractNativeLibs="true"`, ABI
+    filters or ABI splits to limit APK size, R8/ProGuard keep rules, and
+    native libraries that support 16 KB memory pages. Verify each in DL0.2
+    and again with `flutter build apk --debug`.
+
+### 15.9 Saved download configuration
+
+`DownloadPreset` is a value type with `sanitize` (same pattern as
+`CacheLimit.sanitize`) stored through `AppPreferencesDao` under typed keys
+added to `AppPreferenceKeys`. Defaults in parentheses:
+
+| Key | Meaning |
+| --- | --- |
+| `download.askEveryTime` | show the options sheet each time (true) |
+| `download.kind` | `video` or `audio` (video) |
+| `download.maxHeight` | 0 = Best, else 2160/1440/1080/720/480/360 (0) |
+| `download.container` | `mp4`, `mkv` or `any` (any) |
+| `download.compatMode` | prefer H.264/AAC (false; best quality wins) |
+| `download.audioFormat` | `m4a`, `opus`, `mp3` (m4a) |
+| `download.audioBitrateKbps` | 0 = Best (0) |
+| `download.destinationKind` / `download.destinationRef` | device folder (default), app storage, picked folder, OneDrive |
+| `download.embedMetadata` | embed title and thumbnail where supported (true) |
+| `download.maxConcurrent` | 1 to 5 (3) |
+| `download.clipboardDetect` | clipboard prompt switch (true) |
+| `download.autoUpdateExtractor` | weekly update check, Wi-Fi only (true) |
+| `download.lastClipboardHash` | hash of the last handled clipboard value |
+| `download.fragments` | concurrent fragments, 1 to 16 (8) |
+| `download.useAria2c` | use aria2c when the engine includes it (true) |
+| `download.wifiOnly` | downloads only on Wi-Fi (false) |
+| `download.rateLimitKbps` | 0 = unlimited (0) |
+| `download.subtitleLangs` | list of language codes, empty = none (empty) |
+| `download.embedSubs` | embed when the container allows it (true) |
+| `download.sponsorBlock` | `off`, `mark` or `remove` (off) |
+| `download.playlistSleepSeconds` | pause between playlist items (2) |
+| `download.extraArgs` | owner-typed extra engine arguments, validated (empty) |
+
+The proxy URL and all cookies are not preferences: they live in secure
+storage (§15.13).
+
+### 15.10 Errors
+
+Add typed errors (user-safe text, privacy-safe diagnostics): extractor
+unavailable, extractor out of date, unsupported site, login required,
+private or removed, age restricted, geo-blocked, DRM protected, live stream
+unsupported, playlist unsupported, destination unavailable, low storage,
+post-processing failed (merge or convert), cancelled, rate limited, cookies
+expired. Login required, age restricted, geo-blocked and rate limited enter the
+recovery ladder (§15.13) before they are shown. `ExtractorPlugin.kt`
+maps engine output to a short code; raw output never reaches the UI or logs.
+Map the existing availability states (`expired_link`, `unsupported`,
+`unknown`) for web-link source locations the same way as direct URLs.
+
+### 15.11 Security and privacy
+
+-   Argument building is structured and allow-listed (DLK-062). The URL goes
+    last, after `--`, scheme-checked and length-limited. Never `--exec*`,
+    `--config*`, `--netrc*`, `--plugin-dirs`. `--cookies` is emitted only with
+    the app-generated path from §15.13. Owner-typed extra arguments are
+    validated against the denylist in §15.13.
+-   Cookies and proxy credentials are secrets: secure storage only, excluded
+    from backup, never logged, never displayed, shredded from disk after each
+    run.
+-   The engine and any update are downloaded code. Updates run on an explicit action or the auto-update setting (default on, Wi-Fi only), show the version before and after,
+    and failures leave the previous working version in place.
+-   Share and clipboard input are untrusted; apply length, scheme, rate and
+    queue limits.
+-   Store canonical page URLs only; never stream URLs, never raw clipboard
+    text. Redact with `DiagnosticRedactor`.
+-   Backups (BACKUP-003) may include page URLs; document it.
+
+### 15.12 Testing
+
+-   Unit: `FormatSelector` matrix (heights, caps, missing heights, codecs,
+    DRM, merge, MP4-only, audio copy vs re-encode, unknown sizes), URL
+    extraction from messy text, `ClipboardLinkPolicy`, preset sanitize and
+    round trip, file-name sanitizer and collisions, queue concurrency and
+    ordering, error mapping, redaction.
+-   Fakes: fake `MediaExtractor`, fake bridges, temp-directory staging; no
+    network and no device needed for domain logic.
+-   Database: v7 to v8 migration preserves rows; queries; deletion rules.
+-   Integration over fakes plus the real scan-merge service: no duplicate
+    item after a scan of a downloaded file; Clear Cache leaves staging and
+    downloads alone; deleting one download leaves other downloads, other
+    sources and originals alone.
+-   Widget: clipboard prompt, options sheet, Downloads screen, Settings
+    section, empty/loading/error states, text scale 2.0, reduced motion.
+-   Native: `flutter build apk --debug` after every Kotlin, manifest or Gradle
+    change; a Gradle unit test for the argument builder.
+-   Device: `docs/device_testing_downloader.md` (clipboard focus rules,
+    Android 12 notice, share cold and warm start, background download,
+    notification actions, timeout, MediaStore and SAF writes, real sites).
+
+### 15.13 Reach and performance profile (ADR-027 to ADR-030)
+
+**Recovery ladder (`RecoveryLadder`, pure).** When a probe or run fails with a
+recoverable class (login required, age restricted, geo-blocked, HTTP 403/429,
+"sign in to confirm", extractor out of date, requested format unavailable,
+throttled), `ExtractorDownloadRunner` walks a fixed, bounded ladder before
+surfacing the error. Each rung is recorded as a privacy-safe diagnostic code:
+
+1.  Retry with exponential backoff (three attempts).
+2.  Try alternate client or extractor arguments from a per-site allow-list
+    (for YouTube, a different `player_client`).
+3.  Attach the stored account cookies for the link's domain (ADR-027).
+4.  Apply the owner's proxy, if configured.
+5.  Update the engine once per session and retry.
+6.  Relax the format sort and take the next-best format set.
+
+One pass only; never an endless loop. DRM failures skip the ladder. After the
+last rung the typed error names the next owner action (sign in, import cookies,
+update, set a proxy).
+
+**Accounts and cookies (`AccountStore`).** Two ways in: in-app sign-in (a Kotlin
+WebView activity using `CookieManager`; used only for the owner's own sign-in
+and never to scrape media) and `cookies.txt` import (SAF picker, Netscape
+format, size-limited, validated). Cookies are stored through a secure-storage
+bridge (Keystore-backed). At job start the runner writes
+`<downloadsRoot>/.run/<jobId>/cookies.txt` containing only cookies for the
+link's registrable domain, passes it with `--cookies`, writes refreshed cookies
+back to the store after a successful run, and shreds the file (overwrite, then
+delete) in a `finally`. Startup sweeps any leftover `.run/` directory. Settings
+-> Downloads -> Accounts lists sites with Sign in, Import cookies.txt, Remove.
+
+**Performance profile.** Built from the preset, never from free text:
+
+-   Downloader: aria2c for HTTP(S) when verified in DL0.2
+    (`--downloader aria2c`, 16 connections, 1 MiB split), otherwise
+    `--concurrent-fragments N` (default 8) with `--http-chunk-size 10M`.
+-   Resilience: `--retries 10 --fragment-retries 10 --retry-sleep exp=1:30`,
+    `--socket-timeout 20`, `--throttled-rate 100K` (re-extract when throttled),
+    partial files resumed.
+-   Quality: format sorting by resolution, fps, HDR, codec, bitrate; "Best"
+    means the true best (up to 8K, AV1/VP9/HDR, Opus) when compatibility mode
+    is off.
+-   Extras: embed thumbnail, metadata and chapters; subtitles per the preset;
+    SponsorBlock `mark` or `remove` with an allow-listed category set.
+-   Network: optional proxy (secure storage), Wi-Fi-only (ConnectivityManager),
+    optional `--limit-rate`.
+-   Concurrency: `DownloadQueue` up to five jobs (default 3); playlists add a
+    configurable pause between items.
+
+**Extra arguments (ADR-030).** `download.extraArgs` is typed by the owner in
+Settings -> Downloads -> Advanced. The app tokenises it, rejects anything on the
+denylist (`--exec*`, `--config*`, `--netrc*`, `--plugin-dirs`, `--cookies*`,
+`-o/--output`, `--paths`, `-a/--batch-file`, `--load-info-json`, `--cache-dir`,
+`--ffmpeg-location`), and places the rest before `--` and the URL. It is never
+filled from a share, clipboard text, a link, a deep link or a backup restore.
+
+**Playlist and live flows.** Probe a playlist or channel with
+`--flat-playlist --dump-single-json`; the pick sheet pages entries; each chosen
+entry is probed again when its job starts. Live: `--live-from-start` where the
+site supports it, otherwise the live edge; `--wait-for-video` for scheduled
+streams; the stop action ends the engine gracefully so FFmpeg finalises the
+file and the partial recording is kept. When Android 15's `dataSync` limit calls
+`onTimeout`, the recording is finalised and saved as a part, and the owner can
+continue as the next part.
+
+**Testing.** Ladder tests with a fake extractor that fails in each class;
+cookie materialise/shred tests (success, failure, cancel, process death then
+startup sweep); domain-scoped cookie filtering; Netscape parser; argument
+builder tests (URL last after `--`, denylist, extra arguments, no `--cookies`
+except the generated path); playlist selection and pacing; live stop keeps the
+partial file.

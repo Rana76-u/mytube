@@ -1261,3 +1261,513 @@ section and the sheet, and the page stays a composition layer that VP7's
 rebuild measurement can reason about. Two limitations are explicit: subtitle
 **sidecars** are supported while tracks embedded in the container are not, and
 the queue does not survive a cold start.
+
+---
+
+# Link downloader decisions
+
+Recorded 2026-11-06 for the link-downloader feature (YouTube, Facebook,
+Instagram and similar sites). Status is **Proposed** until the owner confirms
+and DL0.2 records the engine verification; then each ADR is edited to
+**Accepted**. Do not add a dependency or write feature code before that. Ground
+for the engine choice (checked 2026-11-06): the `yausername/youtubedl-android`
+wrapper is GPL-3.0 licensed, bundles yt-dlp and Python, needs
+`android:extractNativeLibs="true"` semantics (on AGP 9 this is
+`jniLibs.useLegacyPackaging=true`; the manifest attribute is now rejected) and
+ABI filters or splits, and its README
+lists Maven coordinates under `io.github.junkfood02.youtubedl-android` with
+`library`, `ffmpeg` and optional `aria2c` modules. Android 15 limits `dataSync` foreground services to 6 hours per 24
+hours and calls `onTimeout`. DL0.2 (2026-11-06) re-verified all of these
+against the live sources — see the "DL0.2 engine verification" section under
+ADR-022 and the platform-fact sections under ADR-026. DL0.2's device spike then
+ran green on the CPH2719 (Android 16) on 2026-11-06 — the ADR-022 results table
+is filled in with the measured cases.
+
+## DL0 findings --- repository inspection (DL0.1)
+
+Inspected 2026-11-06 against the actual code, in the style of P0-01. Later
+`DL` tasks cite this table; it records what exists today, not what the
+feature will add.
+
+| Item | Finding |
+| --- | --- |
+| Toolchain | Flutter 3.44.6 stable, Dart 3.12.2 (`environment.sdk: ^3.12.2`) — matches P0-01 |
+| Schema | `AppDatabase.schemaVersion = 7` (`lib/data/database/app_database.dart`); v7 added `Downloads` (Phase 12 / VP6.2). The §15.4 "one migration (v7 → v8)" note is accurate — DL2 owns that migration |
+| Enum storage | `Downloads.provider_type` and `Downloads.status` are TEXT enum **names** (`downloads_table.dart` doc; `DownloadStatus` doc in `download_repository.dart`), so new status values (`queued`, `merging`, `saving`, `interrupted`) need no migration. `Downloads` columns today: id, videoItemId, sourceLocationId, providerType, sourceUri, fileName, sizeBytes, downloadedBytes, status, acceptsRange, createdAt, updatedAt — no media kind, destination, staging path, error code or preset snapshot yet |
+| Record mapping | `DriftDownloadRepository` (de)serialises via `_providerFromName` / `ProviderType.values.byName` and `DownloadStatus.values.byName`; an unknown stored name throws at read — new enum values must land in Dart before any row using them is written |
+| MainActivity | `launchMode="singleTop"` (warm share arrives via `onNewIntent`), `exported=true`, only the LAUNCHER `intent-filter`, `taskAffinity=""`, broad `configChanges` (activity not recreated on rotation). **No `ACTION_SEND` filter exists** — share intake (DLK-003) must add one and handle cold start (`onCreate`) plus warm start (`onNewIntent`) |
+| Notification permission | Declared in the manifest (`POST_NOTIFICATIONS`); requested just in time on first background playback by `MediaSessionCoordinator` via `media_session_bridge.requestNotificationPermission()` (`lib/playback/media_session_coordinator.dart` ~L94). The download service (ADR-026) reuses this flow per §15.8 |
+| Existing foreground service | `MediaPlaybackService.kt` is `mediaPlayback` type, `START_NOT_STICKY`, no `onTimeout` handling — it is the playback session mirror, not a template for the `dataSync` download service, which is new in DL7 |
+| Exhaustive `ProviderType` switches (compile-breaking when `webLink` is added) | 1. `providerIsDownloadable` — `features/downloads/download_controller.dart` L20; 2. `VideoItemCard.providerLabel` — `features/library/video_item_card.dart` L248; 3. `VideoItemCard._providerIcon` L259; 4. `_providerLabel` — `features/library/manage_sources_sheet.dart` L310; 5. `_deletionProviderLabel` — `features/library/video_item_actions.dart` L317; 6. `locationLabel` — `features/player/player_item_details.dart` L116; 7. provider filter labels — `features/library/library_filter_sheet.dart` ~L189. `thumbnail_service_provider.dart` L30 switches on `providerType` but has a `_` wildcard (not exhaustive) |
+| Non-switch lookup sites (no compile error, must be handled manually) | `PlaybackSourceResolver._adapterFor` and `AvailabilityCheckService._adapterFor` (adapter registries), `ItemRemovalService._deleterFor` + the `directUrl` record-only bucket (`item_removal_service.dart` L163-184 — `webLink` must join the record-only/second-source bucket per ARCHITECTURE §15.4), `MediaStorePlugin.checkPermissionStatus` (Kotlin `when` over SDK levels, not providers) |
+| `HttpDownloadManager` | `features/downloads/download_manager.dart`. Transfers write `<downloadsRoot>/<fileName>.part` then rename atomically — **no staging subdirectory today**. Low-storage guard via injectable `AvailableSpaceProbe`; `pruneInterrupted` normalises crash-orphaned rows and sweeps orphan `.part` files; events on one broadcast stream; `CancellationToken` from `sources/source_adapter.dart` |
+| Scan-merge match | `ScanMergeService` keys on exact `sourceUri` string per provider (`existingByUri` map, L84-87): a URI already in the DB updates metadata and creates no duplicate — the DLK-036 "scan must not duplicate a downloaded file" test can rely on this identity |
+| Offline resolver | `StorageOfflineDownloadResolver` returns a `PlayableSource` only for a `completed` record whose file exists under the downloads root; `sourceId` is the record id. Root failure degrades softly to the network source |
+| Storage roots | `StorageRoots`: `cacheRoot` = temp dir + `mytube_cache`, `downloadsRoot` = app-support dir + `mytube_downloads`, separation verified by `isSeparated` (`platform/storage_paths.dart`). §15.7 staging `<downloadsRoot>/staging/<jobId>/` and §15.13 `.run/<jobId>/` will live under `downloadsRoot` |
+| Preferences | `AppPreferences` key/value TEXT + typed `AppPreferencesDao`; `AppPreferenceKeys` has 5 keys (`theme_mode`, `reels_autoplay`, `default_playback_speed`, `scan_entire_device`, `cache_limit_bytes`). No `download.*` keys yet (DL3). No secure-storage bridge exists — required by ADR-027 before cookies/proxy (DL10) |
+| Dependencies | `pubspec.yaml` has no extractor, FFmpeg, aria2c or secure-storage package (per the DL0.2 gate). Note: `sqlite3_flutter_libs: 0.6.0+eol` is end-of-life — unrelated to DL but recorded honestly |
+| Android build | `compileSdk`/`targetSdk` 36, `minSdk` 24, Java/Kotlin 17; **no** ABI filters/splits, no `ndkVersion` pin, no `extractNativeLibs` attribute in the manifest, no R8/keep rules; release still signs with debug keys (DL1/DL13 tasks touch these) |
+| MediaStore bridge | `MediaStorePlugin.kt` channel methods: permission check/request, `deleteVideos`, `queryVideos` — **no insert/`RELATIVE_PATH`/`IS_PENDING` write path** yet, which §15.7 DeviceFolder publishing needs (DL6) |
+| SAF bridge | `SaffBridgePlugin.kt` requests write access up front at folder pick (L104-111) and persists grants; document create/copy path for `PickedFolder` publishing arrives with DL6 |
+| Share plugin | `SharePlugin.kt` is **outbound only** (`shareFile` via `ACTION_SEND` chooser + FileProvider re-serving). Inbound share intake is a new plugin (§15.2 `ShareIntakePlugin.kt`) |
+| Entry points | Library header actions live in `app/shell/app_header.dart` `_tabActions` (`shell_add_url` → `addDirectUrl` from `features/library/library_actions.dart`); Settings has **no Downloads section** yet (only cache wording in `settings_screen.dart`) — DLK-070/071 add it |
+
+**Consequences for later DL tasks**
+
+-   Adding `ProviderType.webLink` breaks exactly the 7 switches listed above;
+    the analyzer will flag them, but the registry/lookup sites must be
+    checked by hand.
+-   New download columns come with one v7→v8 migration (DL2) plus a migration
+    test; new `DownloadStatus` names need no schema change but do need the
+    `byName` deserialisers updated first.
+-   The share-intent-filter, `extractNativeLibs`, ABI splits and R8 rules are
+    all still absent — DL1/DL4/DL13 own them and each needs
+    `flutter build apk --debug`.
+
+## ADR-021 --- Link downloader scope: personal-use build, content limits lifted
+
+**Status:** Proposed (owner decision 2026-11-06, revised).
+
+**Context and problem.** The owner wants a downloader in the style of 4K Video
+Downloader and has stated that the app is for personal use only and will never
+be published on Google Play, and that it should have maximum reach, speed and
+quality. The earlier draft of this ADR limited the feature to media a site
+serves to an anonymous viewer and excluded playlists, live streams, subtitles
+and cookies.
+
+**Decision.** Lift the product-level content-access limits for web-platform
+links. The downloader may use the owner's own accounts (ADR-027), playlists,
+channels, live streams and subtitles (ADR-029), a recovery ladder for blocked or
+throttled links, an optional proxy, and a performance profile (ADR-028). Four
+things stay: (1) DRM-encrypted streams are not decrypted and no
+DRM-circumvention code is written; (2) engine arguments are structured and
+injection-safe (ADR-030); (3) cookies and proxy credentials are handled as
+secrets (ADR-027); (4) the data-integrity rules in `AGENTS.md` (never overwrite,
+never delete what the job did not create, Clear Cache never touches downloads).
+The user sees a one-time notice that downloading may breach a site's terms, that
+they are responsible, and that account cookies can get that account limited by
+the site. Cloud-provider restrictions (OneDrive, Google Drive, R2) are unchanged.
+
+**Alternatives considered.** Keep the anonymous-viewer limit (rejected: owner
+decision). Add DRM decryption (rejected: a circumvention tool with its own legal
+exposure, and out of proportion for this app). A hosted extraction server
+(rejected: adds an app-owned backend, against SEC-001 and NFR-009).
+
+**Consequences.** Google Play distribution is not an option and the engine is
+GPL-3.0, so any later public release needs a new decision. Using account
+cookies can get the owner's account rate-limited or banned by a site. Site
+changes break extractors regularly, so automatic updates (ADR-028) are part of
+the feature.
+
+## ADR-022 --- Embedded yt-dlp behind a `MediaExtractor` seam
+
+**Status:** Accepted (2026-11-06). The documentation checks passed and the
+CPH2719 device spike validated the **engine mechanism** on public YouTube
+content: the three modules initialise, the yt-dlp subprocess executes, YouTube
+extraction + download work, FFmpeg merges separate video+audio into one MP4,
+aria2c downloads, and the in-app update both upgraded and persisted. That is
+what the engine *choice* had to prove, and it is site-agnostic, so DL1 (pure
+Dart, engine-agnostic) is cleared to start. It is **not** a claim that
+Facebook / Instagram / direct-MP4 reach was demonstrated — those spike cases
+came back inconclusive (see the results note below), and real FB/IG reach
+depends on the owner-cookie flow (ADR-027 / DL10). A remedial on-device pass
+with real public URLs and a re-run of the direct-MP4 case is owed before we
+call broad-site reach proven.
+
+**Context and problem.** Pure-Dart or Java extractors cover one or two sites.
+The request names YouTube, Facebook, Instagram "and other major platforms",
+which only yt-dlp covers broadly. Merging separate video and audio tracks (needed
+for higher YouTube qualities) and audio conversion need FFmpeg. The project
+bans a second player or downloader stack and requires dependency audits.
+
+**Decision.** Embed yt-dlp through a maintained `youtubedl-android` build plus
+its FFmpeg module, wrapped by `ExtractorPlugin.kt` and the Dart
+`MediaExtractor` seam (ARCHITECTURE §15). The seam is engine-neutral so the
+engine can be swapped or replaced by a remote service later without touching
+the library, queue or UI. DL0.2 must choose between the original wrapper and
+the maintained fork, record version, licence, ABI and size impact, 16 KB page
+support and a real-device spike on a public YouTube video, a public Facebook
+video, a public Instagram reel and a direct MP4. Expect some sites to need the owner's login; repeat those cases with imported
+cookies (ADR-027) and record both outcomes. Also verify the wrapper's `aria2c`
+module (ADR-028). If the engine
+fails the gate, stop and ask the owner.
+
+**Alternatives considered.** `youtube_explode_dart` (YouTube only; cannot merge
+without FFmpeg). `ffmpeg_kit_flutter` (upstream is retired; verify, and do not
+add). NewPipeExtractor (no Facebook or Instagram). A hosted yt-dlp server
+(rejected: adds an app-owned backend, against SEC-001 and NFR-009; may be
+revisited as a separate optional boundary like R2 signing). A WebView scraper
+(fragile and unsafe).
+
+**Consequences.** Larger APK (use ABI splits), GPL-3.0 obligations if the app
+is ever distributed, native code to keep updated, and a first-run engine
+initialisation delay. In exchange, one engine covers many sites and FFmpeg
+merging and conversion.
+
+### DL0.2 engine verification (documentation part, run 2026-11-06)
+
+Facts re-verified against the live sources, replacing the 2026-11-06
+"read from public pages" ground note above:
+
+| Check | Result |
+| --- | --- |
+| "Original vs fork" | Not two projects. `yausername/youtubedl-android` **is** the maintained line; its Maven Central publication is under `io.github.junkfood02.youtubedl-android` (`library`, `common`, `ffmpeg`, `aria2c`). Releases 0.16.0→0.18.1 are cut by JunkFood02/xibr on the same repo; there is no separate fork to choose between. |
+| Last release | 0.18.1, published 2025-11-16 (GitHub release + Maven Central `lastUpdated 20251116`). 0.18.0 (2025-09-27) added **16 KB page-size support** (PR #331); 0.18.1 added QuickJS support. Repo `pushed_at` 2025-11-16, ~115 open issues, 1.4k stars — active but slow-cadence (releases roughly every 6 months). |
+| Bundled yt-dlp | The AAR ships a prebuilt `yt-dlp` binary. **Measured on the CPH2719 2026-11-06: the bundled binary reports `2025.11.12`** via `yt-dlp --version` (AAR 0.18.1 pins that yt-dlp release). `updateYoutubeDL(STABLE)` on-device moved it to `2026.10.26` and persisted the new binary. |
+| Licences | Wrapper + all modules: **GPL-3.0** (repo `LICENSE` is GPLv3 text; POM declares `GPL-3.0 license`). Bundled FFmpeg built with GPL components is GPL-3.0 too. yt-dlp is Unlicense/public-domain, Python is PSF, aria2c is GPL-3.0. All acceptable for this personal-use build per ADR-021/DL0.2; recorded here per AGENTS. |
+| minSdk | `library/build.gradle.kts` sets `minSdk = 24` — matches the app's `minSdk 24`. **Gate passes.** |
+| APK size | **MEASURED 2026-11-06** (debug, `useLegacyPackaging=true`, uncompressed native libs): universal APK (all 4 ABIs) = **246.2 MB**; split-per-abi arm64-v8a = **114.2 MB**, armeabi-v7a = **101.7 MB**, x86_64 = **113.1 MB**. The CPH2719 is arm64 → ~114 MB debug install. Release+R8 shrinks DEX only; the ~90 MB/ABI native engine dominates the delta over the current (engine-free) build. Large but acceptable for a personal sideloaded build; ABI splits are mandatory. **RECONFIRMED at DL2 (2026-11-06):** the production build now wires the same 0.18.1 engine plus `splits.abi` (arm64-v8a/armeabi-v7a/x86/x86_64 + universal). Per-ABI debug sizes match the spike exactly — arm64-v8a **114.2 MB**, armeabi-v7a **101.7 MB**, x86_64 **113.1 MB**, x86 **93.1 MB**; the universal APK is now **297.9 MB** (it now also carries x86, which the spike split-list omitted). `flutter build apk --debug` is green with `ExtractorPlugin.kt` compiled against the engine API. |
+| `extractNativeLibs` | **VERIFIED on the first spike build 2026-11-06 (build disproves the `false` option, no device needed).** AGP 9.0.1 **rejects** `android:extractNativeLibs="true"` in the manifest ("Avoid setting android:extractNativeLibs=\"true\" explicitly ... instead set ...jniLibs.useLegacyPackaging to true in the build script"); with the attribute removed the build failed at `packageDebug`. Setting `packaging { jniLibs { useLegacyPackaging = true } }` produced a green APK. The engine ships `libpython.zip.so`/`libffmpeg.zip.so`/`libaria2c.zip.so` as *compressed archives named as .so* — `llvm-strip` reports them "not a valid object file" — so they must be stored uncompressed for the subprocess `exec` to find them. Conclusion: uncompressed packaging (`useLegacyPackaging=true`) is **required**; the 16 KB in-place (`false`) variant is not viable for this engine. Whether the resulting APK installs on a 16 KB-page Android 16 device is still device-only. |
+| R8 | The library ships no consumer keep rules of note; its API is called directly from app Kotlin so R8 keeps it by reachability. A keep rule for `com.yausername.**` + a release-build check is planned in DL13; debug builds (no R8) are unaffected. |
+| 16 KB pages | Claimed supported since 0.18.0 (PR #331). **Measured on the CPH2719 2026-11-06: `getconf PAGE_SIZE` = 4096 (runtime 4 KB pages) while `ro.product.cpu.pagesize.max` = 16384.** The APK installed and all three modules initialised and the subprocess executed on this device — proving the libraries load and run — but because the device actually runs 4 KB pages, **true 16 KB-page operation is not exercised here** and remains unverified on a genuine 16 KB-page device. |
+| yt-dlp update mechanism | `YoutubeDLUpdater.kt` fetches `api.github.com/repos/yt-dlp/yt-dlp/releases/latest` (STABLE), `yt-dlp-nightly-builds` (NIGHTLY) or `yt-dlp-master-builds` (MASTER), downloads the `yt-dlp` linux binary asset, installs it under `noBackupFilesDir`, and **restores the bundled binary if the update fails** — exactly the ADR-028 "previous working version kept" behaviour. Rate-limit note: the GitHub API call needs no token but is anonymous (60 req/h), fine for a weekly check. |
+| Transitive deps | `kotlin-stdlib 1.7.22`, `appcompat 1.4.2`, `core-ktx 1.8.0`, `jackson-databind 2.11.1` (dated; only used by the wrapper's JSON helpers — we may bypass them by parsing `--dump-json` ourselves in `ExtractorPlugin.kt`), `commons-io 2.5`. All Android-compatible; **now proven**: the first spike Gradle build resolved all three AARs + transitives and compiled `MainActivity.kt` against the real 0.18.1 API with no dependency conflict. API-shape notes for DL1's `ExtractorPlugin.kt`: `YoutubeDL` is a Kotlin `object` (use `YoutubeDL.getInstance()` / `YoutubeDL.UpdateChannel.STABLE`); `execute(request, processId, redirectErrorStream, callback)` is overloaded so call it with all four args; `YoutubeDLResponse` fields are `out`/`err`/`exitCode`/`elapsedTime` (not `stdout`/`stderr`); `getInfo(url)` returns `mapper.VideoInfo`; `updateYoutubeDL(context, channel)` returns `UpdateStatus?`. |
+
+**Spike status: COMPLETE — device-verified on the CPH2719 (Android 16,
+arm64-v8a), 2026-11-06.** After the earlier network drop the phone rejoined
+wireless ADB on a rotated port (`192.168.10.93:41803`), the arm64 debug APK
+installed (`Success`), and the `SPIKE_DL02` thread ran to completion — twice (a
+pass-1 on the stale bundled engine, then a pass-2 that updates first and runs
+every case on the current engine). Selected real log lines:
+
+```
+INIT youtubedl: ok ms=33 / INIT ffmpeg: ok / INIT aria2c: ok
+VERSION bundled: 2025.11.12                 (pass 1, before update)
+UPDATE ytdlp stable: ok status=DONE -> 2026.10.26
+VERSION bundled: 2026.10.26                 (pass 2, persisted)
+UPDATE ytdlp stable: ok status=ALREADY_UP_TO_DATE -> 2026.10.26
+PROBE yt: ok id=aqz-KE-bpKQ formats=61 title='Big Buck Bunny 60fps 4K …'
+DL yt_small:  ok bytes=26688526 files=[aqz-KE-bpKQ.m4a]
+DL yt_aria2c: ok bytes=11829048 files=[dQw4w9WgXcQ.mp4]   (--downloader aria2c -x 4 -s 4)
+DL yt_merge:  ok bytes=9094138  files=[dQw4w9WgXcQ.mp4]   (bv*[height<=360]+ba, ffmpeg merge)
+PROBE facebook: FAIL  [facebook] Cannot parse data …
+PROBE instagram: FAIL [Instagram] Instagram sent an empty media response … use --cookies
+```
+
+Everything the DL0.2 gate needs is now proven on-device: the three modules
+initialise, the yt-dlp subprocess executes, **YouTube extraction + download
+works, FFmpeg merges separate video+audio into one MP4, aria2c downloads, and
+the in-app `updateYoutubeDL(STABLE)` both upgraded (2025.11.12 → 2026.10.26) and
+persisted the engine** (`ALREADY_UP_TO_DATE` on the next start — ADR-028's
+"previous working version kept" path confirmed). The three non-passes were
+**inconclusive, not proof of an engine defect — and equally not proof the engine
+can reach those sites**: the Facebook probe used a fabricated/unparseable test id
+so it says nothing about real FB media; the Instagram probe failed exactly as
+ADR-027 predicts (login/`--cookies` required) but was never retried *with*
+cookies, so IG reach is unproven and is a DL10 cookie concern; and the
+Direct-MP4 `[generic]` HTTP 403 on the Google sample host was a UA/source
+rejection that was dropped rather than re-run in the update-first pass, so the
+generic-HTTP path is untested (plain direct URLs are in any case served by the
+ADR-019 dart:io engine, not yt-dlp). Login-gated cookie *reruns* were skipped —
+no owner cookies were imported for this throwaway spike. What the spike *did*
+prove is the site-agnostic engine mechanism (init, subprocess, extract,
+download, ffmpeg merge, aria2c, in-app update) on real YouTube content, which is
+the only thing the engine *choice* itself had to validate.
+
+**Gate conclusion: the engine *choice* is validated (on YouTube); broad-site
+reach is not yet demonstrated.** Nothing seen required stopping or asking, so
+DL1 (pure Dart, engine-agnostic) may start. FB/IG/direct-MP4 reach stays an open
+item — remedial on-device cases with real public URLs plus a cookie rerun — to be
+closed in the DL9/DL10 cookie work, not asserted here.
+The `spike/dl0-2-engine` branch (deps + `useLegacyPackaging` + the throwaway
+`SPIKE_DL02` thread) is scratch-only and must NOT be merged — DL1 re-adds the
+dependency properly behind the `MediaExtractor` seam in `lib/platform/extractor/`
++ `ExtractorPlugin.kt`. The case list (a)-(g) and the cookie-rerun rationale
+below are kept as the plan of record.
+
+1.  Branch `spike/dl0-2-engine` from current master. Do not merge.
+2.  `android/app/build.gradle.kts` → `defaultConfig` add
+    `ndk { abiFilters += listOf("arm64-v8a") }` (device is arm64) and
+    `dependencies { implementation("io.github.junkfood02.youtubedl-android:library:0.18.1"); implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1"); implementation("io.github.junkfood02.youtubedl-android:aria2c:0.18.1") }`.
+3.  `AndroidManifest.xml` application tag add `android:extractNativeLibs="true"`
+    (flip to `"false"` for the second build to test 16 KB in-place loading).
+4.  In `MainActivity.kt` `configureFlutterEngine`, add a temporary method
+    channel `spike/extractor` exposing: `version` (`yt-dlp --version` via
+    `YoutubeDL.getInstance().execute(YoutubeDLRequest("--version"))`), `init`
+    (`YoutubeDL/FFmpeg/Aria2c .init(this)`), `probe` (`getInfo(url)`),
+    `download` (`-f bestvideo+bestaudio --merge-output-format mp4 -o <app
+    external files dir>/spike/%(title)s.%(ext)s <url>`), and `downloadAria2c`
+    (same + `--downloader aria2c --external-downloader-args "-x16 -s16"`).
+    Alternatively install the release sample APK from the wrapper's releases
+    page and skip 2-4.
+5.  `flutter build apk --debug` (also record `--split-per-abi` sizes),
+    `flutter install` or `adb install -r` on CPH2719.
+6.  Run cases, recording each honestly: (a) probe+download one public YouTube
+    video; (b) one public Facebook video; (c) one public Instagram reel; (d)
+    one direct MP4 URL; (e) a 1080p video+audio merge (case a with
+    `-f bestvideo[height>=1080]+bestaudio --merge-output-format mp4`);
+    (f) aria2c variant of (a); (g) `--version` before and after
+    `updateYoutubeDL(STABLE)` to verify the update path keeps working on
+    Android 16.
+7.  For every login-gated failure in (b)/(c): import a `cookies.txt` from a
+    browser extension for that site, re-run with `--cookies <file>`, and
+    record both the without-cookies and with-cookies outcomes.
+8.  Paste the results table back here (site, result, notes) and flip the
+    "Spike status" line above. Only then is DL1 cleared to start.
+
+| Spike case | Result | Notes |
+| --- | --- | --- |
+| Public YouTube video | **PASS** | `getInfo` (61 formats) + `-f worst` download → 26.7 MB file written |
+| Public Facebook video | FAIL (login/parse) | `[facebook] Cannot parse data` for the test id; anonymous-access limit, not an engine defect |
+| Public Instagram reel | FAIL (login-gated) | `Instagram sent an empty media response … use --cookies` — the ADR-027 case |
+| Direct MP4 (generic) | FAIL (source) | pass-1 `[generic]` HTTP 403 from the sample host = UA/source, not engine; plain URLs are the ADR-019 dart:io engine's job |
+| Video+audio merge | **PASS** | `bv*[height<=360]+ba` merged by FFmpeg into a single 9.1 MB MP4 |
+| aria2c downloader | **PASS** | `--downloader aria2c -x 4 -s 4` → 11.8 MB MP4 |
+| yt-dlp in-app update | **PASS** | `updateYoutubeDL(STABLE)` `2025.11.12 → 2026.10.26`, then `ALREADY_UP_TO_DATE` (binary persisted) |
+| Cookies retry of failures | skipped | no owner cookies imported for this throwaway spike; ADR-027 evidence pending a signed-in DL9 pass (does not gate DL1) |
+
+
+## ADR-023 --- One download pipeline with two engines; staged publishing
+
+**Status:** Proposed.
+
+**Context and problem.** ADR-019 built a dart:io HTTP engine for direct URLs.
+Web links need an extractor-run engine. Two separate managers would duplicate
+records, progress, the controller, offline playback and deletion rules. The
+owner also wants files in a visible location, not only app-private storage.
+
+**Decision.** Keep one `DownloadRepository`, one record model, one event
+stream and one `DownloadController`, and add a runner strategy
+(`directHttp` and `extractor`). Every job writes to a staging directory under
+the downloads root and is published to the chosen destination only when
+complete (app storage, visible device folder through MediaStore, picked SAF
+folder, OneDrive later). A finished video becomes one library item whose
+primary source is the stored file and whose second source is the canonical page
+URL; audio stays in the Downloads list. Registration uses insert-or-ignore
+semantics and must not break scan de-duplication.
+
+**Alternatives considered.** A separate downloader subsystem (rejected:
+duplication, divergent safety rules). Writing directly to the destination
+(rejected: partial files in a visible folder, no atomic publish, no retry after
+a failed publish). Keeping everything app-private (rejected: owner wants
+visible files and survival across uninstall). Treating the page link as a
+playable source (rejected: AGENTS says not every URL is a stream).
+
+**Consequences.** One safety suite covers both engines. `ProviderType` gains
+`webLink`, which touches every exhaustive switch. A scan after publishing must
+match the existing source URI; a test proves it. OneDrive publishing is a
+later, blocked task.
+
+## ADR-024 --- Intake semantics: clipboard asks, share downloads
+
+**Status:** Proposed (owner rule).
+
+**Context and problem.** The owner defined two behaviours: a link found in the
+clipboard may mean download or stream, so ask every time; a link shared into
+the app always means download. Android restricts background clipboard reads and
+Android 12 and later show a system notice when an app reads another app's clip.
+The share target is exported and any app can invoke it.
+
+**Decision.** Read the clipboard only on foreground resume, check the clip
+timestamp before reading content, and show a Download / Stream / Dismiss prompt
+every time, never auto-starting. Remember a hash of the last handled value only.
+A shared link goes straight to the download flow, honouring "ask before each
+download", and is rate limited, size limited and queue capped because the
+target is exported. A clipboard link is not fetched until the user chooses.
+
+**Alternatives considered.** Auto-download from clipboard (rejected: owner rule
+and privacy). Background clipboard polling (rejected: blocked by Android and
+invasive). Always showing the options sheet for shares (rejected: defeats the
+saved configuration).
+
+**Consequences.** Needs a tiny native probe for the clip timestamp, with a
+`hasStrings()` fallback. Shares can run without a further prompt when the user
+has turned "ask before each download" off, so the notification and snackbar
+must always show what started and offer Cancel.
+
+## ADR-025 --- Saved download configuration in typed preferences
+
+**Status:** Proposed.
+
+**Context and problem.** The owner does not want to choose type, quality and
+destination every time.
+
+**Decision.** A `DownloadPreset` value type with `sanitize`, stored under typed
+keys in `app_preferences` (ARCHITECTURE §15.9). "Ask before each download"
+(default on) decides whether the options sheet opens; the sheet's "Use these
+settings next time" writes the preset and turns it off. A job snapshots the
+preset at creation. Quality is a cap: the nearest lower available height is used
+and the user is told.
+
+**Alternatives considered.** One JSON blob (rejected: harder to sanitize and
+migrate than the typed keys the app already uses). Per-site presets (deferred).
+Storing the last-used choice automatically (rejected: surprising; the owner
+asked for an explicit save).
+
+**Consequences.** Settings shows one coherent section; corrupt values cannot
+break a download; presets can be added to backup later (BACKUP-001).
+
+## ADR-026 --- Background downloads with a `dataSync` foreground service
+
+**Status:** Accepted (platform facts verified against current Android
+documentation 2026-11-06 in DL0.3; the owner-confirmation step is DL0.4).
+
+**Context and problem.** Downloads must continue when the app is minimised.
+Foreground services of type `dataSync` are limited on Android 15 and later to 6
+hours per 24 hours and call `onTimeout`. User-initiated data transfer jobs are
+the platform's alternative but are a larger change.
+
+**Decision.** Use a `dataSync` foreground service started by user action, with
+a progress notification (Pause, Cancel), `onTimeout` marking running jobs
+`interrupted` and calling `stopSelf()`, and just-in-time notification
+permission. Swiping the app away is best effort and must leave consistent,
+resumable state. Revisit user-initiated data transfer jobs if the limit hurts
+real use.
+
+**Alternatives considered.** WorkManager long-running workers (viable, heavier
+and the work still needs a foreground notification). User-initiated data
+transfer jobs (best long-term fit; defer). No background support (rejected: a
+large download would die when the screen turns off).
+
+**Consequences.** One new service and manifest entries. A multi-hour batch can
+hit the system limit; the user sees interrupted jobs with Resume rather than a
+crash.
+
+### DL0.3 platform facts (verified against developer.android.com 2026-11-06)
+
+-   **Type & permissions.** `android:foregroundServiceType="dataSync"` on the
+    `<service>`; declare `FOREGROUND_SERVICE` (normal) and
+    `FOREGROUND_SERVICE_DATA_SYNC` (both already precedented by the existing
+    `FOREGROUND_SERVICE(_MEDIA_PLAYBACK)` entries); pass
+    `ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC` to `startForeground()`.
+    No runtime prerequisite beyond those declarations. `POST_NOTIFICATIONS`
+    is already declared; on API 33+ it must be granted (the app's existing
+    just-in-time flow, DL0 findings) or the notification is silently
+    withheld. Apps targeting 15+ cannot start `dataSync` from
+    `BOOT_COMPLETED` — irrelevant here, jobs only start from user action.
+-   **Timeout / `onTimeout`.** Confirmed: apps **targeting API 35+** (this app
+    targets 36) get a 6 h per 24 h quota shared across all `dataSync`
+    services; **bringing the app to the foreground resets the timer**; on
+    expiry the system calls `Service.onTimeout(int, int)` (exists only on
+    Android 15+) and the service has a few seconds to `stopSelf()` or a
+    `RemoteServiceException` is thrown. Plan implemented: finalise the current
+    job state, mark running jobs `interrupted`, `stopSelf()` immediately; also
+    track elapsed foreground-service time in-app and stop gracefully before
+    6 h so pre-15 devices (no callback, silent caching) behave identically.
+    After quota exhaustion new `dataSync` starts throw
+    `ForegroundServiceStartNotAllowedException` ("Time limit already
+    exhausted") until the app is foregrounded — the queue must catch this and
+    show "open the app to resume" rather than crash. A developer option can
+    force short timeouts for testing (`adb shell dumpsys` flag documented in
+    the Android 15 behaviour-changes page).
+-   **API 24 to 28 storage path.** Confirmed as §15.7 assumed: writing app
+    files through `MediaStore` needs no permission on API 29+; on API 24 to
+    28 the `DeviceFolder` path declares `WRITE_EXTERNAL_STORAGE` with
+    `android:maxSdkVersion="28"`, requested just in time (the existing
+    `READ_EXTERNAL_STORAGE maxSdk 32` entry shows the pattern), denial falls
+    back to AppStorage. API 29 legacy-request (`requestLegacyExternalStorage`)
+    is not needed because the app was born with `targetSdk 36`.
+-   **Share intent-filter.** Confirmed: `<intent-filter>` with action
+    `android.intent.action.SEND`, category `DEFAULT`,
+    `android:mimeType="text/plain"` on `MainActivity` (`exported=true`
+    already). `singleTop` (DL0 findings) means warm shares arrive via
+    `onNewIntent`, cold via `onCreate`; the intent must be cleared after
+    reading so rotation/resume cannot replay it (§15.5).
+-   **UIDT jobs vs service.** User-initiated data transfer jobs exist from
+    **API 34 only** (`JobInfo.setUserInitiated(true)`, requires
+    `RUN_USER_INITIATED_JOBS`, a `JobService` notification, scheduling while
+    visible; WorkManager maps them to `setExpedited` +
+    `Constraints.Builder().setRequiredNetworkType` UIDT variant). With
+    `minSdk 24` a UIDT-only path would need a complete FGS fallback anyway,
+    so the `dataSync` service stays the single mechanism — ADR-026's
+    "revisit later" stands; official docs themselves list FGS as valid "when
+    WorkManager is not an option" for immediate user-initiated transfers.
+
+## ADR-027 --- Owner accounts and cookies for the link downloader
+
+**Status:** Proposed (mechanism facts verified in DL0.2 — the engine takes a
+Netscape `--cookies` file, confirmed from `YoutubeDLRequest`/yt-dlp options.
+The DL0.2 device spike reinforced the motivation: Instagram failed on-device
+with the explicit "use `--cookies` for authentication" diagnosis, while the
+gated sites stayed unreachable anonymously. The end-to-end signed-in cookie
+flow is still to be built and proven in DL10.)
+
+**Context and problem.** Many sites gate media behind a login: age-restricted
+YouTube, members-only content, private Facebook and Instagram posts the owner
+can see, and anti-bot checks that pass for a signed-in session. The engine takes
+a Netscape cookie file. Android has no readable browser cookie database.
+
+**Decision.** Support two entry points: in-app sign-in through a Kotlin WebView
+that captures the site's cookies, and `cookies.txt` import through SAF. Store
+cookies in Keystore-backed secure storage, excluded from backup. For each job
+write a cookie file with only the link's registrable domain to
+`<downloadsRoot>/.run/<jobId>/`, pass it with `--cookies`, write refreshed
+cookies back, and shred the file in a `finally` plus a startup sweep. Never log,
+display or persist cookies elsewhere. Settings lists signed-in sites with
+Remove. The first-use notice warns that cookies can get the account limited.
+
+**Alternatives considered.** Reading browser cookies directly (not possible on
+Android without root). Storing cookies in the Drift database (rejected: backup
+and logging exposure). A WebView that scrapes the media itself (rejected:
+fragile, and the engine already does this).
+
+**Consequences.** One new secure-storage bridge and a WebView activity. Cookies
+expire, so a `cookiesExpired` error maps to a "Sign in again" action.
+
+## ADR-028 --- Performance profile and automatic engine updates
+
+**Status:** Proposed (documentation verified in DL0.2 2026-11-06: the `aria2c`
+module exists at 0.18.1, the updater keeps the previous working binary on
+failure, and the **aria2c-on-device check passed** in the DL0.2 spike
+(`--downloader aria2c -x 4 -s 4` produced a file on the CPH2719 — see ADR-022's
+table). Only the multi-mode **speed benchmark** (DL13.2: single vs fragments 8
+vs 16 vs aria2c on one video) remains before the defaults are set.
+
+**Context and problem.** The owner wants maximum efficiency. Single-connection
+downloads are slow on throttled sites, DASH/HLS content arrives as many
+fragments, and extractors break often.
+
+**Decision.** Use aria2c (the wrapper's optional module) for HTTP(S) downloads
+when DL0.2 verifies it, otherwise concurrent fragments (default 8) with HTTP
+chunking. Add aggressive retry and resume, re-extract on throttling, best-quality
+format sorting (up to 8K, AV1/VP9/HDR, Opus; H.264 compatibility mode off by
+default), up to five concurrent jobs (default 3), optional Wi-Fi-only and speed
+limit, and an automatic weekly engine update check on Wi-Fi (default on) with
+the previous working version kept on failure. Record a real benchmark
+(single stream vs fragments 8/16 vs aria2c) on the CPH2719 in this file.
+
+**Alternatives considered.** Native single-stream only (rejected: slow).
+Handwritten segmented downloader in Dart (rejected: duplicates the engine).
+
+**Consequences.** Larger APK if aria2c is included (use ABI splits). More
+parallel connections can trigger site rate limits, which the recovery ladder and
+the playlist pause mitigate.
+
+## ADR-029 --- Playlists, channels, live streams and subtitles
+
+**Status:** Proposed.
+
+**Decision.** Support all four. Playlists and channels use a flat probe, a
+pick-which-videos sheet, one job and one library item per entry, and a pause
+between items. Live streams record from the start where possible and keep the
+partial file on stop or on the Android 15 `dataSync` timeout. Subtitles are
+chosen in the preset or sheet and are embedded or saved as sidecars (the player
+already loads sidecars, VP4.3).
+
+**Alternatives considered.** Keep them out of scope (rejected: owner decision).
+
+**Consequences.** More UI (DESIGN.md §5), a batch-enqueue path, and a clear
+notion of "part" for recordings cut by the service timeout.
+
+## ADR-030 --- Structured arguments plus an owner-typed extra-arguments field
+
+**Status:** Proposed.
+
+**Context and problem.** The share target is exported, so any app can send text
+to the downloader. Letting that text become engine flags would allow `--exec`
+and similar. The owner also wants full access to the engine's options.
+
+**Decision.** Every argument the app builds comes from typed fields. The URL is
+last, after `--`. A single free-text "Extra arguments" field exists in Settings
+-> Downloads -> Advanced, typed by the owner only, validated against a denylist
+(`--exec*`, `--config*`, `--netrc*`, `--plugin-dirs`, `--cookies*`, output and
+path flags, batch and info-json loaders, cache dir, FFmpeg location) and never
+filled from share, clipboard, links, deep links or backup restore. A Gradle unit
+test pins the builder.
+
+**Alternatives considered.** No free-text path (rejected: limits the owner).
+Free text from any source (rejected: remote code execution through the exported
+share target).
+
+**Consequences.** Full engine flexibility for the owner without opening the
+share path.

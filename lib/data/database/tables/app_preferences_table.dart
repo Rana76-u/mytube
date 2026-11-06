@@ -43,4 +43,63 @@ abstract final class AppPreferenceKeys {
   /// default; the value is normalised through `CacheLimit.sanitize` on read,
   /// so a stale or corrupt entry cannot disable cleanup.
   static const String cacheLimitBytes = 'cache_limit_bytes';
+
+  // ── Link-downloader preset keys (ARCHITECTURE §15.9, DL1.4) ──────────────
+  //
+  // These are *not* secrets: the proxy URL and all cookies live in
+  // platform-secure storage (§15.13), never here. Every value is decoded
+  // defensively through `DownloadPreset.sanitize` so a corrupt row falls back
+  // to the documented default rather than wedging the downloader.
+  static const String downloadAskEveryTime = 'download.askEveryTime';
+  static const String downloadKind = 'download.kind';
+  static const String downloadMaxHeight = 'download.maxHeight';
+  static const String downloadContainer = 'download.container';
+  static const String downloadCompatMode = 'download.compatMode';
+  static const String downloadAudioFormat = 'download.audioFormat';
+  static const String downloadAudioBitrateKbps = 'download.audioBitrateKbps';
+  static const String downloadDestinationKind = 'download.destinationKind';
+  static const String downloadDestinationRef = 'download.destinationRef';
+  static const String downloadEmbedMetadata = 'download.embedMetadata';
+  static const String downloadMaxConcurrent = 'download.maxConcurrent';
+  static const String downloadClipboardDetect = 'download.clipboardDetect';
+  static const String downloadAutoUpdateExtractor =
+      'download.autoUpdateExtractor';
+  static const String downloadLastClipboardHash = 'download.lastClipboardHash';
+  static const String downloadFragments = 'download.fragments';
+  static const String downloadUseAria2c = 'download.useAria2c';
+  static const String downloadWifiOnly = 'download.wifiOnly';
+  static const String downloadRateLimitKbps = 'download.rateLimitKbps';
+  static const String downloadSubtitleLangs = 'download.subtitleLangs';
+  static const String downloadEmbedSubs = 'download.embedSubs';
+  static const String downloadSponsorBlock = 'download.sponsorBlock';
+  static const String downloadPlaylistSleepSeconds =
+      'download.playlistSleepSeconds';
+  static const String downloadExtraArgs = 'download.extraArgs';
+
+  /// Every `download.*` key, for auditing and bulk clear.
+  static const List<String> downloadKeys = [
+    downloadAskEveryTime,
+    downloadKind,
+    downloadMaxHeight,
+    downloadContainer,
+    downloadCompatMode,
+    downloadAudioFormat,
+    downloadAudioBitrateKbps,
+    downloadDestinationKind,
+    downloadDestinationRef,
+    downloadEmbedMetadata,
+    downloadMaxConcurrent,
+    downloadClipboardDetect,
+    downloadAutoUpdateExtractor,
+    downloadLastClipboardHash,
+    downloadFragments,
+    downloadUseAria2c,
+    downloadWifiOnly,
+    downloadRateLimitKbps,
+    downloadSubtitleLangs,
+    downloadEmbedSubs,
+    downloadSponsorBlock,
+    downloadPlaylistSleepSeconds,
+    downloadExtraArgs,
+  ];
 }

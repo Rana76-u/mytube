@@ -48,3 +48,30 @@ Objective: Design a sleek, responsive, and accessible mobile-first app Similar t
 • Skeleton loading shimmer effect for video grids during network fetch.
 • Haptic feedback and scale-down animation (scale(0.95)) on button taps.
 • Smooth mini-player dock transition when swiping down from the full video player page.
+
+5. Downloader UI (Download from link)
+
+• Entry points:
+	• Library header action "Download from link"; Settings > Downloads; the Android share sheet (opens straight into the flow); the clipboard prompt.
+	• No sixth tab. The Downloads list lives under Settings > Downloads.
+• Clipboard prompt (bottom sheet, surface #212121, sheet radius 16px):
+	• Title "Link found in your clipboard", host and shortened path only, never the query string.
+	• Three pill actions (24px radius): Download (primary), Stream (outlined), Dismiss (text).
+• Options sheet:
+	• Header: 16:9 thumbnail (12px radius, timestamp badge), title (max 2 lines), uploader • duration.
+	• Pill switch Video | Audio. Quality rows with radio selection: "Best available" first, then heights; each row shows size or "Size unknown" and a small info note for codecs that may not play (accent secondary #3EA6FF).
+	• Destination row, checkbox "Use these settings next time", Download button pinned to the bottom above the safe area.
+• Downloads screen (Settings > Downloads):
+	• Sections Active, Queued, Completed, Failed. Row: 120px 16:9 thumbnail, title (2 lines), status line (42% • 3.1 MB/s • 1 min left, Merging, Saving, Completed • 120 MB, Failed with reason), 2px red progress line, 3-dot menu (Pause, Resume, Cancel, Retry, Play, Share, Delete file).
+	• Skeleton shimmer while loading; empty state with a "Paste a link" action.
+• Notification: ongoing progress with title, percentage and speed, actions Pause and Cancel; completion opens the Downloads list.
+• Micro-interactions: reuse scale-down (0.95) and haptic on primary buttons; honour reduced motion; no new animation primitives; colours only through theme tokens.
+
+6. Downloader additions (playlists, live, accounts, advanced)
+
+• Playlist sheet (bottom sheet, surface #212121): title and count, "Select all" and range pill, rows with 120px 16:9 thumbnail, title (2 lines), duration and a checkbox, pinned "Download N videos" button above the safe area.
+• Options sheet additions: Subtitles row (language chips, "Auto-generated" toggle), "Embed chapters and thumbnail" switch, live badge (red pill, "LIVE") with "Record from start" and "Stop and keep" actions.
+• Downloads row: "Part 1/2" label for recordings cut by the service timeout; "Sign in again" action for cookiesExpired; error rows name the next action.
+• Settings > Downloads sections: Accounts (site rows with Sign in, Import cookies.txt, Remove), Network (Proxy, Wi-Fi only, Speed limit), Speed (Concurrent downloads, Fragments, aria2c switch), Extras (SponsorBlock, Subtitles), Engine (version, Check for update, Auto-update), Advanced (Extra arguments text field with inline validation errors).
+• First-use notice (dialog, once): downloading can breach site terms, you are responsible, account cookies can get the account limited.
+• Same rules as above: theme tokens only, scale-down and haptic on primary buttons, reduced motion honoured.
