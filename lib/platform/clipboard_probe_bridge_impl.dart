@@ -20,6 +20,9 @@ class ClipboardProbeBridgeImpl implements ClipboardProbeBridge {
       );
     } on PlatformException {
       return null;
+    } catch (_) {
+      // MissingPluginException on widget-test hosts.
+      return null;
     }
   }
 }

@@ -1,9 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mytube/core/result.dart';
 import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/database/tables/app_preferences_table.dart';
+import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/download_preset.dart';
 import 'package:mytube/domain/models/web_media.dart';
+import 'package:mytube/platform/platform_providers.dart';
 
 /// Lossless key/value mapping between a [DownloadPreset] and the [AppPreferences]
 /// store (DL1.4).
@@ -193,6 +196,30 @@ class DownloadPresetNotifier extends Notifier<DownloadPreset> {
   /// Applies a targeted change, keeping the rest (used by the Settings sheet).
   Future<void> patch(DownloadPreset Function(DownloadPreset current) change) =>
       update(change(state));
+
+  /// Opens the SAF picker and, on a grant, stores a picked-folder destination.
+  /// Cancel is a no-op. The widget never talks to the bridge itself.
+  Future<Result<void>> pickDestinationFolder() async {
+    final picked = await ref.read(safBridgeProvider).openFolderPicker();
+    switch (picked) {
+      case Ok(value: final uri) when uri != null && uri.isNotEmpty:
+        final parsed = Uri.tryParse(uri);
+        if (parsed == null) {
+          return Result.err(
+            const UnexpectedError(
+              userMessage: 'That folder could not be used. Pick another.',
+              diagnosticMessage: 'picked folder uri failed to parse',
+            ),
+          );
+        }
+        await patch((p) => p.copyWith(destination: PickedFolderDestination(parsed)));
+        return Result.ok(null);
+      case Ok():
+        return Result.ok(null);
+      case Err(:final error):
+        return Result.err(error);
+    }
+  }
 
   Future<void> _persist(DownloadPreset preset) async {
     if (!_alive) return;

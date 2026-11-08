@@ -6,6 +6,7 @@ import 'package:mytube/core/errors/app_exception.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/repositories/download_repository.dart';
+import 'package:mytube/features/downloads/download_manager.dart';
 import 'package:mytube/features/downloads/download_providers.dart';
 import 'package:mytube/platform/extractor/extractor_providers.dart';
 import 'package:mytube/platform/extractor/media_extractor.dart';

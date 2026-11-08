@@ -15,6 +15,8 @@ class ShareIntakeBridgeImpl implements ShareIntakeBridge {
       return value?.toString();
     } on PlatformException {
       return null;
+    } catch (_) {
+      return null;
     }
   }
 
