@@ -44,6 +44,62 @@ class Downloads extends Table {
   /// Whether the source advertised byte-range support (resume, P12-04).
   BoolColumn get acceptsRange => boolean().withDefault(const Constant(false))();
 
+  // ── Link downloader fields (DL4.1, ARCHITECTURE §15.4) ────────────────────
+  //
+  // Every column below is additive and defaulted/nullable so a pre-DL4 row
+  // reads back cleanly after the v7 → v8 migration. They let the extractor
+  // runner persist what a direct-URL download never needed: which engine
+  // produced the file, what kind of media it is, the display metadata, the
+  // immutable preset snapshot, where the finished file was published, and a
+  // typed error code. None of them hold a secret, a signed URL or raw engine
+  // output.
+
+  /// Serialised [DownloadSourceKind] name (`"directHttp"` or `"extractor"`).
+  /// Keys the runner strategy (ADR-023); defaults to the direct-URL engine so
+  /// existing rows keep working untouched.
+  TextColumn get sourceKind =>
+      text().withDefault(const Constant('directHttp'))();
+
+  /// Serialised [DownloadMediaKind] name (`"video"` or `"audio"`).
+  TextColumn get mediaKind => text().withDefault(const Constant('video'))();
+
+  /// Human title from the extractor, for the download row. Never a URL.
+  TextColumn get title => text().nullable()();
+
+  /// Thumbnail reference (the extractor's image URL) for display only; it is
+  /// never a durable identity and is excluded from the signed-URL rule because
+  /// it is not a media stream.
+  TextColumn get thumbnailUri => text().nullable()();
+
+  /// Short format summary for display (e.g. `1080p · mp4`). Never raw output.
+  TextColumn get formatSummary => text().nullable()();
+
+  /// JSON-encoded immutable [DownloadPreset] snapshot taken when the job was
+  /// created (AGENTS: a job snapshots its preset; later preference changes
+  /// never mutate a queued or running job).
+  TextColumn get presetJson => text().nullable()();
+
+  /// Destination kind name (e.g. `appStorage`, `deviceFolder`, `pickedFolder`,
+  /// `oneDrive`) paired with [destinationRef]. Non-secret locator only.
+  TextColumn get destinationKind => text().nullable()();
+
+  /// Non-secret destination reference: a SAF tree URI or MediaStore folder
+  /// hint. Never a credential or token (ARCHITECTURE §15.4).
+  TextColumn get destinationRef => text().nullable()();
+
+  /// The job's own staging directory/file under the downloads root, removed
+  /// when the job is cancelled or after a successful publish (§15.7).
+  TextColumn get stagingPath => text().nullable()();
+
+  /// Where the finished file actually lives: a content URI (MediaStore/SAF)
+  /// or an absolute app-storage path. [fileName] stays the app-root-relative
+  /// name used by the direct-URL engine (ADR-019).
+  TextColumn get storedUri => text().nullable()();
+
+  /// Typed failure code (an [AppError] discriminant) for the failure state.
+  /// Never carries a message, URL or engine output.
+  TextColumn get errorCode => text().nullable()();
+
   /// Wall-clock timestamp (ms since epoch) when the row was created.
   IntColumn get createdAt => integer()();
 

@@ -14,13 +14,21 @@ import 'package:mytube/data/database/app_database.dart' hide SourceLocation;
 import 'package:mytube/data/database/database_provider.dart';
 import 'package:mytube/data/repositories/drift_download_repository.dart';
 import 'package:mytube/data/repositories/drift_video_repository.dart';
+import 'package:mytube/domain/models/download_preset.dart'
+    show DownloadMediaKind;
+import 'package:mytube/domain/models/web_media.dart' show DownloadSourceKind;
 import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/cache_controller.dart';
+import 'package:mytube/domain/services/destination_publisher.dart';
 import 'package:mytube/features/downloads/download_manager.dart';
 import 'package:mytube/features/downloads/download_transport.dart';
+import 'package:mytube/features/downloads/extractor_download_runner.dart';
+import 'package:mytube/platform/extractor/fake_media_extractor.dart';
+import 'package:mytube/platform/extractor/media_extractor.dart';
 import 'package:mytube/platform/platform_providers.dart';
 import 'package:mytube/platform/storage_paths.dart';
+import 'package:mytube/sources/source_adapter.dart' show CancellationToken;
 
 // ---------------------------------------------------------------------------
 // VP6.5 — cross-provider and safety regression for the download stack.
@@ -187,6 +195,56 @@ void main() {
       (await videoRepo.getSourceLocationsForVideo(
         VideoItemId('v1'),
       )).valueOrThrow;
+
+  /// Seeds an extractor (web-link) download row plus its on-disk bytes.
+  /// [published] writes the finished file in the downloads root; [stage] leaves
+  /// a partial in the job's own staging directory.
+  Future<DownloadRecord> seedExtractorDownload(
+    String id, {
+    bool published = true,
+    bool stage = false,
+  }) async {
+    final record = DownloadRecord(
+      id: id,
+      videoItemId: 'v1',
+      providerType: ProviderType.webLink,
+      sourceUri: 'https://example.com/watch?v=$id',
+      fileName: '$id.mp4',
+      sizeBytes: 64,
+      downloadedBytes: published ? 64 : 0,
+      status: published ? DownloadStatus.completed : DownloadStatus.queued,
+      acceptsRange: false,
+      sourceKind: DownloadSourceKind.extractor,
+      mediaKind: DownloadMediaKind.video,
+      createdAt: 1,
+      updatedAt: 1,
+      storedUri: published ? p.join(downloadsDir.path, '$id.mp4') : null,
+      stagingPath: p.join(downloadsDir.path, 'staging', id),
+    );
+    await downloadRepo.insert(record);
+    if (published) {
+      File(p.join(downloadsDir.path, record.fileName))
+        ..createSync()
+        ..writeAsBytesSync(_bytes(64));
+    }
+    if (stage) {
+      final dir = Directory(p.join(downloadsDir.path, 'staging', id))
+        ..createSync(recursive: true);
+      File(p.join(dir.path, 'partial')).writeAsBytesSync(_bytes(16));
+    }
+    return record;
+  }
+
+  /// A runner over the real repository + an app-storage publisher, driving the
+  /// fake engine against the temp downloads root.
+  ExtractorDownloadRunner buildExtractorRunner(FakeMediaExtractor extractor) =>
+      ExtractorDownloadRunner(
+        extractor: extractor,
+        repository: downloadRepo,
+        resolveRoot: resolveRoot,
+        publisherFor: (root) => AppStoragePublisher(downloadsRoot: root),
+        emit: (_, {error}) {},
+      );
 
   group('downloads never disturb other providers (VP6.5)', () {
     test('downloading the direct-URL copy leaves both sources and the '
@@ -397,6 +455,200 @@ void main() {
       );
       expect((await storedRecords()).length, 1);
     });
+  });
+
+  // DL4.6 — the link-downloader's own safety regression. The direct-HTTP
+  // guarantees above are re-proven for extractor jobs against the real
+  // repository, publisher and cache stack: the engine's staging tree belongs
+  // to its job alone, so Clear Cache, eviction, a download delete and a cancel
+  // each reach exactly the bytes they own and never another job's staging,
+  // another download, another source or a user original.
+  group('extractor download safety (DL4.6)', () {
+    ProviderContainer container() {
+      final created = ProviderContainer(
+        overrides: [
+          storagePathsProvider.overrideWithValue(_FixedStoragePaths(roots)),
+          databaseProvider.overrideWithValue(db),
+        ],
+      );
+      addTearDown(created.dispose);
+      return created;
+    }
+
+    test('Clear Cache leaves extractor staging and completed downloads '
+        'untouched', () async {
+      final c = container();
+      await c.read(thumbnailDiskCacheProvider).write('k', _bytes(64));
+      final done = await seedExtractorDownload('dl-x-done', published: true);
+      final interrupted = await seedExtractorDownload(
+        'dl-x-int',
+        published: false,
+        stage: true,
+      );
+      final staging = Directory(
+        p.join(downloadsDir.path, 'staging', 'dl-x-int'),
+      );
+
+      final result = await c
+          .read(cacheControllerProvider.notifier)
+          .clearCache();
+
+      // Only the cached preview is freed — downloads and staging are not the
+      // cache's to touch.
+      expect((result as Ok<int>).value, 64);
+      expect(
+        await c.read(thumbnailDiskCacheProvider).usage(),
+        CacheUsage.empty,
+      );
+      expect(
+        File(p.join(downloadsDir.path, done.fileName)).readAsBytesSync(),
+        _bytes(64),
+      );
+      expect(staging.existsSync(), isTrue);
+      expect(File(p.join(staging.path, 'partial')).existsSync(), isTrue);
+      expect(
+        (await storedRecords()).map((r) => r.id),
+        containsAll([done.id, interrupted.id]),
+      );
+    });
+
+    test(
+      'eviction to budget stays inside the cache root, never staging',
+      () async {
+        final c = container();
+        final cache = c.read(thumbnailDiskCacheProvider);
+        await cache.write('a', _bytes(64));
+        await seedExtractorDownload('dl-x-done', published: true);
+        await seedExtractorDownload('dl-x-int', published: false, stage: true);
+
+        final freed = await cache.enforceBudget(1);
+
+        expect(freed, 64);
+        expect(await cache.usage(), CacheUsage.empty);
+        expect(
+          Directory(
+            p.join(downloadsDir.path, 'staging', 'dl-x-int'),
+          ).existsSync(),
+          isTrue,
+        );
+        expect(
+          File(p.join(downloadsDir.path, 'dl-x-done.mp4')).existsSync(),
+          isTrue,
+        );
+        expect((await storedRecords()).length, 2);
+      },
+    );
+
+    test('deleting one extractor download leaves the other download, both '
+        'sources and the original intact', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+      final one = await seedExtractorDownload('dl-keep-a', published: true);
+      final two = await seedExtractorDownload('dl-keep-b', published: true);
+      final original = File(p.join(originalsDir.path, 'holiday.mp4'))
+        ..createSync()
+        ..writeAsBytesSync(_bytes(1024));
+
+      final result = await manager.deleteDownload(one.id);
+      expect(result.isOk, isTrue);
+
+      expect(
+        File(p.join(downloadsDir.path, one.fileName)).existsSync(),
+        isFalse,
+      );
+      expect((await storedRecords()).map((r) => r.id), isNot(contains(one.id)));
+      expect(
+        File(p.join(downloadsDir.path, two.fileName)).readAsBytesSync(),
+        _bytes(64),
+      );
+      expect((await storedRecords()).map((r) => r.id), contains(two.id));
+      expect(
+        (await storedSources()).map((s) => s.id),
+        containsAll(['s-direct', 's-onedrive']),
+      );
+      expect(original.existsSync(), isTrue);
+    });
+
+    test('cancelling one job deletes only its own staging directory', () async {
+      final runner = buildExtractorRunner(
+        FakeMediaExtractor(jobEvents: const []),
+      );
+      final a = await seedExtractorDownload(
+        'dl-a',
+        published: false,
+        stage: true,
+      );
+      await seedExtractorDownload('dl-b', published: false, stage: true);
+      final done = await seedExtractorDownload('dl-done', published: true);
+      final original = File(p.join(originalsDir.path, 'holiday.mp4'))
+        ..createSync()
+        ..writeAsBytesSync(_bytes(1024));
+
+      final token = CancellationToken()..cancel();
+      await runner.run(
+        (await downloadRepo.getById(a.id)).valueOrThrow!,
+        resume: false,
+        token: token,
+        deleteOnStop: () => true,
+      );
+
+      // Job A: row and staging both gone.
+      expect((await downloadRepo.getById(a.id)).valueOrThrow, isNull);
+      expect(
+        Directory(p.join(downloadsDir.path, 'staging', 'dl-a')).existsSync(),
+        isFalse,
+      );
+      // Job B's staging, the completed download and the original all survive.
+      expect(
+        Directory(p.join(downloadsDir.path, 'staging', 'dl-b')).existsSync(),
+        isTrue,
+      );
+      expect(
+        File(p.join(downloadsDir.path, done.fileName)).readAsBytesSync(),
+        _bytes(64),
+      );
+      expect(original.existsSync(), isTrue);
+    });
+
+    test(
+      'a failed publish keeps the job staging and touches nothing else',
+      () async {
+        final runner = buildExtractorRunner(
+          FakeMediaExtractor(
+            jobEvents: const [
+              ExtractorDone(stagedPath: '/does/not/exist.mp4', sizeBytes: 5),
+            ],
+          ),
+        );
+        final a = await seedExtractorDownload(
+          'dl-a',
+          published: false,
+          stage: true,
+        );
+        final done = await seedExtractorDownload('dl-done', published: true);
+        final staging = Directory(p.join(downloadsDir.path, 'staging', 'dl-a'));
+
+        await runner.run(
+          (await downloadRepo.getById(a.id)).valueOrThrow!,
+          resume: false,
+          token: CancellationToken(),
+          deleteOnStop: () => false,
+        );
+
+        expect(
+          (await downloadRepo.getById(a.id)).valueOrThrow!.status,
+          DownloadStatus.failed,
+        );
+        // The staged partial is preserved so a retry re-publishes (§15.7)…
+        expect(staging.existsSync(), isTrue);
+        expect(File(p.join(staging.path, 'partial')).existsSync(), isTrue);
+        // …and the completed download is untouched.
+        expect(
+          File(p.join(downloadsDir.path, done.fileName)).readAsBytesSync(),
+          _bytes(64),
+        );
+      },
+    );
   });
 }
 

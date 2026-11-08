@@ -3,6 +3,7 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/models/source_deletion_report.dart';
+import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/item_removal_service.dart';
 
@@ -82,6 +83,45 @@ VideoItemRemovalService _service(
   VideoRepository repository,
   List<ItemOriginalDeleter> deleters,
 ) => VideoItemRemovalService(repository: repository, deleters: deleters);
+
+/// A service wired with a download repository (DL4.5) so stored download files
+/// are recognised and kept.
+VideoItemRemovalService _serviceWithDownloads(
+  VideoRepository repository,
+  List<ItemOriginalDeleter> deleters,
+  List<DownloadRecord> downloads,
+) => VideoItemRemovalService(
+  repository: repository,
+  deleters: deleters,
+  downloads: _FakeDownloads(downloads),
+);
+
+/// Returns a fixed download list from [getByVideoItem] and leaves the rest
+/// unimplemented — enough for the removal decision (DL4.5).
+class _FakeDownloads implements DownloadRepository {
+  _FakeDownloads(this.records);
+  final List<DownloadRecord> records;
+
+  @override
+  Future<Result<List<DownloadRecord>>> getByVideoItem(VideoItemId id) async =>
+      Result.ok(records);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// A [DownloadRepository] whose lookup fails, to check the removal decision
+/// falls back to the destructive path when downloads cannot be read (DL4.5).
+class _ThrowingDownloads implements DownloadRepository {
+  @override
+  Future<Result<List<DownloadRecord>>> getByVideoItem(VideoItemId id) async =>
+      Result.err(
+        const UnexpectedError(diagnosticMessage: 'downloads unavailable'),
+      );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
 
 FakeVideoRepository _repositoryFor(List<SourceLocation> locations) =>
     FakeVideoRepository(locations: {_videoId: locations});
@@ -424,6 +464,149 @@ void main() {
       expect(outcome.deletedOriginals, 0);
       expect(outcome.undeletedOriginals, 1);
       expect(repository.deletedIds, [_videoId]);
+    });
+  });
+
+  // DL4.5: a source that is the app's own stored download file must survive a
+  // library removal — only the explicit download "Delete file" action destroys
+  // it. The download record still points at the bytes, so the location is
+  // unlinked (record-only) rather than deleted.
+  group('VideoItemRemovalService.plan (DL4.5 downloads)', () {
+    const webUrl = 'https://example.com/watch?v=abc';
+
+    DownloadRecord storedDownload(String storedUri) => DownloadRecord(
+      id: 'dl-1',
+      videoItemId: _videoId,
+      providerType: ProviderType.webLink,
+      sourceUri: webUrl,
+      fileName: 'dl-1.mp4',
+      status: DownloadStatus.completed,
+      downloadedBytes: 100,
+      acceptsRange: false,
+      createdAt: 1,
+      updatedAt: 1,
+      storedUri: storedUri,
+    );
+
+    test(
+      'a webLink-only item (app-storage download) is unlinked, never deleted',
+      () async {
+        final repository = _repositoryFor([
+          _location(ProviderType.webLink, webUrl, isPrimary: true),
+        ]);
+        final deleter = _RecordingDeleter(providerTypes: _localTypes);
+        // The stored file lives in app storage, so the item carries no file
+        // source at all — the webLink row is the whole entry.
+        final service = _serviceWithDownloads(
+          repository,
+          [deleter],
+          [
+            storedDownload(
+              'file:///storage/emulated/0/Android/data/app/files/downloads/dl-1.mp4',
+            ),
+          ],
+        );
+
+        final plan = (await service.plan(
+          _item(primaryProvider: ProviderType.webLink),
+        )).valueOrThrow;
+
+        expect(plan.scope, ItemRemovalScope.removeFromLibrary);
+        expect(plan.isDestructive, isFalse);
+        expect(plan.originalsToDelete, isEmpty);
+        expect(plan.deletingProviders, isEmpty);
+        expect(plan.recordOnly.single.providerType, ProviderType.webLink);
+      },
+    );
+
+    test(
+      'a scanned download file is kept when a download record owns it',
+      () async {
+        // Device-folder download: primary MediaStore file source + webLink
+        // second source, and the file source equals the download's storedUri.
+        final repository = _repositoryFor([
+          _location(
+            ProviderType.localMediaStore,
+            _mediaStoreOne,
+            isPrimary: true,
+          ),
+          _location(ProviderType.webLink, webUrl),
+        ]);
+        final deleter = _RecordingDeleter(providerTypes: _localTypes);
+        final service = _serviceWithDownloads(
+          repository,
+          [deleter],
+          [storedDownload(_mediaStoreOne)],
+        );
+
+        final plan = (await service.plan(_item())).valueOrThrow;
+
+        // The MediaStore source is the download's own bytes, so nothing is
+        // destroyed: both locations are unlinked.
+        expect(plan.scope, ItemRemovalScope.removeFromLibrary);
+        expect(plan.isDestructive, isFalse);
+        expect(plan.originalsToDelete, isEmpty);
+        expect(plan.deletingProviders, isEmpty);
+        expect(plan.recordOnly.length, 2);
+        expect(plan.recordOnly.map((l) => l.providerType).toSet(), {
+          ProviderType.localMediaStore,
+          ProviderType.webLink,
+        });
+      },
+    );
+
+    test(
+      'the same file source without a download record is still deleted',
+      () async {
+        // Contrast with the previous case: with no download repository supplied,
+        // scanning is unaffected and the original is treated as deletable.
+        final repository = _repositoryFor([
+          _location(
+            ProviderType.localMediaStore,
+            _mediaStoreOne,
+            isPrimary: true,
+          ),
+          _location(ProviderType.webLink, webUrl),
+        ]);
+        final deleter = _RecordingDeleter(providerTypes: _localTypes);
+        final service = _service(repository, [deleter]);
+
+        final plan = (await service.plan(_item())).valueOrThrow;
+
+        expect(plan.scope, ItemRemovalScope.deleteOriginals);
+        expect(plan.isDestructive, isTrue);
+        expect(
+          plan.originalsToDelete.single.providerType,
+          ProviderType.localMediaStore,
+        );
+        expect(plan.deletingProviders, {ProviderType.localMediaStore});
+      },
+    );
+
+    test('a download lookup failure falls back to the destructive path', () async {
+      // When the download record cannot be read, the file must not be silently
+      // kept — it is reported through the normal named/confirmed deletion path.
+      final repository = _repositoryFor([
+        _location(
+          ProviderType.localMediaStore,
+          _mediaStoreOne,
+          isPrimary: true,
+        ),
+      ]);
+      final deleter = _RecordingDeleter(providerTypes: _localTypes);
+      final service = VideoItemRemovalService(
+        repository: repository,
+        deleters: [deleter],
+        downloads: _ThrowingDownloads(),
+      );
+
+      final plan = (await service.plan(_item())).valueOrThrow;
+
+      expect(plan.scope, ItemRemovalScope.deleteOriginals);
+      expect(
+        plan.originalsToDelete.single.providerType,
+        ProviderType.localMediaStore,
+      );
     });
   });
 }

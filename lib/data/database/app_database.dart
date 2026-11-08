@@ -31,6 +31,10 @@ part 'app_database.g.dart';
 ///   v6 — [Collections.isPinned]/[Collections.pinnedAt] + [RecommendationExposures]
 ///        (disc redesign §18/§19 — pinned collections, session-aware exposure)
 ///   v7 — [Downloads] (Phase 12 / VP6.2 — app-managed offline download records)
+///   v8 — [Downloads] link-downloader columns (DL4.1 / ARCHITECTURE §15.4 —
+///        source/media kind, display metadata, preset snapshot, destination,
+///        staging + stored file locators, error code). All additive with
+///        defaults/nullables; every existing row is preserved.
 @DriftDatabase(
   tables: [
     VideoItems,
@@ -56,7 +60,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -107,11 +111,28 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(recommendationExposures);
         await _createV6Indexes();
       }
-      // v6 → v7: app-managed offline downloads (Phase 12 / VP6.2). New table,
-      // so creating it is safe for any pre-v7 database.
+      // v6 → v7: app-managed offline downloads (Phase 12 / VP6.2). New table.
+      // Created from the *current* definition it already carries the v8
+      // link-downloader columns, so a pre-v7 database converges in one step
+      // and must not re-add them below.
       if (from < 7) {
         await m.createTable(downloads);
         await _createV7Indexes();
+      } else if (from < 8) {
+        // v7 → v8: link-downloader columns on the existing downloads table
+        // (DL4.1, ARCHITECTURE §15.4). Every column is additive with a default
+        // or nullable, so pre-DL4 rows survive untouched.
+        await m.addColumn(downloads, downloads.sourceKind);
+        await m.addColumn(downloads, downloads.mediaKind);
+        await m.addColumn(downloads, downloads.title);
+        await m.addColumn(downloads, downloads.thumbnailUri);
+        await m.addColumn(downloads, downloads.formatSummary);
+        await m.addColumn(downloads, downloads.presetJson);
+        await m.addColumn(downloads, downloads.destinationKind);
+        await m.addColumn(downloads, downloads.destinationRef);
+        await m.addColumn(downloads, downloads.stagingPath);
+        await m.addColumn(downloads, downloads.storedUri);
+        await m.addColumn(downloads, downloads.errorCode);
       }
     },
   );

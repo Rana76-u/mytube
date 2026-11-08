@@ -59,17 +59,67 @@ void main() {
 
     // ── Schema version ──────────────────────────────────────────────────────
 
-    test('schema version is 7', () async {
-      // The overall schema version is 7 (Phase 12 / VP6.2 added the downloads
-      // table on top of the v6 collection-pinning columns and the
-      // recommendation_exposures table); earlier groups documented their
-      // own tables rather than the version number itself. The authoritative
-      // version tests live in migrations_test.dart.
+    test('schema version is 8', () async {
+      // The overall schema version is 8 (DL4.1 added the link-downloader
+      // columns to the downloads table introduced in v7 / Phase 12); earlier
+      // groups documented their own tables rather than the version number
+      // itself. The authoritative version tests live in migrations_test.dart.
       final version = await db
           .customSelect('PRAGMA user_version')
           .map((row) => row.read<int>('user_version'))
           .getSingle();
-      expect(version, equals(7));
+      expect(version, equals(8));
+    });
+
+    // ── Downloads (DL4.1 columns) ───────────────────────────────────────────
+
+    test(
+      'Downloads: fresh install carries the link-downloader columns',
+      () async {
+        final columns = await db
+            .customSelect('PRAGMA table_info(downloads)')
+            .map((r) => r.read<String>('name'))
+            .get();
+        expect(
+          columns,
+          containsAll(<String>[
+            'source_kind',
+            'media_kind',
+            'title',
+            'thumbnail_uri',
+            'format_summary',
+            'preset_json',
+            'destination_kind',
+            'destination_ref',
+            'staging_path',
+            'stored_uri',
+            'error_code',
+          ]),
+        );
+      },
+    );
+
+    test('Downloads: direct-URL row defaults source/media kind', () async {
+      await db.into(db.videoItems).insert(_videoItem(id: 'vd1', title: 'D'));
+      await db
+          .into(db.downloads)
+          .insert(
+            DownloadsCompanion.insert(
+              id: 'dl1',
+              videoItemId: 'vd1',
+              providerType: 'directUrl',
+              sourceUri: 'https://example.com/v.mp4',
+              fileName: 'dl1_v.mp4',
+              createdAt: _now,
+              updatedAt: _now,
+            ),
+          );
+      final row = await (db.select(
+        db.downloads,
+      )..where((t) => t.id.equals('dl1'))).getSingle();
+      expect(row.sourceKind, equals('directHttp'));
+      expect(row.mediaKind, equals('video'));
+      expect(row.storedUri, isNull);
     });
 
     // ── VideoItems ───────────────────────────────────────────────────────────

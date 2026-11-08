@@ -3480,6 +3480,127 @@ class $DownloadsTable extends Downloads
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _sourceKindMeta = const VerificationMeta(
+    'sourceKind',
+  );
+  @override
+  late final GeneratedColumn<String> sourceKind = GeneratedColumn<String>(
+    'source_kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('directHttp'),
+  );
+  static const VerificationMeta _mediaKindMeta = const VerificationMeta(
+    'mediaKind',
+  );
+  @override
+  late final GeneratedColumn<String> mediaKind = GeneratedColumn<String>(
+    'media_kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('video'),
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _thumbnailUriMeta = const VerificationMeta(
+    'thumbnailUri',
+  );
+  @override
+  late final GeneratedColumn<String> thumbnailUri = GeneratedColumn<String>(
+    'thumbnail_uri',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _formatSummaryMeta = const VerificationMeta(
+    'formatSummary',
+  );
+  @override
+  late final GeneratedColumn<String> formatSummary = GeneratedColumn<String>(
+    'format_summary',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _presetJsonMeta = const VerificationMeta(
+    'presetJson',
+  );
+  @override
+  late final GeneratedColumn<String> presetJson = GeneratedColumn<String>(
+    'preset_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _destinationKindMeta = const VerificationMeta(
+    'destinationKind',
+  );
+  @override
+  late final GeneratedColumn<String> destinationKind = GeneratedColumn<String>(
+    'destination_kind',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _destinationRefMeta = const VerificationMeta(
+    'destinationRef',
+  );
+  @override
+  late final GeneratedColumn<String> destinationRef = GeneratedColumn<String>(
+    'destination_ref',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _stagingPathMeta = const VerificationMeta(
+    'stagingPath',
+  );
+  @override
+  late final GeneratedColumn<String> stagingPath = GeneratedColumn<String>(
+    'staging_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _storedUriMeta = const VerificationMeta(
+    'storedUri',
+  );
+  @override
+  late final GeneratedColumn<String> storedUri = GeneratedColumn<String>(
+    'stored_uri',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _errorCodeMeta = const VerificationMeta(
+    'errorCode',
+  );
+  @override
+  late final GeneratedColumn<String> errorCode = GeneratedColumn<String>(
+    'error_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3514,6 +3635,17 @@ class $DownloadsTable extends Downloads
     downloadedBytes,
     status,
     acceptsRange,
+    sourceKind,
+    mediaKind,
+    title,
+    thumbnailUri,
+    formatSummary,
+    presetJson,
+    destinationKind,
+    destinationRef,
+    stagingPath,
+    storedUri,
+    errorCode,
     createdAt,
     updatedAt,
   ];
@@ -3611,6 +3743,87 @@ class $DownloadsTable extends Downloads
         ),
       );
     }
+    if (data.containsKey('source_kind')) {
+      context.handle(
+        _sourceKindMeta,
+        sourceKind.isAcceptableOrUnknown(data['source_kind']!, _sourceKindMeta),
+      );
+    }
+    if (data.containsKey('media_kind')) {
+      context.handle(
+        _mediaKindMeta,
+        mediaKind.isAcceptableOrUnknown(data['media_kind']!, _mediaKindMeta),
+      );
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('thumbnail_uri')) {
+      context.handle(
+        _thumbnailUriMeta,
+        thumbnailUri.isAcceptableOrUnknown(
+          data['thumbnail_uri']!,
+          _thumbnailUriMeta,
+        ),
+      );
+    }
+    if (data.containsKey('format_summary')) {
+      context.handle(
+        _formatSummaryMeta,
+        formatSummary.isAcceptableOrUnknown(
+          data['format_summary']!,
+          _formatSummaryMeta,
+        ),
+      );
+    }
+    if (data.containsKey('preset_json')) {
+      context.handle(
+        _presetJsonMeta,
+        presetJson.isAcceptableOrUnknown(data['preset_json']!, _presetJsonMeta),
+      );
+    }
+    if (data.containsKey('destination_kind')) {
+      context.handle(
+        _destinationKindMeta,
+        destinationKind.isAcceptableOrUnknown(
+          data['destination_kind']!,
+          _destinationKindMeta,
+        ),
+      );
+    }
+    if (data.containsKey('destination_ref')) {
+      context.handle(
+        _destinationRefMeta,
+        destinationRef.isAcceptableOrUnknown(
+          data['destination_ref']!,
+          _destinationRefMeta,
+        ),
+      );
+    }
+    if (data.containsKey('staging_path')) {
+      context.handle(
+        _stagingPathMeta,
+        stagingPath.isAcceptableOrUnknown(
+          data['staging_path']!,
+          _stagingPathMeta,
+        ),
+      );
+    }
+    if (data.containsKey('stored_uri')) {
+      context.handle(
+        _storedUriMeta,
+        storedUri.isAcceptableOrUnknown(data['stored_uri']!, _storedUriMeta),
+      );
+    }
+    if (data.containsKey('error_code')) {
+      context.handle(
+        _errorCodeMeta,
+        errorCode.isAcceptableOrUnknown(data['error_code']!, _errorCodeMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3676,6 +3889,50 @@ class $DownloadsTable extends Downloads
         DriftSqlType.bool,
         data['${effectivePrefix}accepts_range'],
       )!,
+      sourceKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_kind'],
+      )!,
+      mediaKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_kind'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      ),
+      thumbnailUri: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thumbnail_uri'],
+      ),
+      formatSummary: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}format_summary'],
+      ),
+      presetJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}preset_json'],
+      ),
+      destinationKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}destination_kind'],
+      ),
+      destinationRef: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}destination_ref'],
+      ),
+      stagingPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}staging_path'],
+      ),
+      storedUri: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}stored_uri'],
+      ),
+      errorCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error_code'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}created_at'],
@@ -3725,6 +3982,51 @@ class Download extends DataClass implements Insertable<Download> {
   /// Whether the source advertised byte-range support (resume, P12-04).
   final bool acceptsRange;
 
+  /// Serialised [DownloadSourceKind] name (`"directHttp"` or `"extractor"`).
+  /// Keys the runner strategy (ADR-023); defaults to the direct-URL engine so
+  /// existing rows keep working untouched.
+  final String sourceKind;
+
+  /// Serialised [DownloadMediaKind] name (`"video"` or `"audio"`).
+  final String mediaKind;
+
+  /// Human title from the extractor, for the download row. Never a URL.
+  final String? title;
+
+  /// Thumbnail reference (the extractor's image URL) for display only; it is
+  /// never a durable identity and is excluded from the signed-URL rule because
+  /// it is not a media stream.
+  final String? thumbnailUri;
+
+  /// Short format summary for display (e.g. `1080p · mp4`). Never raw output.
+  final String? formatSummary;
+
+  /// JSON-encoded immutable [DownloadPreset] snapshot taken when the job was
+  /// created (AGENTS: a job snapshots its preset; later preference changes
+  /// never mutate a queued or running job).
+  final String? presetJson;
+
+  /// Destination kind name (e.g. `appStorage`, `deviceFolder`, `pickedFolder`,
+  /// `oneDrive`) paired with [destinationRef]. Non-secret locator only.
+  final String? destinationKind;
+
+  /// Non-secret destination reference: a SAF tree URI or MediaStore folder
+  /// hint. Never a credential or token (ARCHITECTURE §15.4).
+  final String? destinationRef;
+
+  /// The job's own staging directory/file under the downloads root, removed
+  /// when the job is cancelled or after a successful publish (§15.7).
+  final String? stagingPath;
+
+  /// Where the finished file actually lives: a content URI (MediaStore/SAF)
+  /// or an absolute app-storage path. [fileName] stays the app-root-relative
+  /// name used by the direct-URL engine (ADR-019).
+  final String? storedUri;
+
+  /// Typed failure code (an [AppError] discriminant) for the failure state.
+  /// Never carries a message, URL or engine output.
+  final String? errorCode;
+
   /// Wall-clock timestamp (ms since epoch) when the row was created.
   final int createdAt;
 
@@ -3741,6 +4043,17 @@ class Download extends DataClass implements Insertable<Download> {
     required this.downloadedBytes,
     required this.status,
     required this.acceptsRange,
+    required this.sourceKind,
+    required this.mediaKind,
+    this.title,
+    this.thumbnailUri,
+    this.formatSummary,
+    this.presetJson,
+    this.destinationKind,
+    this.destinationRef,
+    this.stagingPath,
+    this.storedUri,
+    this.errorCode,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -3761,6 +4074,35 @@ class Download extends DataClass implements Insertable<Download> {
     map['downloaded_bytes'] = Variable<int>(downloadedBytes);
     map['status'] = Variable<String>(status);
     map['accepts_range'] = Variable<bool>(acceptsRange);
+    map['source_kind'] = Variable<String>(sourceKind);
+    map['media_kind'] = Variable<String>(mediaKind);
+    if (!nullToAbsent || title != null) {
+      map['title'] = Variable<String>(title);
+    }
+    if (!nullToAbsent || thumbnailUri != null) {
+      map['thumbnail_uri'] = Variable<String>(thumbnailUri);
+    }
+    if (!nullToAbsent || formatSummary != null) {
+      map['format_summary'] = Variable<String>(formatSummary);
+    }
+    if (!nullToAbsent || presetJson != null) {
+      map['preset_json'] = Variable<String>(presetJson);
+    }
+    if (!nullToAbsent || destinationKind != null) {
+      map['destination_kind'] = Variable<String>(destinationKind);
+    }
+    if (!nullToAbsent || destinationRef != null) {
+      map['destination_ref'] = Variable<String>(destinationRef);
+    }
+    if (!nullToAbsent || stagingPath != null) {
+      map['staging_path'] = Variable<String>(stagingPath);
+    }
+    if (!nullToAbsent || storedUri != null) {
+      map['stored_uri'] = Variable<String>(storedUri);
+    }
+    if (!nullToAbsent || errorCode != null) {
+      map['error_code'] = Variable<String>(errorCode);
+    }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -3782,6 +4124,35 @@ class Download extends DataClass implements Insertable<Download> {
       downloadedBytes: Value(downloadedBytes),
       status: Value(status),
       acceptsRange: Value(acceptsRange),
+      sourceKind: Value(sourceKind),
+      mediaKind: Value(mediaKind),
+      title: title == null && nullToAbsent
+          ? const Value.absent()
+          : Value(title),
+      thumbnailUri: thumbnailUri == null && nullToAbsent
+          ? const Value.absent()
+          : Value(thumbnailUri),
+      formatSummary: formatSummary == null && nullToAbsent
+          ? const Value.absent()
+          : Value(formatSummary),
+      presetJson: presetJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(presetJson),
+      destinationKind: destinationKind == null && nullToAbsent
+          ? const Value.absent()
+          : Value(destinationKind),
+      destinationRef: destinationRef == null && nullToAbsent
+          ? const Value.absent()
+          : Value(destinationRef),
+      stagingPath: stagingPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(stagingPath),
+      storedUri: storedUri == null && nullToAbsent
+          ? const Value.absent()
+          : Value(storedUri),
+      errorCode: errorCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorCode),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -3803,6 +4174,17 @@ class Download extends DataClass implements Insertable<Download> {
       downloadedBytes: serializer.fromJson<int>(json['downloadedBytes']),
       status: serializer.fromJson<String>(json['status']),
       acceptsRange: serializer.fromJson<bool>(json['acceptsRange']),
+      sourceKind: serializer.fromJson<String>(json['sourceKind']),
+      mediaKind: serializer.fromJson<String>(json['mediaKind']),
+      title: serializer.fromJson<String?>(json['title']),
+      thumbnailUri: serializer.fromJson<String?>(json['thumbnailUri']),
+      formatSummary: serializer.fromJson<String?>(json['formatSummary']),
+      presetJson: serializer.fromJson<String?>(json['presetJson']),
+      destinationKind: serializer.fromJson<String?>(json['destinationKind']),
+      destinationRef: serializer.fromJson<String?>(json['destinationRef']),
+      stagingPath: serializer.fromJson<String?>(json['stagingPath']),
+      storedUri: serializer.fromJson<String?>(json['storedUri']),
+      errorCode: serializer.fromJson<String?>(json['errorCode']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -3821,6 +4203,17 @@ class Download extends DataClass implements Insertable<Download> {
       'downloadedBytes': serializer.toJson<int>(downloadedBytes),
       'status': serializer.toJson<String>(status),
       'acceptsRange': serializer.toJson<bool>(acceptsRange),
+      'sourceKind': serializer.toJson<String>(sourceKind),
+      'mediaKind': serializer.toJson<String>(mediaKind),
+      'title': serializer.toJson<String?>(title),
+      'thumbnailUri': serializer.toJson<String?>(thumbnailUri),
+      'formatSummary': serializer.toJson<String?>(formatSummary),
+      'presetJson': serializer.toJson<String?>(presetJson),
+      'destinationKind': serializer.toJson<String?>(destinationKind),
+      'destinationRef': serializer.toJson<String?>(destinationRef),
+      'stagingPath': serializer.toJson<String?>(stagingPath),
+      'storedUri': serializer.toJson<String?>(storedUri),
+      'errorCode': serializer.toJson<String?>(errorCode),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
@@ -3837,6 +4230,17 @@ class Download extends DataClass implements Insertable<Download> {
     int? downloadedBytes,
     String? status,
     bool? acceptsRange,
+    String? sourceKind,
+    String? mediaKind,
+    Value<String?> title = const Value.absent(),
+    Value<String?> thumbnailUri = const Value.absent(),
+    Value<String?> formatSummary = const Value.absent(),
+    Value<String?> presetJson = const Value.absent(),
+    Value<String?> destinationKind = const Value.absent(),
+    Value<String?> destinationRef = const Value.absent(),
+    Value<String?> stagingPath = const Value.absent(),
+    Value<String?> storedUri = const Value.absent(),
+    Value<String?> errorCode = const Value.absent(),
     int? createdAt,
     int? updatedAt,
   }) => Download(
@@ -3852,6 +4256,23 @@ class Download extends DataClass implements Insertable<Download> {
     downloadedBytes: downloadedBytes ?? this.downloadedBytes,
     status: status ?? this.status,
     acceptsRange: acceptsRange ?? this.acceptsRange,
+    sourceKind: sourceKind ?? this.sourceKind,
+    mediaKind: mediaKind ?? this.mediaKind,
+    title: title.present ? title.value : this.title,
+    thumbnailUri: thumbnailUri.present ? thumbnailUri.value : this.thumbnailUri,
+    formatSummary: formatSummary.present
+        ? formatSummary.value
+        : this.formatSummary,
+    presetJson: presetJson.present ? presetJson.value : this.presetJson,
+    destinationKind: destinationKind.present
+        ? destinationKind.value
+        : this.destinationKind,
+    destinationRef: destinationRef.present
+        ? destinationRef.value
+        : this.destinationRef,
+    stagingPath: stagingPath.present ? stagingPath.value : this.stagingPath,
+    storedUri: storedUri.present ? storedUri.value : this.storedUri,
+    errorCode: errorCode.present ? errorCode.value : this.errorCode,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -3877,6 +4298,31 @@ class Download extends DataClass implements Insertable<Download> {
       acceptsRange: data.acceptsRange.present
           ? data.acceptsRange.value
           : this.acceptsRange,
+      sourceKind: data.sourceKind.present
+          ? data.sourceKind.value
+          : this.sourceKind,
+      mediaKind: data.mediaKind.present ? data.mediaKind.value : this.mediaKind,
+      title: data.title.present ? data.title.value : this.title,
+      thumbnailUri: data.thumbnailUri.present
+          ? data.thumbnailUri.value
+          : this.thumbnailUri,
+      formatSummary: data.formatSummary.present
+          ? data.formatSummary.value
+          : this.formatSummary,
+      presetJson: data.presetJson.present
+          ? data.presetJson.value
+          : this.presetJson,
+      destinationKind: data.destinationKind.present
+          ? data.destinationKind.value
+          : this.destinationKind,
+      destinationRef: data.destinationRef.present
+          ? data.destinationRef.value
+          : this.destinationRef,
+      stagingPath: data.stagingPath.present
+          ? data.stagingPath.value
+          : this.stagingPath,
+      storedUri: data.storedUri.present ? data.storedUri.value : this.storedUri,
+      errorCode: data.errorCode.present ? data.errorCode.value : this.errorCode,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -3895,6 +4341,17 @@ class Download extends DataClass implements Insertable<Download> {
           ..write('downloadedBytes: $downloadedBytes, ')
           ..write('status: $status, ')
           ..write('acceptsRange: $acceptsRange, ')
+          ..write('sourceKind: $sourceKind, ')
+          ..write('mediaKind: $mediaKind, ')
+          ..write('title: $title, ')
+          ..write('thumbnailUri: $thumbnailUri, ')
+          ..write('formatSummary: $formatSummary, ')
+          ..write('presetJson: $presetJson, ')
+          ..write('destinationKind: $destinationKind, ')
+          ..write('destinationRef: $destinationRef, ')
+          ..write('stagingPath: $stagingPath, ')
+          ..write('storedUri: $storedUri, ')
+          ..write('errorCode: $errorCode, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -3902,7 +4359,7 @@ class Download extends DataClass implements Insertable<Download> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     videoItemId,
     sourceLocationId,
@@ -3913,9 +4370,20 @@ class Download extends DataClass implements Insertable<Download> {
     downloadedBytes,
     status,
     acceptsRange,
+    sourceKind,
+    mediaKind,
+    title,
+    thumbnailUri,
+    formatSummary,
+    presetJson,
+    destinationKind,
+    destinationRef,
+    stagingPath,
+    storedUri,
+    errorCode,
     createdAt,
     updatedAt,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3930,6 +4398,17 @@ class Download extends DataClass implements Insertable<Download> {
           other.downloadedBytes == this.downloadedBytes &&
           other.status == this.status &&
           other.acceptsRange == this.acceptsRange &&
+          other.sourceKind == this.sourceKind &&
+          other.mediaKind == this.mediaKind &&
+          other.title == this.title &&
+          other.thumbnailUri == this.thumbnailUri &&
+          other.formatSummary == this.formatSummary &&
+          other.presetJson == this.presetJson &&
+          other.destinationKind == this.destinationKind &&
+          other.destinationRef == this.destinationRef &&
+          other.stagingPath == this.stagingPath &&
+          other.storedUri == this.storedUri &&
+          other.errorCode == this.errorCode &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -3945,6 +4424,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
   final Value<int> downloadedBytes;
   final Value<String> status;
   final Value<bool> acceptsRange;
+  final Value<String> sourceKind;
+  final Value<String> mediaKind;
+  final Value<String?> title;
+  final Value<String?> thumbnailUri;
+  final Value<String?> formatSummary;
+  final Value<String?> presetJson;
+  final Value<String?> destinationKind;
+  final Value<String?> destinationRef;
+  final Value<String?> stagingPath;
+  final Value<String?> storedUri;
+  final Value<String?> errorCode;
   final Value<int> createdAt;
   final Value<int> updatedAt;
   final Value<int> rowid;
@@ -3959,6 +4449,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
     this.downloadedBytes = const Value.absent(),
     this.status = const Value.absent(),
     this.acceptsRange = const Value.absent(),
+    this.sourceKind = const Value.absent(),
+    this.mediaKind = const Value.absent(),
+    this.title = const Value.absent(),
+    this.thumbnailUri = const Value.absent(),
+    this.formatSummary = const Value.absent(),
+    this.presetJson = const Value.absent(),
+    this.destinationKind = const Value.absent(),
+    this.destinationRef = const Value.absent(),
+    this.stagingPath = const Value.absent(),
+    this.storedUri = const Value.absent(),
+    this.errorCode = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -3974,6 +4475,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
     this.downloadedBytes = const Value.absent(),
     this.status = const Value.absent(),
     this.acceptsRange = const Value.absent(),
+    this.sourceKind = const Value.absent(),
+    this.mediaKind = const Value.absent(),
+    this.title = const Value.absent(),
+    this.thumbnailUri = const Value.absent(),
+    this.formatSummary = const Value.absent(),
+    this.presetJson = const Value.absent(),
+    this.destinationKind = const Value.absent(),
+    this.destinationRef = const Value.absent(),
+    this.stagingPath = const Value.absent(),
+    this.storedUri = const Value.absent(),
+    this.errorCode = const Value.absent(),
     required int createdAt,
     required int updatedAt,
     this.rowid = const Value.absent(),
@@ -3995,6 +4507,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
     Expression<int>? downloadedBytes,
     Expression<String>? status,
     Expression<bool>? acceptsRange,
+    Expression<String>? sourceKind,
+    Expression<String>? mediaKind,
+    Expression<String>? title,
+    Expression<String>? thumbnailUri,
+    Expression<String>? formatSummary,
+    Expression<String>? presetJson,
+    Expression<String>? destinationKind,
+    Expression<String>? destinationRef,
+    Expression<String>? stagingPath,
+    Expression<String>? storedUri,
+    Expression<String>? errorCode,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
     Expression<int>? rowid,
@@ -4010,6 +4533,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
       if (downloadedBytes != null) 'downloaded_bytes': downloadedBytes,
       if (status != null) 'status': status,
       if (acceptsRange != null) 'accepts_range': acceptsRange,
+      if (sourceKind != null) 'source_kind': sourceKind,
+      if (mediaKind != null) 'media_kind': mediaKind,
+      if (title != null) 'title': title,
+      if (thumbnailUri != null) 'thumbnail_uri': thumbnailUri,
+      if (formatSummary != null) 'format_summary': formatSummary,
+      if (presetJson != null) 'preset_json': presetJson,
+      if (destinationKind != null) 'destination_kind': destinationKind,
+      if (destinationRef != null) 'destination_ref': destinationRef,
+      if (stagingPath != null) 'staging_path': stagingPath,
+      if (storedUri != null) 'stored_uri': storedUri,
+      if (errorCode != null) 'error_code': errorCode,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -4027,6 +4561,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
     Value<int>? downloadedBytes,
     Value<String>? status,
     Value<bool>? acceptsRange,
+    Value<String>? sourceKind,
+    Value<String>? mediaKind,
+    Value<String?>? title,
+    Value<String?>? thumbnailUri,
+    Value<String?>? formatSummary,
+    Value<String?>? presetJson,
+    Value<String?>? destinationKind,
+    Value<String?>? destinationRef,
+    Value<String?>? stagingPath,
+    Value<String?>? storedUri,
+    Value<String?>? errorCode,
     Value<int>? createdAt,
     Value<int>? updatedAt,
     Value<int>? rowid,
@@ -4042,6 +4587,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       status: status ?? this.status,
       acceptsRange: acceptsRange ?? this.acceptsRange,
+      sourceKind: sourceKind ?? this.sourceKind,
+      mediaKind: mediaKind ?? this.mediaKind,
+      title: title ?? this.title,
+      thumbnailUri: thumbnailUri ?? this.thumbnailUri,
+      formatSummary: formatSummary ?? this.formatSummary,
+      presetJson: presetJson ?? this.presetJson,
+      destinationKind: destinationKind ?? this.destinationKind,
+      destinationRef: destinationRef ?? this.destinationRef,
+      stagingPath: stagingPath ?? this.stagingPath,
+      storedUri: storedUri ?? this.storedUri,
+      errorCode: errorCode ?? this.errorCode,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -4081,6 +4637,39 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
     if (acceptsRange.present) {
       map['accepts_range'] = Variable<bool>(acceptsRange.value);
     }
+    if (sourceKind.present) {
+      map['source_kind'] = Variable<String>(sourceKind.value);
+    }
+    if (mediaKind.present) {
+      map['media_kind'] = Variable<String>(mediaKind.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (thumbnailUri.present) {
+      map['thumbnail_uri'] = Variable<String>(thumbnailUri.value);
+    }
+    if (formatSummary.present) {
+      map['format_summary'] = Variable<String>(formatSummary.value);
+    }
+    if (presetJson.present) {
+      map['preset_json'] = Variable<String>(presetJson.value);
+    }
+    if (destinationKind.present) {
+      map['destination_kind'] = Variable<String>(destinationKind.value);
+    }
+    if (destinationRef.present) {
+      map['destination_ref'] = Variable<String>(destinationRef.value);
+    }
+    if (stagingPath.present) {
+      map['staging_path'] = Variable<String>(stagingPath.value);
+    }
+    if (storedUri.present) {
+      map['stored_uri'] = Variable<String>(storedUri.value);
+    }
+    if (errorCode.present) {
+      map['error_code'] = Variable<String>(errorCode.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
     }
@@ -4106,6 +4695,17 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
           ..write('downloadedBytes: $downloadedBytes, ')
           ..write('status: $status, ')
           ..write('acceptsRange: $acceptsRange, ')
+          ..write('sourceKind: $sourceKind, ')
+          ..write('mediaKind: $mediaKind, ')
+          ..write('title: $title, ')
+          ..write('thumbnailUri: $thumbnailUri, ')
+          ..write('formatSummary: $formatSummary, ')
+          ..write('presetJson: $presetJson, ')
+          ..write('destinationKind: $destinationKind, ')
+          ..write('destinationRef: $destinationRef, ')
+          ..write('stagingPath: $stagingPath, ')
+          ..write('storedUri: $storedUri, ')
+          ..write('errorCode: $errorCode, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -7236,6 +7836,17 @@ typedef $$DownloadsTableCreateCompanionBuilder =
       Value<int> downloadedBytes,
       Value<String> status,
       Value<bool> acceptsRange,
+      Value<String> sourceKind,
+      Value<String> mediaKind,
+      Value<String?> title,
+      Value<String?> thumbnailUri,
+      Value<String?> formatSummary,
+      Value<String?> presetJson,
+      Value<String?> destinationKind,
+      Value<String?> destinationRef,
+      Value<String?> stagingPath,
+      Value<String?> storedUri,
+      Value<String?> errorCode,
       required int createdAt,
       required int updatedAt,
       Value<int> rowid,
@@ -7252,6 +7863,17 @@ typedef $$DownloadsTableUpdateCompanionBuilder =
       Value<int> downloadedBytes,
       Value<String> status,
       Value<bool> acceptsRange,
+      Value<String> sourceKind,
+      Value<String> mediaKind,
+      Value<String?> title,
+      Value<String?> thumbnailUri,
+      Value<String?> formatSummary,
+      Value<String?> presetJson,
+      Value<String?> destinationKind,
+      Value<String?> destinationRef,
+      Value<String?> stagingPath,
+      Value<String?> storedUri,
+      Value<String?> errorCode,
       Value<int> createdAt,
       Value<int> updatedAt,
       Value<int> rowid,
@@ -7313,6 +7935,61 @@ class $$DownloadsTableFilterComposer
 
   ColumnFilters<bool> get acceptsRange => $composableBuilder(
     column: $table.acceptsRange,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceKind => $composableBuilder(
+    column: $table.sourceKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaKind => $composableBuilder(
+    column: $table.mediaKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get formatSummary => $composableBuilder(
+    column: $table.formatSummary,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get presetJson => $composableBuilder(
+    column: $table.presetJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get destinationKind => $composableBuilder(
+    column: $table.destinationKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get destinationRef => $composableBuilder(
+    column: $table.destinationRef,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get stagingPath => $composableBuilder(
+    column: $table.stagingPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get storedUri => $composableBuilder(
+    column: $table.storedUri,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7386,6 +8063,61 @@ class $$DownloadsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get sourceKind => $composableBuilder(
+    column: $table.sourceKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mediaKind => $composableBuilder(
+    column: $table.mediaKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get formatSummary => $composableBuilder(
+    column: $table.formatSummary,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get presetJson => $composableBuilder(
+    column: $table.presetJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get destinationKind => $composableBuilder(
+    column: $table.destinationKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get destinationRef => $composableBuilder(
+    column: $table.destinationRef,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get stagingPath => $composableBuilder(
+    column: $table.stagingPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get storedUri => $composableBuilder(
+    column: $table.storedUri,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -7446,6 +8178,53 @@ class $$DownloadsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get sourceKind => $composableBuilder(
+    column: $table.sourceKind,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get mediaKind =>
+      $composableBuilder(column: $table.mediaKind, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get thumbnailUri => $composableBuilder(
+    column: $table.thumbnailUri,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get formatSummary => $composableBuilder(
+    column: $table.formatSummary,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get presetJson => $composableBuilder(
+    column: $table.presetJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get destinationKind => $composableBuilder(
+    column: $table.destinationKind,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get destinationRef => $composableBuilder(
+    column: $table.destinationRef,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get stagingPath => $composableBuilder(
+    column: $table.stagingPath,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get storedUri =>
+      $composableBuilder(column: $table.storedUri, builder: (column) => column);
+
+  GeneratedColumn<String> get errorCode =>
+      $composableBuilder(column: $table.errorCode, builder: (column) => column);
+
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -7491,6 +8270,17 @@ class $$DownloadsTableTableManager
                 Value<int> downloadedBytes = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<bool> acceptsRange = const Value.absent(),
+                Value<String> sourceKind = const Value.absent(),
+                Value<String> mediaKind = const Value.absent(),
+                Value<String?> title = const Value.absent(),
+                Value<String?> thumbnailUri = const Value.absent(),
+                Value<String?> formatSummary = const Value.absent(),
+                Value<String?> presetJson = const Value.absent(),
+                Value<String?> destinationKind = const Value.absent(),
+                Value<String?> destinationRef = const Value.absent(),
+                Value<String?> stagingPath = const Value.absent(),
+                Value<String?> storedUri = const Value.absent(),
+                Value<String?> errorCode = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7505,6 +8295,17 @@ class $$DownloadsTableTableManager
                 downloadedBytes: downloadedBytes,
                 status: status,
                 acceptsRange: acceptsRange,
+                sourceKind: sourceKind,
+                mediaKind: mediaKind,
+                title: title,
+                thumbnailUri: thumbnailUri,
+                formatSummary: formatSummary,
+                presetJson: presetJson,
+                destinationKind: destinationKind,
+                destinationRef: destinationRef,
+                stagingPath: stagingPath,
+                storedUri: storedUri,
+                errorCode: errorCode,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -7521,6 +8322,17 @@ class $$DownloadsTableTableManager
                 Value<int> downloadedBytes = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<bool> acceptsRange = const Value.absent(),
+                Value<String> sourceKind = const Value.absent(),
+                Value<String> mediaKind = const Value.absent(),
+                Value<String?> title = const Value.absent(),
+                Value<String?> thumbnailUri = const Value.absent(),
+                Value<String?> formatSummary = const Value.absent(),
+                Value<String?> presetJson = const Value.absent(),
+                Value<String?> destinationKind = const Value.absent(),
+                Value<String?> destinationRef = const Value.absent(),
+                Value<String?> stagingPath = const Value.absent(),
+                Value<String?> storedUri = const Value.absent(),
+                Value<String?> errorCode = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -7535,6 +8347,17 @@ class $$DownloadsTableTableManager
                 downloadedBytes: downloadedBytes,
                 status: status,
                 acceptsRange: acceptsRange,
+                sourceKind: sourceKind,
+                mediaKind: mediaKind,
+                title: title,
+                thumbnailUri: thumbnailUri,
+                formatSummary: formatSummary,
+                presetJson: presetJson,
+                destinationKind: destinationKind,
+                destinationRef: destinationRef,
+                stagingPath: stagingPath,
+                storedUri: storedUri,
+                errorCode: errorCode,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

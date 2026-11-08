@@ -1,10 +1,23 @@
 package com.example.mytube
 
+import android.content.Intent
 import android.content.res.Configuration
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        ShareIntakePlugin.handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        ShareIntakePlugin.handleIncomingIntent(intent)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MediaStorePlugin().also { plugin ->
@@ -26,6 +39,12 @@ class MainActivity : FlutterActivity() {
             flutterEngine.plugins.add(plugin)
         }
         SharePlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
+        ShareIntakePlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
+        ClipboardProbePlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
         CaptionsPlugin().also { plugin ->

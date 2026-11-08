@@ -186,6 +186,7 @@ class _LibraryFilterSheetState extends ConsumerState<LibraryFilterSheet> {
     ProviderType.localMediaStore => 'Device',
     ProviderType.selectedFolder => 'Folder',
     ProviderType.directUrl => 'Direct URL',
+    ProviderType.webLink => 'Web link',
     ProviderType.oneDrive => 'OneDrive',
     ProviderType.googleDrive => 'Google Drive',
     ProviderType.cloudflareR2 => 'Cloudflare R2',

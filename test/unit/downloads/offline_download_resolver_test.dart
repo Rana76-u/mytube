@@ -124,4 +124,92 @@ void main() {
       expect(source, isNull);
     });
   });
+
+  group('StorageOfflineDownloadResolver content URIs (DL4.5)', () {
+    DownloadRecord webRecord({
+      required String storedUri,
+      String id = 'w1',
+      String videoItemId = 'item',
+    }) => DownloadRecord(
+      id: id,
+      videoItemId: videoItemId,
+      providerType: ProviderType.webLink,
+      sourceUri: 'https://example.com/watch?v=abc',
+      fileName: 'w1.mp4',
+      status: DownloadStatus.completed,
+      downloadedBytes: 500,
+      sizeBytes: 500,
+      acceptsRange: false,
+      storedUri: storedUri,
+      createdAt: 1,
+      updatedAt: 1,
+    );
+
+    test(
+      'a device-folder download resolves to its MediaStore content URI',
+      () async {
+        await repo.insert(
+          webRecord(storedUri: 'content://media/external/video/55'),
+        );
+
+        final source = await build(
+          okRoot,
+        ).resolveOfflineSource(VideoItemId('item'));
+
+        expect(source, isA<PlayableSource>());
+        expect(source!.uri.toString(), 'content://media/external/video/55');
+        expect(source.sourceType, ProviderType.localMediaStore);
+        expect(source.sourceId, 'w1');
+        // The durable page URL is never the playable URI.
+        expect(source.uri.toString(), isNot(contains('example.com')));
+      },
+    );
+
+    test('a picked-folder (SAF) download resolves as selectedFolder', () async {
+      const doc =
+          'content://com.android.externalstorage.documents/tree/primary%3AVid/document/9';
+      await repo.insert(webRecord(storedUri: doc));
+
+      final source = await build(
+        okRoot,
+      ).resolveOfflineSource(VideoItemId('item'));
+
+      expect(source!.uri.toString(), doc);
+      expect(source.sourceType, ProviderType.selectedFolder);
+    });
+
+    test(
+      'a content copy is trusted without touching the downloads root',
+      () async {
+        // The device/picked copy lives outside the app root; the resolver must
+        // still hand back the content URI even when the root is unavailable.
+        await repo.insert(
+          webRecord(storedUri: 'content://media/external/video/77'),
+        );
+        Future<Result<String>> errRoot() async =>
+            Result.err(const UnexpectedError(diagnosticMessage: 'overlap'));
+
+        final source = await build(
+          errRoot,
+        ).resolveOfflineSource(VideoItemId('item'));
+        expect(source, isA<PlayableSource>());
+        expect(source!.uri.scheme, 'content');
+      },
+    );
+
+    test(
+      'an app-storage copy (file path storedUri) still uses the root file',
+      () async {
+        await repo.insert(webRecord(storedUri: p.join(root.path, 'w1.mp4')));
+        // The published file is present under the root.
+        await File(p.join(root.path, 'w1.mp4')).writeAsBytes([1, 2, 3]);
+
+        final source = await build(
+          okRoot,
+        ).resolveOfflineSource(VideoItemId('item'));
+        expect(source!.uri.scheme, 'file');
+        expect(source.sourceType, ProviderType.webLink);
+      },
+    );
+  });
 }

@@ -1,6 +1,7 @@
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/models/source_deletion_report.dart';
+import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 
 /// What removing one library item does to the originals behind it (ADR-017).
@@ -140,14 +141,25 @@ abstract interface class ItemRemovalService {
 /// directly — so the decision "can this provider's original be deleted" has a
 /// single, listed answer and cloud providers stay untouched until one registers
 /// a deleter.
+///
+/// When a [downloads] repository is supplied, a source that is the app's own
+/// stored download file is treated as record-only too: removing a library item
+/// unlinks it but never destroys the download's bytes, which only the explicit
+/// download "Delete file" action removes (ADR-017 / DL4.5).
 class VideoItemRemovalService implements ItemRemovalService {
   const VideoItemRemovalService({
     required this.repository,
     required this.deleters,
+    this.downloads,
   });
 
   final VideoRepository repository;
   final List<ItemOriginalDeleter> deleters;
+
+  /// The download records, when the caller can supply them. Used only to tell a
+  /// scanned original apart from an app-managed download of the same provider;
+  /// null keeps the pre-DL behaviour (every local original is deletable).
+  final DownloadRepository? downloads;
 
   @override
   Future<Result<ItemRemovalPlan>> plan(VideoItemSummary item) async {
@@ -164,9 +176,35 @@ class VideoItemRemovalService implements ItemRemovalService {
     final recordOnly = <SourceLocation>[];
     final unsupported = <ProviderType>{};
 
+    // Locations that are the app's own stored download files (ADR-017 / DL4.5):
+    // removing the library item unlinks them but never destroys the bytes —
+    // only the download's own "Delete file" action does. A download lookup
+    // failure is treated as "no known downloads" so the file is then reported
+    // through the normal (named, confirmed) original-deletion path.
+    final downloadUris = <String>{};
+    final dl = downloads;
+    if (dl != null) {
+      final recordsResult = await dl.getByVideoItem(item.id);
+      if (recordsResult case Ok(:final value)) {
+        for (final record in value) {
+          final uri = record.storedUri;
+          if (uri != null && uri.isNotEmpty) downloadUris.add(uri);
+        }
+      }
+    }
+
     for (final location in locations) {
-      // A direct URL has no file of its own: unlinking the row *is* the removal.
-      if (location.providerType == ProviderType.directUrl) {
+      // A direct URL or web link has no file of its own: unlinking the row *is*
+      // the removal. A web link's stored file, if any, is a download and is
+      // deleted only by the explicit per-download action (ADR-017/DL4.5).
+      if (location.providerType == ProviderType.directUrl ||
+          location.providerType == ProviderType.webLink) {
+        recordOnly.add(location);
+        continue;
+      }
+      // The stored file of one of this item's downloads: keep the bytes, unlink
+      // the reference only (the download record still points at them).
+      if (downloadUris.contains(location.sourceUri)) {
         recordOnly.add(location);
         continue;
       }

@@ -255,6 +255,14 @@ enum ProviderType {
   oneDrive,
   googleDrive,
   cloudflareR2,
+
+  /// A web-page link resolved and downloaded through the extraction engine
+  /// (DL4.2, ARCHITECTURE §15.1). Its durable source id is the canonical page
+  /// URL the extractor returns — never a stream or signed URL — and a
+  /// `webLink` location is record-only for removal (ADR-017): deleting it never
+  /// destroys the stored file, which only the explicit "Delete file" action
+  /// does.
+  webLink,
 }
 
 // ---------------------------------------------------------------------------

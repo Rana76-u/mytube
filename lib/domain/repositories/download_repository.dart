@@ -1,17 +1,31 @@
 import 'package:mytube/core/result.dart';
+import 'package:mytube/domain/models/download_preset.dart'
+    show DownloadMediaKind;
+import 'package:mytube/domain/models/web_media.dart' show DownloadSourceKind;
 import 'package:mytube/domain/repositories/video_repository.dart';
 
 /// Lifecycle state of an app-managed offline download (DL-001, P12-02).
 ///
 /// Persisted as the enum *name* TEXT so new states do not force a migration,
 /// matching the `providerType`/`availability` storage style in
-/// [SourceLocations].
+/// [SourceLocations]. The extractor runner (DL4.3) drives the added
+/// [queued]/[merging]/[saving]/[interrupted] states; the direct-URL engine
+/// never uses them.
 enum DownloadStatus {
   /// Row created, transfer not started yet.
   pending,
 
+  /// Accepted by the extractor runner but waiting for a concurrency slot.
+  queued,
+
   /// Bytes actively streaming into the `.part` file.
   running,
+
+  /// Video and audio fragments downloaded; the engine is merging them.
+  merging,
+
+  /// The finished file is being written/published to its destination.
+  saving,
 
   /// User paused; the `.part` file and progress are kept for resume (P12-04).
   paused,
@@ -23,13 +37,24 @@ enum DownloadStatus {
   /// possible, otherwise removed. Retry re-attempts (P12-04).
   failed,
 
+  /// A running transfer was cut short by an app restart/crash before it could
+  /// reach a terminal state. Resumable work is normally re-tagged [paused] by
+  /// `pruneInterrupted`; this marks an extractor job that cannot resume and
+  /// must be retried from scratch.
+  interrupted,
+
   /// The user cancelled; the `.part` file and record are removed (P12-04).
   canceled;
 
-  /// True while bytes may still be appended to the `.part` file.
+  /// True while bytes may still be appended to the staging file, or the job is
+  /// queued for one of the extractor phases. A terminal/paused/interrupted
+  /// state is never tentative.
   bool get isTentative =>
       this == DownloadStatus.pending ||
+      this == DownloadStatus.queued ||
       this == DownloadStatus.running ||
+      this == DownloadStatus.merging ||
+      this == DownloadStatus.saving ||
       this == DownloadStatus.paused;
 }
 
@@ -57,6 +82,17 @@ class DownloadRecord {
     required this.updatedAt,
     this.sourceLocationId,
     this.sizeBytes,
+    this.sourceKind = DownloadSourceKind.directHttp,
+    this.mediaKind = DownloadMediaKind.video,
+    this.title,
+    this.thumbnailUri,
+    this.formatSummary,
+    this.presetJson,
+    this.destinationKind,
+    this.destinationRef,
+    this.stagingPath,
+    this.storedUri,
+    this.errorCode,
   });
 
   /// Stable app-assigned id (UUID); also keys the on-disk file name.
@@ -98,6 +134,45 @@ class DownloadRecord {
   /// Wall-clock timestamp (ms since epoch) of the last update.
   final int updatedAt;
 
+  // ── Link downloader fields (DL4.1, §15.4) ──────────────────────────────
+
+  /// Which engine produces the bytes: the direct-HTTP transfer or the
+  /// extractor. Keys the runner strategy (ADR-023).
+  final DownloadSourceKind sourceKind;
+
+  /// Whether this download is a video or an audio-only track.
+  final DownloadMediaKind mediaKind;
+
+  /// Human title from the extractor, for the download row. Never a URL.
+  final String? title;
+
+  /// Thumbnail reference for display only; never a durable identity.
+  final String? thumbnailUri;
+
+  /// Short format summary for display (e.g. `1080p · mp4`).
+  final String? formatSummary;
+
+  /// JSON-encoded immutable preset snapshot taken when the job was created.
+  final String? presetJson;
+
+  /// Destination kind name paired with [destinationRef]; null for the
+  /// direct-URL engine which always writes to the app downloads root.
+  final String? destinationKind;
+
+  /// Non-secret destination locator (tree URI / folder id). Never a credential.
+  final String? destinationRef;
+
+  /// The job's own staging path under the downloads root; removed on cancel or
+  /// after a successful publish.
+  final String? stagingPath;
+
+  /// Where the finished file lives: a content URI (MediaStore/SAF) or an
+  /// absolute app-storage path. [fileName] stays the app-root-relative name.
+  final String? storedUri;
+
+  /// Typed failure code for a failed/interrupted state; never a message.
+  final String? errorCode;
+
   bool get isComplete => status == DownloadStatus.completed;
 
   DownloadRecord copyWith({
@@ -112,6 +187,17 @@ class DownloadRecord {
     bool? acceptsRange,
     int? createdAt,
     int? updatedAt,
+    DownloadSourceKind? sourceKind,
+    DownloadMediaKind? mediaKind,
+    String? title,
+    String? thumbnailUri,
+    String? formatSummary,
+    String? presetJson,
+    String? destinationKind,
+    String? destinationRef,
+    String? stagingPath,
+    String? storedUri,
+    String? errorCode,
   }) => DownloadRecord(
     id: id,
     videoItemId: videoItemId ?? this.videoItemId,
@@ -125,6 +211,17 @@ class DownloadRecord {
     acceptsRange: acceptsRange ?? this.acceptsRange,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    sourceKind: sourceKind ?? this.sourceKind,
+    mediaKind: mediaKind ?? this.mediaKind,
+    title: title ?? this.title,
+    thumbnailUri: thumbnailUri ?? this.thumbnailUri,
+    formatSummary: formatSummary ?? this.formatSummary,
+    presetJson: presetJson ?? this.presetJson,
+    destinationKind: destinationKind ?? this.destinationKind,
+    destinationRef: destinationRef ?? this.destinationRef,
+    stagingPath: stagingPath ?? this.stagingPath,
+    storedUri: storedUri ?? this.storedUri,
+    errorCode: errorCode ?? this.errorCode,
   );
 
   @override
@@ -141,10 +238,21 @@ class DownloadRecord {
       other.status == status &&
       other.acceptsRange == acceptsRange &&
       other.createdAt == createdAt &&
-      other.updatedAt == updatedAt;
+      other.updatedAt == updatedAt &&
+      other.sourceKind == sourceKind &&
+      other.mediaKind == mediaKind &&
+      other.title == title &&
+      other.thumbnailUri == thumbnailUri &&
+      other.formatSummary == formatSummary &&
+      other.presetJson == presetJson &&
+      other.destinationKind == destinationKind &&
+      other.destinationRef == destinationRef &&
+      other.stagingPath == stagingPath &&
+      other.storedUri == storedUri &&
+      other.errorCode == errorCode;
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     videoItemId,
     sourceLocationId,
@@ -157,7 +265,18 @@ class DownloadRecord {
     acceptsRange,
     createdAt,
     updatedAt,
-  );
+    sourceKind,
+    mediaKind,
+    title,
+    thumbnailUri,
+    formatSummary,
+    presetJson,
+    destinationKind,
+    destinationRef,
+    stagingPath,
+    storedUri,
+    errorCode,
+  ]);
 
   @override
   String toString() =>

@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/platform/audio_focus_bridge.dart';
 import 'package:mytube/platform/audio_focus_bridge_impl.dart';
+import 'package:mytube/platform/clipboard_probe_bridge.dart';
+import 'package:mytube/platform/clipboard_probe_bridge_impl.dart';
 import 'package:mytube/platform/http_remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/media_session_bridge.dart';
 import 'package:mytube/platform/media_session_bridge_impl.dart';
@@ -13,6 +15,8 @@ import 'package:mytube/platform/saf_bridge.dart';
 import 'package:mytube/platform/saf_bridge_impl.dart';
 import 'package:mytube/platform/share_bridge.dart';
 import 'package:mytube/platform/share_bridge_impl.dart';
+import 'package:mytube/platform/share_intake_bridge.dart';
+import 'package:mytube/platform/share_intake_bridge_impl.dart';
 import 'package:mytube/platform/storage_paths.dart';
 import 'package:mytube/platform/thumbnail_bridge.dart';
 import 'package:mytube/platform/thumbnail_bridge_impl.dart';
@@ -89,3 +93,15 @@ final pipBridgeProvider = Provider<PipBridge>((ref) => PipBridgeImpl());
 /// rather than a dead control (NFR-006). Override with a fake bridge to assert
 /// the share path in tests.
 final shareBridgeProvider = Provider<ShareBridge>((ref) => ShareBridgeImpl());
+
+/// Riverpod provider for the Android inbound-share bridge used by the DL5 share
+/// intake flow. Override in tests with a deterministic fake.
+final shareIntakeBridgeProvider = Provider<ShareIntakeBridge>(
+  (ref) => ShareIntakeBridgeImpl(),
+);
+
+/// Riverpod provider for the Android clipboard probe bridge used by the DL5
+/// clipboard watcher. Override in tests with a fake bridge.
+final clipboardProbeBridgeProvider = Provider<ClipboardProbeBridge>(
+  (ref) => ClipboardProbeBridgeImpl(),
+);

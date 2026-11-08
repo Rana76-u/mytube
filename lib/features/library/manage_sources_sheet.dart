@@ -311,6 +311,7 @@ class _SourceRow extends StatelessWidget {
     ProviderType.localMediaStore => 'This device',
     ProviderType.selectedFolder => 'Selected folder',
     ProviderType.directUrl => 'Direct URL',
+    ProviderType.webLink => 'Web link',
     ProviderType.oneDrive => 'OneDrive',
     ProviderType.googleDrive => 'Google Drive',
     ProviderType.cloudflareR2 => 'Cloudflare R2',

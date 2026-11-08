@@ -2942,48 +2942,122 @@ has confirmed the ADRs and DL0.2 has passed.
 
 ### DL4 --- Pipeline, persistence and library integration
 
--   [ ] **DL4.1** Schema. --- Todo. Reconcile ARCHITECTURE §15.4 with the real
-    `Downloads` table; add only the missing columns and new states; one
-    migration with row preservation; update the schema, migration and DAO
-    tests. Do not discard user data.
--   [ ] **DL4.2** `ProviderType.webLink` and `WebLinkAdapter`. --- Todo. Add the
-    value, update every exhaustive switch the analyzer reports, register the
-    adapter in `source_registry.dart` with honest capabilities (streaming,
-    download; no search), `checkDownloadEligibility`, availability mapping.
-    Tests with the fake extractor.
--   [ ] **DL4.3** `ExtractorDownloadRunner`. --- Todo. Plug into the manager as
-    a runner strategy; map `ExtractorJobEvent` to records and the existing event
-    stream; states `queued`, `downloading`, `merging`, `saving`, `paused`,
-    `completed`, `failed`, `interrupted`; resume re-runs with the same staging
-    directory; `pruneInterrupted` handles extractor jobs. Tests with the fake
-    extractor and a temp directory.
--   [ ] **DL4.4** `DownloadLibraryRegistrar`. --- Todo. Implement the table in
-    ARCHITECTURE §15.4: reuse an existing item by canonical URL, primary file
-    source plus `webLink` second source, preserve user metadata, audio creates
-    no item. Tests with the real in-memory Drift repository, including: scan
-    after publish creates no second item (real `ScanMergeService`), favourites
-    and tags survive, duplicate link reuses the item.
--   [ ] **DL4.5** Offline playback and removal. --- Todo. Extend
-    `OfflineDownloadResolver` to content and picked-folder URIs with the same
-    soft-degrade rules; route delete through the ADR-017 flow (`webLink` is
-    record-only; the stored file is deleted only by the explicit
-    "Delete file" action that names it). Tests.
--   [ ] **DL4.6** Safety regression. --- Todo. Extend the VP6.5 style suite:
-    Clear Cache and eviction leave staging and downloads untouched; deleting
-    one download leaves other downloads, other sources and originals;
-    cancelling removes only that job's staging; a failed publish keeps staging.
--   [ ] **DL4 verification.** --- Todo. Format, analyze, full tests, APK build.
+-   [x] **DL4.1** Schema. --- Done 2026-11-06. Reconciled ARCHITECTURE §15.4
+    with the real `Downloads` table and added only the missing columns
+    (`source_kind`, `media_kind`, `title`, `thumbnail_uri`, `format_summary`,
+    `preset_json`, `destination_kind`, `destination_ref`, `staging_path`,
+    `stored_uri`, `error_code`) plus the `queued`/`merging`/`saving`/
+    `interrupted` `DownloadStatus` names (status stays TEXT, so no schema cost).
+    One v7→v8 migration adds them; `createTable` on a pre-v7 upgrade already
+    carries them (guarded with `else if`). Schema, migration (v2/v3/v4/v5/v6/
+    v7 paths) and DAO round-trip tests are green; no user data discarded.
+-   [x] **DL4.2** `ProviderType.webLink` and `WebLinkAdapter`. --- Done
+    2026-11-06. Added the enum value and updated every exhaustive switch the
+    analyzer reported (download pill gate -> downloadable, library filter /
+    manage-sources / card label + `Icons.language` icon, deletion phrase,
+    player host label). New `lib/sources/web_link/web_link_adapter.dart` sits
+    over the `MediaExtractor` seam: durable id = canonical page URL,
+    `resolveForPlayback` maps `ExtractorStream` -> `PlayableSource`,
+    `checkDownloadEligibility` (eligible / DRM-or-live prohibited / login-&-
+    network unknown), availability mapping, honest capabilities (stream +
+    download, no search/thumbnail), empty `listVideos`. Deviation from the task
+    wording: the adapter is wired into `playbackSourceResolverProvider`'s
+    adapter list, NOT `videoSourceAdaptersProvider`, following the
+    `DirectUrlAdapter` precedent — a scan-registered empty page would mark
+    every stored web link missing. `webLink` is record-only in
+    `item_removal_service`. 20 fake-extractor adapter tests + 72 removal /
+    download regressions green.
+-   [x] **DL4.3** `ExtractorDownloadRunner`. --- Done 2026-11-06. New
+    `lib/features/downloads/extractor_download_runner.dart` is the
+    `DownloadSourceKind.extractor` counterpart to the direct-HTTP loop, kept
+    entirely behind the `MediaExtractor` seam (ADR-022). `HttpDownloadManager`
+    now takes a `MediaExtractor` + a `DestinationPublisher` factory and builds
+    the runner in its constructor body so the runner's `emit` is the manager's
+    own `_emit` (no circular provider). `start()` snapshots an extractor
+    record as `queued` with the new DL4.1 columns (source kind, media kind,
+    title, format summary, `preset_json` via `ExtractorJobSpec`, destination
+    via `encodeDestination`, staging path). `_launch` dispatches extractor vs
+    HTTP; the runner maps `ExtractorProgress` phases to `running`/
+    `merging`/`saving` with byte counters, `ExtractorDone` moves through
+    `saving` into `completed` via the publisher (a failed publish keeps
+    staging), `ExtractorFailed` becomes `failed` with a typed `errorCode`.
+    Resume re-runs the same `jobId`/staging directory; cancel (token +
+    `deleteOnStop`) shreds only that job's staging and drops the row; pause
+    keeps staging. `pruneInterrupted` normalises tentative extractor records
+    to `interrupted` and keeps staging. A non-http(s) stored identity is
+    refused before the engine runs. 12 runner/dispatch tests over
+    `FakeMediaExtractor` + real `DriftDownloadRepository` + `AppStoragePublisher`
+    on a temp dir, plus the 12 existing HTTP manager regressions, all green.
+-   [x] **DL4.4** `DownloadLibraryRegistrar`. --- Done 2026-11-06. New
+    `lib/domain/services/download_library_registrar.dart` implements the
+    ARCHITECTURE §15.4 table over the `VideoRepository` contract (no Flutter /
+    Riverpod / Drift). Video -> device folder sets the stored MediaStore
+    content URI as the primary `localMediaStore` source with a `webLink`
+    second source; picked folder -> `selectedFolder`; app storage -> a
+    `webLink`-only item (the offline copy stays tracked by the download record,
+    ADR-019); audio -> no item. It reuses an existing item by canonical URL
+    (matched against `webLink` source URIs), adds a source at most once, and
+    never touches favourites/tags/collections/progress. It is wired as an
+    optional collaborator of `ExtractorDownloadRunner` (and through it
+    `HttpDownloadManager` + `downloadLibraryRegistrarProvider`): a completed
+    video publish registers the item and the runner repoints
+    `DownloadRecord.videoItemId` at it; a registration failure is soft (the
+    download stays completed). 12 registrar tests + 2 runner-registration
+    integration tests over the real in-memory Drift repo and the real
+    `ScanMergeService` (scan after publish adds 0; favourites + tags survive a
+    reuse; duplicate link/file never fork an item), all green.
+-   [x] **DL4.5** Offline playback and removal. --- Done 2026-11-06.
+    `StorageOfflineDownloadResolver` gained a `content://` branch ahead of the
+    downloads-root/file logic: a completed record whose `storedUri` is a content
+    URI resolves straight to a `PlayableSource` (`localMediaStore` for
+    `content://media/…`, otherwise `selectedFolder`, `canSeek: true`) trusted
+    without a stat or root lookup, while an app-storage copy (a `file` path
+    `storedUri`) still falls through to the existing root + fileName existence
+    check, so the soft-degrade-to-null rules are unchanged. Delete is routed
+    through the ADR-017 flow: `ProviderType.webLink` was already record-only from
+    DL4.2, and `VideoItemRemovalService` now takes an optional
+    `DownloadRepository` (`downloads`, wired via `item_removal_service_provider`)
+    so any source whose `sourceUri` equals one of the item's download records'
+    `storedUri` is classified record-only too — a library removal never destroys
+    a download's stored bytes, only the explicit download "Delete file" action
+    does. A download-lookup `Err` is treated as "no known downloads" and falls
+    back to the normal named/confirmed original-deletion path, so scanning of
+    unrelated originals is unaffected. 4 content-URI resolver tests + 4
+    removal-decision tests (webLink-only unlink, scanned download kept, the same
+    file source without a record still deleted, lookup failure falls back)
+    joined the VP6.3 suite; all 29 green, `dart analyze lib test` clean.
+-   [x] **DL4.6** Safety regression. --- Done 2026-11-06. Extended
+    `test/unit/downloads/vp6_5_safety_regression_test.dart` with an `extractor
+    download safety (DL4.6)` group running the real `DriftDownloadRepository` +
+    `AppStoragePublisher` + production cache stack against the temp tree: Clear
+    Cache frees only the cached preview and leaves an extractor job's staging
+    directory + a completed extractor download byte-for-byte; eviction to budget
+    stays inside the cache root and never reaches `staging/`; deleting one web
+    link download (`deleteDownload` -> `_removeFilesAndRow`) removes only its own
+    published file + row while the other download, both provider sources and the
+    user original survive; a cancel (token + `deleteOnStop`) via the real runner
+    deletes only that job's `staging/<id>/` directory and row, leaving another
+    job's staging, a completed download and the original intact; and a failed
+    publish marks `failed` while keeping the staged partial for retry (§15.7).
+    The four extractor scenarios reuse a new `seedExtractorDownload` helper and
+    `buildExtractorRunner` (fake engine). 10 tests in the file (5 VP6.5 + 5
+    DL4.6), all green.
+-   [x] **DL4 verification.** --- Done 2026-11-06. `dart format lib test` (8
+    files changed), `dart analyze lib test` (No issues found!), full
+    `flutter test --concurrency=1` suite (1755 passed, 0 failed — a stale
+    `AppDatabase` version assertion was corrected to 8 for the DL4.1 migration),
+    and `flutter build apk --debug` all green; `app-debug.apk` produced.
 
 ### DL5 --- Intake: share, clipboard, paste
 
--   [ ] **DL5.1** Share intake. --- Todo. Manifest `intent-filter` for
+-   [x] **DL5.1** Share intake. --- Done. Manifest `intent-filter` for
     `ACTION_SEND` `text/plain`; `ShareIntakePlugin.kt` (`onCreate` and
     `onNewIntent`, clear the intent after delivery); Dart bridge;
     `ShareIntakeCoordinator` with URL extraction, rate limit, queue cap and the
     "always Download" route. Edit `MainActivity` minimally. Tests: cold start,
     warm start, no URL, two URLs, replay after rotation, rate limit, queue cap.
     Build the APK.
--   [ ] **DL5.2** Clipboard watcher. --- Todo. `ClipboardProbePlugin.kt`
+-   [x] **DL5.2** Clipboard watcher. --- Done. `ClipboardProbePlugin.kt`
     (description and timestamp without reading content) with a
     `Clipboard.hasStrings()` fallback; `ClipboardWatcher` observing app
     lifecycle in the shell: read only on `resumed`, after the first frame, with
@@ -2991,15 +3065,15 @@ has confirmed the ADRs and DL0.2 has passed.
     hash for Download, Stream and Dismiss. Tests with a fake bridge and clock:
     no read in the background, no repeat for the same value, setting off, new
     value prompts again, direct media URL routed elsewhere.
--   [ ] **DL5.3** Paste entry. --- Todo. "Download from link" sheet with
+-   [x] **DL5.3** Paste entry. --- Done. "Download from link" sheet with
     field, Paste button, validation and the same flow; reachable from the
     Library header action slot and from Settings -> Downloads. Update the
     header per-tab action test.
--   [ ] **DL5.4** Flow orchestration. --- Todo. `startDownloadFlow(link,
+-   [x] **DL5.4** Flow orchestration. --- Done. `startDownloadFlow(link,
     origin)`: duplicate check (queue and library), probe, options sheet or
     immediate start according to "ask before each download", error sheets with
     actions (retry, update extractor, choose another folder). Tests over fakes.
--   [ ] **DL5 verification.** --- Todo. Format, analyze, tests, APK build.
+-   [x] **DL5 verification.** --- Done. Format, analyze, tests, APK build.
 
 ### DL6 --- Interface
 

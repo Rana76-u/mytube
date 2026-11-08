@@ -6,9 +6,20 @@ import 'package:uuid/uuid.dart';
 
 import 'package:mytube/core/result.dart';
 import 'package:mytube/domain/models/app_error.dart';
+import 'package:mytube/domain/models/download_preset.dart'
+    show DownloadMediaKind;
+import 'package:mytube/domain/models/web_media.dart'
+    show DownloadSourceKind, DownloadDestination;
 import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/destination_publisher.dart';
+import 'package:mytube/domain/services/download_library_registrar.dart';
 import 'package:mytube/features/downloads/download_transport.dart';
+import 'package:mytube/features/downloads/extractor_download_runner.dart';
+import 'package:mytube/features/downloads/extractor_job_spec.dart'
+    show encodeDestination;
+import 'package:mytube/platform/extractor/media_extractor.dart'
+    show MediaExtractor;
 import 'package:mytube/sources/direct_url/url_metadata_prober.dart'
     show directUrlRequestHeaders;
 import 'package:mytube/sources/source_adapter.dart' show CancellationToken;
@@ -26,7 +37,8 @@ class DownloadEvent {
   final AppError? error;
 }
 
-/// Parameters for starting a download (P12-02).
+/// Parameters for starting a download (P12-02, extended for the link
+/// downloader in DL4.3).
 class DownloadRequest {
   const DownloadRequest({
     required this.videoItemId,
@@ -35,19 +47,48 @@ class DownloadRequest {
     this.sourceLocationId,
     this.sizeBytes,
     this.acceptsRange = false,
+    this.sourceKind = DownloadSourceKind.directHttp,
+    this.mediaKind = DownloadMediaKind.video,
+    this.title,
+    this.thumbnailUri,
+    this.formatSummary,
+    this.presetJson,
+    this.destination,
   });
 
   final String videoItemId;
   final ProviderType providerType;
 
-  /// Durable identity — the direct URL / provider item id, never a signed URL.
+  /// Durable identity — the direct URL / canonical page URL / provider item id,
+  /// never a signed URL.
   final String sourceUri;
   final String? sourceLocationId;
   final int? sizeBytes;
 
   /// Whether the source advertises byte-range support, learned from the
-  /// eligibility probe at offer time.
+  /// eligibility probe at offer time. Only meaningful for [directHttp].
   final bool acceptsRange;
+
+  // ── Link downloader fields (DL4.3) — ignored by the direct-HTTP engine ──
+
+  /// Which engine produces the bytes; keys the runner strategy (ADR-023).
+  final DownloadSourceKind sourceKind;
+
+  /// Whether this is a video or an audio-only track.
+  final DownloadMediaKind mediaKind;
+
+  /// Human title and thumbnail for the download row (never a durable id).
+  final String? title;
+  final String? thumbnailUri;
+
+  /// Short format summary for display (e.g. `1080p · mp4`).
+  final String? formatSummary;
+
+  /// JSON [ExtractorJobSpec] snapshot taken when the job was created.
+  final String? presetJson;
+
+  /// Final home for an extractor download; null means the app downloads root.
+  final DownloadDestination? destination;
 }
 
 /// Reports free bytes beneath [path], or null when unknown. Injectable so the
@@ -101,6 +142,9 @@ class HttpDownloadManager implements DownloadManager {
     required Future<Result<String>> Function() resolveRoot,
     AvailableSpaceProbe? spaceProbe,
     String Function(String id, String sourceUri)? nameFor,
+    MediaExtractor? extractor,
+    DestinationPublisher Function(String downloadsRoot)? publisherFor,
+    DownloadLibraryRegistrar? registrar,
     // ignore: prefer_initializing_formals
   }) : _repository = repository,
        // ignore: prefer_initializing_formals
@@ -110,13 +154,36 @@ class HttpDownloadManager implements DownloadManager {
        // ignore: prefer_initializing_formals
        _spaceProbe = spaceProbe,
        // ignore: prefer_initializing_formals
-       _nameFor = nameFor ?? defaultFileName;
+       _nameFor = nameFor ?? defaultFileName,
+       // Built below once the fields it depends on are initialised.
+       _extractor = null {
+    // The extractor runner strategy (DL4.3). Only assembled when both an
+    // engine seam and a publisher factory are supplied; its emit feeds this
+    // manager's own event stream so extractor and HTTP jobs are uniform.
+    if (extractor != null && publisherFor != null) {
+      _extractor = ExtractorDownloadRunner(
+        extractor: extractor,
+        repository: _repository,
+        resolveRoot: _resolveRoot,
+        publisherFor: publisherFor,
+        registrar: registrar,
+        emit: _emit,
+      );
+    }
+  }
 
   final DownloadRepository _repository;
   final DownloadTransport _transport;
   final Future<Result<String>> Function() _resolveRoot;
   final AvailableSpaceProbe? _spaceProbe;
   final String Function(String id, String sourceUri) _nameFor;
+
+  /// The extractor runner strategy (DL4.3). When present, jobs whose
+  /// [DownloadRecord.sourceKind] is `extractor` are handed to it instead of the
+  /// direct-HTTP transfer loop. Null on hosts without the engine (and in the
+  /// direct-URL tests), where extractor requests are simply not created.
+  /// Assigned in the constructor body, so it is not `final`.
+  ExtractorDownloadRunner? _extractor;
 
   final Uuid _uuid = const Uuid();
   final StreamController<DownloadEvent> _events =
@@ -159,6 +226,10 @@ class HttpDownloadManager implements DownloadManager {
 
     final now = DateTime.now().millisecondsSinceEpoch;
     final id = _uuid.v4();
+    final isExtractor = request.sourceKind == DownloadSourceKind.extractor;
+    final dest = request.destination == null
+        ? null
+        : encodeDestination(request.destination!);
     final record = DownloadRecord(
       id: id,
       videoItemId: request.videoItemId,
@@ -168,8 +239,20 @@ class HttpDownloadManager implements DownloadManager {
       fileName: _nameFor(id, request.sourceUri),
       sizeBytes: request.sizeBytes,
       downloadedBytes: 0,
-      status: DownloadStatus.running,
+      // An extractor job is accepted into `queued` first (the runner moves it to
+      // `running` when it starts transferring); the HTTP engine starts
+      // `running` immediately as before.
+      status: isExtractor ? DownloadStatus.queued : DownloadStatus.running,
       acceptsRange: request.acceptsRange,
+      sourceKind: request.sourceKind,
+      mediaKind: request.mediaKind,
+      title: request.title,
+      thumbnailUri: request.thumbnailUri,
+      formatSummary: request.formatSummary,
+      presetJson: request.presetJson,
+      destinationKind: dest?.kind,
+      destinationRef: dest?.ref,
+      stagingPath: isExtractor ? p.join(rootPath, 'staging', id) : null,
       createdAt: now,
       updatedAt: now,
     );
@@ -275,10 +358,21 @@ class HttpDownloadManager implements DownloadManager {
     if (all case Err(:final error)) return Result.err(error);
     final records = (all as Ok<List<DownloadRecord>>).value;
 
-    // 1. Normalise crash-orphaned active states: a running/pending record has
-    //    no live transfer after a restart. Keep it resumable when a `.part`
-    //    file survives, otherwise mark it failed.
+    // 1. Normalise crash-orphaned active states. An extractor job cannot keep a
+    //    live transfer after a restart either, but it re-extracts on resume with
+    //    the same staging directory, so its tentative states become
+    //    `interrupted` (kept resumable, staging untouched) rather than the
+    //    `.part`-file logic the HTTP engine uses (§15.8).
     for (final record in records) {
+      if (record.sourceKind == DownloadSourceKind.extractor) {
+        if (record.status == DownloadStatus.queued ||
+            record.status == DownloadStatus.running ||
+            record.status == DownloadStatus.merging ||
+            record.status == DownloadStatus.saving) {
+          await _persist(record, status: DownloadStatus.interrupted);
+        }
+        continue;
+      }
       if (record.status == DownloadStatus.running ||
           record.status == DownloadStatus.pending) {
         final hasPart = await File(
@@ -337,6 +431,21 @@ class HttpDownloadManager implements DownloadManager {
   void _launch(DownloadRecord record, {required bool resume}) {
     final running = _Running(record: record);
     _active[record.id] = running;
+    if (record.sourceKind == DownloadSourceKind.extractor &&
+        _extractor != null) {
+      // Extractor strategy (DL4.3): the runner drives the engine, maps events
+      // onto records and publishes. It reads the same stop token/flag the HTTP
+      // loop uses, so pause/cancel/resume behave uniformly.
+      running.future = _extractor!
+          .run(
+            record,
+            resume: resume,
+            token: running.token,
+            deleteOnStop: () => running.deleteOnStop,
+          )
+          .whenComplete(() => _active.remove(record.id));
+      return;
+    }
     running.future = _run(running, resume: resume);
   }
 

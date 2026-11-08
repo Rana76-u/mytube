@@ -120,6 +120,10 @@ String resolutionLabel(int? widthPx, int? heightPx) {
       segments.length > 1 ? segments[segments.length - 2] : 'Selected folder',
     ProviderType.directUrl =>
       (uri?.host.isNotEmpty ?? false) ? uri!.host : 'Direct link',
+    // A web link's durable identity is its canonical page URL; only the host is
+    // shown so no path/query is surfaced (AGENTS privacy rules).
+    ProviderType.webLink =>
+      (uri?.host.isNotEmpty ?? false) ? uri!.host : 'Web link',
     ProviderType.oneDrive => 'OneDrive',
     ProviderType.googleDrive => 'Google Drive',
     ProviderType.cloudflareR2 => 'Cloudflare R2',

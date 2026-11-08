@@ -318,6 +318,7 @@ String _deletionProviderLabel(ProviderType type) => switch (type) {
   ProviderType.localMediaStore => 'this device',
   ProviderType.selectedFolder => 'the selected folder',
   ProviderType.directUrl => 'the direct link',
+  ProviderType.webLink => 'the web link',
   ProviderType.oneDrive => 'OneDrive',
   ProviderType.googleDrive => 'Google Drive',
   ProviderType.cloudflareR2 => 'Cloudflare R2',

@@ -28,5 +28,6 @@ final itemRemovalServiceProvider = Provider<ItemRemovalService>(
   (ref) => VideoItemRemovalService(
     repository: ref.watch(videoRepositoryProvider),
     deleters: ref.watch(itemOriginalDeletersProvider),
+    downloads: ref.watch(downloadRepositoryProvider),
   ),
 );

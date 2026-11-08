@@ -3,6 +3,9 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/data/database/app_database.dart' as db_lib;
 import 'package:mytube/data/database/daos/downloads_dao.dart';
 import 'package:mytube/domain/models/app_error.dart';
+import 'package:mytube/domain/models/download_preset.dart'
+    show DownloadMediaKind;
+import 'package:mytube/domain/models/web_media.dart' show DownloadSourceKind;
 import 'package:mytube/domain/repositories/download_repository.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 
@@ -146,6 +149,17 @@ class DriftDownloadRepository implements DownloadRepository {
         acceptsRange: Value(r.acceptsRange),
         createdAt: Value(r.createdAt),
         updatedAt: Value(r.updatedAt),
+        sourceKind: Value(r.sourceKind.name),
+        mediaKind: Value(r.mediaKind.name),
+        title: Value(r.title),
+        thumbnailUri: Value(r.thumbnailUri),
+        formatSummary: Value(r.formatSummary),
+        presetJson: Value(r.presetJson),
+        destinationKind: Value(r.destinationKind),
+        destinationRef: Value(r.destinationRef),
+        stagingPath: Value(r.stagingPath),
+        storedUri: Value(r.storedUri),
+        errorCode: Value(r.errorCode),
       );
 
   DownloadRecord _toRecord(db_lib.Download row) => DownloadRecord(
@@ -161,6 +175,17 @@ class DriftDownloadRepository implements DownloadRepository {
     acceptsRange: row.acceptsRange,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    sourceKind: _sourceKindFromName(row.sourceKind),
+    mediaKind: _mediaKindFromName(row.mediaKind),
+    title: row.title,
+    thumbnailUri: row.thumbnailUri,
+    formatSummary: row.formatSummary,
+    presetJson: row.presetJson,
+    destinationKind: row.destinationKind,
+    destinationRef: row.destinationRef,
+    stagingPath: row.stagingPath,
+    storedUri: row.storedUri,
+    errorCode: row.errorCode,
   );
 
   static ProviderType _providerFromName(String name) => ProviderType.values
@@ -168,4 +193,14 @@ class DriftDownloadRepository implements DownloadRepository {
 
   static DownloadStatus _statusFromName(String name) => DownloadStatus.values
       .firstWhere((s) => s.name == name, orElse: () => DownloadStatus.failed);
+
+  static DownloadSourceKind _sourceKindFromName(String name) =>
+      DownloadSourceKind.values.firstWhere(
+        (k) => k.name == name,
+        orElse: () => DownloadSourceKind.directHttp,
+      );
+
+  static DownloadMediaKind _mediaKindFromName(String name) => DownloadMediaKind
+      .values
+      .firstWhere((k) => k.name == name, orElse: () => DownloadMediaKind.video);
 }

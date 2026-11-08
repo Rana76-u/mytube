@@ -124,6 +124,26 @@ Future<AppDatabase> _openWithUpgradeFrom(int fromVersion) async {
           )
         ''');
       }
+      // A genuine v7 snapshot already carries the downloads table WITHOUT the
+      // DL4.1 link-downloader columns; the v7 -> v8 upgrade must add them.
+      if (fromVersion >= 7) {
+        rawDb.execute('''
+          CREATE TABLE IF NOT EXISTS downloads (
+            id TEXT NOT NULL PRIMARY KEY,
+            video_item_id TEXT NOT NULL,
+            source_location_id TEXT,
+            provider_type TEXT NOT NULL,
+            source_uri TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            size_bytes INTEGER,
+            downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            accepts_range INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          )
+        ''');
+      }
       rawDb.execute('PRAGMA user_version = $fromVersion');
     },
   );
@@ -185,12 +205,12 @@ void main() {
       );
     });
 
-    test('schema version is 7 after onCreate', () async {
+    test('schema version is 8 after onCreate', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
     });
   });
 
@@ -227,12 +247,12 @@ void main() {
       expect(indexes, contains('idx_source_locations_video_item_id'));
     });
 
-    test('schema version is 7 after v2 upgrade', () async {
+    test('schema version is 8 after v2 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
     });
   });
 
@@ -264,12 +284,12 @@ void main() {
       );
     });
 
-    test('schema version is 7 after v3 upgrade', () async {
+    test('schema version is 8 after v3 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
     });
   });
 
@@ -329,12 +349,12 @@ void main() {
       );
     });
 
-    test('schema version is 7 after v4 upgrade', () async {
+    test('schema version is 8 after v4 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
     });
   });
 
@@ -407,12 +427,12 @@ void main() {
       },
     );
 
-    test('schema version is 7 after v5 upgrade', () async {
+    test('schema version is 8 after v5 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
     });
   });
 
@@ -500,12 +520,98 @@ void main() {
       expect(download.downloadedBytes, equals(0));
     });
 
-    test('schema version is 7 after v6 upgrade', () async {
+    test('schema version is 8 after v6 upgrade', () async {
       final v = await db
           .customSelect('PRAGMA user_version')
           .map((r) => r.read<int>('user_version'))
           .getSingle();
-      expect(v, equals(7));
+      expect(v, equals(8));
+    });
+  });
+
+  // ── onUpgrade v7 → v8 (DL4.1 — link-downloader columns) ─────────────────
+  group('Migration — v7 → v8 upgrade', () {
+    late AppDatabase db;
+    setUp(() async => db = await _openWithUpgradeFrom(7));
+    tearDown(() async => db.close());
+
+    test('downloads table gains the link-downloader columns', () async {
+      final columns = await db
+          .customSelect('PRAGMA table_info(downloads)')
+          .map((r) => r.read<String>('name'))
+          .get();
+      expect(
+        columns,
+        containsAll(<String>[
+          'source_kind',
+          'media_kind',
+          'title',
+          'thumbnail_uri',
+          'format_summary',
+          'preset_json',
+          'destination_kind',
+          'destination_ref',
+          'staging_path',
+          'stored_uri',
+          'error_code',
+        ]),
+      );
+    });
+
+    test('pre-existing download row survives with defaulted kind', () async {
+      await db.customStatement(
+        '''
+            INSERT INTO video_items (id, title, is_favourite, watch_progress_ms,
+              created_at, updated_at)
+            VALUES ('old1', 'Old video', 0, 0, ?, ?)
+            ''',
+        [_now, _now],
+      );
+      await db.customStatement(
+        '''
+            INSERT INTO downloads (id, video_item_id, provider_type, source_uri,
+              file_name, downloaded_bytes, status, accepts_range, created_at,
+              updated_at)
+            VALUES ('dl1', 'old1', 'directUrl', 'https://example.com/v.mp4',
+              'dl1_v.mp4', 0, 'pending', 0, ?, ?)
+            ''',
+        [_now, _now],
+      );
+
+      final row = await (db.select(
+        db.downloads,
+      )..where((t) => t.id.equals('dl1'))).getSingle();
+      // The defaulted columns backfill on add; a migrated direct-URL row reads
+      // as the direct-HTTP video engine it always was.
+      expect(row.sourceKind, equals('directHttp'));
+      expect(row.mediaKind, equals('video'));
+      expect(row.storedUri, isNull);
+
+      // The new columns are writable after the upgrade.
+      await (db.update(db.downloads)..where((t) => t.id.equals('dl1'))).write(
+        const DownloadsCompanion(
+          sourceKind: Value('extractor'),
+          mediaKind: Value('audio'),
+          storedUri: Value('content://media/external/audio/media/7'),
+        ),
+      );
+      final updated = await (db.select(
+        db.downloads,
+      )..where((t) => t.id.equals('dl1'))).getSingle();
+      expect(updated.sourceKind, equals('extractor'));
+      expect(updated.mediaKind, equals('audio'));
+      expect(
+        updated.storedUri,
+        equals('content://media/external/audio/media/7'),
+      );
+    });
+
+    test('schema version is 8 after v7 upgrade', () async {
+      final v = await db
+          .customSelect('PRAGMA user_version')
+          .map((r) => r.read<int>('user_version'))
+          .getSingle();
+      expect(v, equals(8));
     });
   });
 

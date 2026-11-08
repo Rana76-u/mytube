@@ -7,13 +7,20 @@ import 'package:mytube/core/result.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
+import 'package:mytube/domain/services/destination_publisher.dart'
+    show DestinationPublisher;
+import 'package:mytube/domain/services/download_library_registrar.dart';
 import 'package:mytube/domain/services/playback_source_resolver.dart';
 import 'package:mytube/features/downloads/download_controller.dart';
 import 'package:mytube/features/downloads/download_manager.dart';
+import 'package:mytube/features/downloads/download_publisher.dart';
 import 'package:mytube/features/downloads/download_transport.dart';
 import 'package:mytube/features/downloads/network_probe.dart';
 import 'package:mytube/features/downloads/offline_download_resolver.dart';
+import 'package:mytube/platform/extractor/extractor_providers.dart';
 import 'package:mytube/platform/platform_providers.dart';
+import 'package:mytube/platform/publish_bridge.dart';
+import 'package:mytube/platform/publish_bridge_impl.dart';
 
 /// Riverpod provider for the [DownloadTransport] (P12-02).
 ///
@@ -60,14 +67,52 @@ final downloadsRootResolverProvider =
 /// cleanup reach them (CACHE-006). The low-storage probe is left null on hosts
 /// without an OS free-space API: refusal then only triggers when a size is
 /// declared and a probe is supplied (see the ADR for the on-device follow-up).
+///
+/// The manager builds its own extractor runner (DL4.3) from the [MediaExtractor]
+/// seam and the destination-publisher factory so `extractor` jobs delegate to
+/// it while direct-HTTP transfers keep running inline; the seam degrades to an
+/// "unavailable" extractor on hosts without the engine, so injection is always
+/// safe.
 final downloadManagerProvider = Provider<DownloadManager>((ref) {
   final manager = HttpDownloadManager(
     repository: ref.watch(downloadRepositoryProvider),
     transport: ref.watch(downloadTransportProvider),
     resolveRoot: ref.watch(downloadsRootResolverProvider),
+    extractor: ref.watch(mediaExtractorProvider),
+    publisherFor: ref.watch(downloadPublisherFactoryProvider),
+    registrar: ref.watch(downloadLibraryRegistrarProvider),
   );
   ref.onDispose(manager.dispose);
   return manager;
+});
+
+/// The library-registration collaborator the extractor runner calls after a
+/// successful publish (DL4.4, ARCHITECTURE §15.4). It is wired over the shared
+/// [VideoRepository], so a finished web-link download becomes (or joins) a
+/// logical library item with the canonical page URL as its durable identity.
+final downloadLibraryRegistrarProvider = Provider<DownloadLibraryRegistrar>(
+  (ref) =>
+      DownloadLibraryRegistrar(repository: ref.watch(videoRepositoryProvider)),
+);
+
+/// The native publish bridge behind [downloadPublisherFactoryProvider]
+/// (DL3.2/DL3.3). Override in tests with a fake to avoid the method channel.
+final publishBridgeProvider = Provider<PublishBridge>(
+  (ref) => const PublishBridgeImpl(),
+);
+
+/// Builds a [DestinationPublisher] for a resolved downloads root.
+///
+/// A fresh [DownloadPublisher] is created per root so app-storage publishing
+/// stays inside the exact directory the root resolver approved (CACHE-006).
+typedef DownloadPublisherFactory =
+    DestinationPublisher Function(String downloadsRoot);
+
+final downloadPublisherFactoryProvider = Provider<DownloadPublisherFactory>((
+  ref,
+) {
+  final bridge = ref.watch(publishBridgeProvider);
+  return (root) => DownloadPublisher(downloadsRoot: root, bridge: bridge);
 });
 
 /// Riverpod provider for the [OfflineDownloadResolver] (P12-03 / VP6.3).

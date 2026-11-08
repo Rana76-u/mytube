@@ -13,12 +13,13 @@ import 'package:mytube/features/downloads/download_manager.dart';
 ///
 /// A local MediaStore/SAF item already *is* a file on the device — downloading
 /// it would duplicate or lie — so only remote providers are downloadable. The
-/// direct-URL provider is the sole one wired today; the cloud providers are
+/// direct-URL and web-link providers are wired today; the cloud providers are
 /// listed so their adapters light the pill up the moment they land (P12-01).
 /// A source the provider *prohibits* is handled at offer time by the caller,
 /// not here — this only answers "could this provider type ever be copied".
 bool providerIsDownloadable(ProviderType? provider) => switch (provider) {
   ProviderType.directUrl ||
+  ProviderType.webLink ||
   ProviderType.oneDrive ||
   ProviderType.googleDrive ||
   ProviderType.cloudflareR2 => true,
@@ -195,10 +196,15 @@ class DownloadController extends ChangeNotifier {
   DownloadPillStatus _statusFor(DownloadRecord record) =>
       switch (record.status) {
         DownloadStatus.completed => DownloadPillStatus.completed,
-        DownloadStatus.failed => DownloadPillStatus.failed,
-        // pending / running / paused all read as "in progress" to the user.
+        DownloadStatus.failed ||
+        DownloadStatus.interrupted => DownloadPillStatus.failed,
+        // pending / queued / running / merging / saving / paused all read as
+        // "in progress" to the user.
         DownloadStatus.pending ||
+        DownloadStatus.queued ||
         DownloadStatus.running ||
+        DownloadStatus.merging ||
+        DownloadStatus.saving ||
         DownloadStatus.paused => DownloadPillStatus.running,
         DownloadStatus.canceled => DownloadPillStatus.idle,
       };
