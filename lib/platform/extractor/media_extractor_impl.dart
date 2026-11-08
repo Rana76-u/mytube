@@ -410,6 +410,8 @@ class MediaExtractorImpl implements MediaExtractor {
       WebMediaInfo(
         canonicalUrl: canonical,
         title: root['title'] as String?,
+        uploader: (root['uploader'] as String?) ?? (root['channel'] as String?),
+        thumbnailUrl: root['thumbnail'] as String?,
         duration: durationSeconds == null
             ? null
             : Duration(seconds: durationSeconds.round()),

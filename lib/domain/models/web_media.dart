@@ -231,6 +231,8 @@ class WebMediaInfo {
   const WebMediaInfo({
     required this.canonicalUrl,
     this.title,
+    this.uploader,
+    this.thumbnailUrl,
     this.duration,
     this.kind = WebMediaKind.video,
     this.formats = const [],
@@ -238,6 +240,12 @@ class WebMediaInfo {
 
   final String canonicalUrl;
   final String? title;
+
+  /// Channel / uploader display name. Never a URL.
+  final String? uploader;
+
+  /// Thumbnail URL for display only; never a durable identity and never logged.
+  final String? thumbnailUrl;
   final Duration? duration;
   final WebMediaKind kind;
   final List<WebFormat> formats;
@@ -253,13 +261,22 @@ class WebMediaInfo {
       other is WebMediaInfo &&
       other.canonicalUrl == canonicalUrl &&
       other.title == title &&
+      other.uploader == uploader &&
+      other.thumbnailUrl == thumbnailUrl &&
       other.duration == duration &&
       other.kind == kind &&
       _listEquals(other.formats, formats);
 
   @override
-  int get hashCode =>
-      Object.hash(canonicalUrl, title, duration, kind, Object.hashAll(formats));
+  int get hashCode => Object.hash(
+    canonicalUrl,
+    title,
+    uploader,
+    thumbnailUrl,
+    duration,
+    kind,
+    Object.hashAll(formats),
+  );
 
   // The page URL may carry tracking query params; toString drops them so a
   // log or error never leaks a query string (AGENTS privacy).

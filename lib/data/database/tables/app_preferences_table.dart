@@ -76,6 +76,11 @@ abstract final class AppPreferenceKeys {
       'download.playlistSleepSeconds';
   static const String downloadExtraArgs = 'download.extraArgs';
 
+  /// Whether the one-time downloader responsibility notice (DLK-063) was
+  /// acknowledged. Not part of [DownloadPreset] — it is a UI flag.
+  static const String downloadNoticeAcknowledged =
+      'download.noticeAcknowledged';
+
   /// Every `download.*` key, for auditing and bulk clear.
   static const List<String> downloadKeys = [
     downloadAskEveryTime,

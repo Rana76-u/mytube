@@ -3077,6 +3077,10 @@ has confirmed the ADRs and DL0.2 has passed.
 
 ### DL6 --- Interface
 
+-   [ ] **DL6 scaffold started.** --- Basic DL6 UI widgets and settings wiring
+    are in place: clipboard prompt, options sheet, Downloads list screen, and
+    the Downloads settings section are scaffolded. Remaining polish and full
+    flows are still pending.
 -   [ ] **DL6.1** Clipboard prompt sheet. --- Todo. Host and shortened path
     only, three pill actions (Download, Stream, Dismiss), accessible, no query
     string anywhere. Widget tests.
