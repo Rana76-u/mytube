@@ -37,10 +37,9 @@ enum DownloadStatus {
   /// possible, otherwise removed. Retry re-attempts (P12-04).
   failed,
 
-  /// A running transfer was cut short by an app restart/crash before it could
-  /// reach a terminal state. Resumable work is normally re-tagged [paused] by
-  /// `pruneInterrupted`; this marks an extractor job that cannot resume and
-  /// must be retried from scratch.
+  /// A running transfer was cut short by an app restart, timeout or other
+  /// interruption before it reached a terminal state. Resume retries the saved
+  /// partial when supported; otherwise Retry starts it again.
   interrupted,
 
   /// The user cancelled; the `.part` file and record are removed (P12-04).

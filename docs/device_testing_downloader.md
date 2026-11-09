@@ -125,9 +125,70 @@ can reach.
 - **OneDrive.** Selecting the OneDrive destination must show it disabled with
   "Connect OneDrive first"; the placeholder returns `DESTINATION_UNAVAILABLE`
   and keeps staging (real upload is DLOD-1, Phase 9).
+- **Downloaded audio playback (DL6).** From a completed audio row, Play must
+  open the stored file through Android `ACTION_VIEW` with its audio MIME type;
+  verify the installed player can read both app-storage `FileProvider` URIs
+  and MediaStore/SAF content URIs. With no compatible player, verify the app
+  reports that no player is available and does not alter the download.
 
 ## Target device
 
 Same **CPH2719 — Android 16 (API 36)**. The scoped-storage MediaStore path is the
 primary target; the API 24–28 fallback ideally needs a legacy device or
 emulator to exercise `WRITE_EXTERNAL_STORAGE`.
+
+---
+
+# DL7 — Background Execution and Notifications
+
+Host coverage for the Dart service coordinator and interrupt path:
+
+- `flutter analyze lib test` → **No issues found**.
+- The focused downloader and shell test run passed **120 tests**. Coordinator
+  tests cover foreground-service start/stop, one-second notification
+  throttling, permission request timing, queue completion, and
+  Pause/Cancel/timeout command routing.
+- Download-manager tests cover timeout interruption with a resumable partial,
+  process-death normalization, and the existing network/storage failure paths.
+- `.\android\gradlew.bat -p android :app:testDebugUnitTest --no-daemon` and
+  `flutter build apk --debug` both succeed; the latter compiles the `dataSync`
+  service and plugin.
+
+## Device checks
+
+- [ ] Paste and share a YouTube link. While metadata is being fetched, verify
+  the app shows "Checking link" and Cancel; after the job is queued, verify the
+  Downloads list shows its state/progress and offers Pause/Cancel or
+  Resume/Retry as appropriate.
+- [ ] On Android 13+, start a download with notifications allowed. Confirm the
+  permission prompt is requested only when the first job starts, and that
+  denying it does not prevent the user-initiated download.
+- [ ] Start a download, background the app, and verify the `dataSync`
+  foreground notification stays visible and progress changes no more than
+  about once per second.
+- [ ] During a transfer with measurable size and rate, verify the Downloads
+  row and foreground notification show speed and ETA; pause or finish the job
+  and confirm those live estimates disappear. Unknown size/rate should omit
+  estimates rather than show stale values.
+- [ ] Tap **Pause** in the notification. Confirm progress stops, the partial
+  remains, the row becomes Paused, and Resume continues it.
+- [ ] Tap **Cancel** in the notification. Confirm only that job's staging or
+  partial files and row are removed; other jobs and originals remain.
+- [ ] Finish the queue. Confirm the progress notification is removed and a
+  completion notification opens Settings -> Downloads when tapped, including
+  from a cold app start.
+- [ ] Run on Android 15+ (API 35+) and exercise the service timeout through a
+  controlled test harness rather than waiting for the six-hour quota. Confirm
+  the service stops promptly, active rows become Interrupted, and resumable
+  partial/staging data remains.
+- [ ] Kill the app process while a job is active, relaunch, and confirm active
+  records are normalized to Interrupted or Failed and never shown as completed
+  without a published file. Resume/Retry must work from the Downloads list.
+- [ ] Repeat with airplane mode and low storage. Failures must be Failed or
+  Interrupted with Retry/Resume available; no completed record may be created
+  for an unpublished file.
+
+**Device behavior remains unverified until these checks are run.** The host
+tests and APK build validate the coordinator and Android compilation, not
+notification visibility, runtime permission UI, foreground-service quotas, or
+OEM process behavior.

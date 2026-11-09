@@ -74,7 +74,7 @@ void main() {
   ExtractorDownloadRunner buildRunner(
     FakeMediaExtractor extractor,
     List<DownloadEvent> sink, {
-    void Function(DownloadRecord, {AppError? error})? emit,
+    DownloadEventEmitter? emit,
   }) => ExtractorDownloadRunner(
     extractor: extractor,
     repository: repo,
@@ -82,7 +82,14 @@ void main() {
     publisherFor: publisherFor,
     emit:
         emit ??
-        (record, {error}) => sink.add(DownloadEvent(record, error: error)),
+        (record, {error, speedBytesPerSecond, etaSeconds}) => sink.add(
+          DownloadEvent(
+            record,
+            error: error,
+            speedBytesPerSecond: speedBytesPerSecond,
+            etaSeconds: etaSeconds,
+          ),
+        ),
   );
 
   Future<DownloadRecord> load(String id) async =>
@@ -110,6 +117,8 @@ void main() {
               phase: ExtractorPhase.downloading,
               bytesDone: 1000,
               bytesTotal: 2000,
+              speedBps: 4096,
+              etaSeconds: 12,
             ),
             const ExtractorProgress(
               phase: ExtractorPhase.merging,
@@ -146,7 +155,9 @@ void main() {
           events.any(
             (e) =>
                 e.record.status == DownloadStatus.running &&
-                e.record.downloadedBytes == 1000,
+                e.record.downloadedBytes == 1000 &&
+                e.speedBytesPerSecond == 4096 &&
+                e.etaSeconds == 12,
           ),
           isTrue,
         );
@@ -369,7 +380,13 @@ void main() {
           resolveRoot: resolveRoot,
           publisherFor: publisherFor,
           registrar: DownloadLibraryRegistrar(repository: videoRepo),
-          emit: (_, {error}) {},
+          emit:
+              (
+                DownloadRecord _, {
+                AppError? error,
+                int? speedBytesPerSecond,
+                int? etaSeconds,
+              }) {},
         );
 
         await repo.insert(_record());
@@ -412,7 +429,13 @@ void main() {
           resolveRoot: resolveRoot,
           publisherFor: publisherFor,
           registrar: DownloadLibraryRegistrar(repository: videoRepo),
-          emit: (_, {error}) {},
+          emit:
+              (
+                DownloadRecord _, {
+                AppError? error,
+                int? speedBytesPerSecond,
+                int? etaSeconds,
+              }) {},
         );
 
         await repo.insert(
@@ -460,11 +483,13 @@ void main() {
       final record = (started as Ok<DownloadRecord>).value;
       expect(record.sourceKind, DownloadSourceKind.extractor);
 
-      for (var i = 0; i < 5000; i++) {
-        if ((await load(record.id)).status == DownloadStatus.completed) break;
-        await Future<void>.delayed(Duration.zero);
+      var done = await load(record.id);
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (done.status != DownloadStatus.completed &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        done = await load(record.id);
       }
-      final done = await load(record.id);
       expect(done.status, DownloadStatus.completed);
       expect(
         fake.startedJobs.single.stagingDirectory,

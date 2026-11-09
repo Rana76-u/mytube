@@ -3,20 +3,11 @@ import 'package:flutter/foundation.dart' show immutable;
 import 'package:mytube/domain/services/link_extraction.dart';
 
 /// The possible outcomes for a shared text intake.
-enum ShareIntakeStatus {
-  accepted,
-  missingUrl,
-  rateLimited,
-  queueFull,
-}
+enum ShareIntakeStatus { accepted, missingUrl, rateLimited, queueFull }
 
 @immutable
 class ShareIntakeResult {
-  const ShareIntakeResult({
-    required this.status,
-    this.link,
-    this.message,
-  });
+  const ShareIntakeResult({required this.status, this.link, this.message});
 
   final ShareIntakeStatus status;
   final WebLink? link;

@@ -34,7 +34,9 @@ void main() {
     test('rejects missing or invalid text', () {
       final coordinator = ShareIntakeCoordinator();
       expect(
-        coordinator.handleShareText('', queueCount: 0, now: DateTime.now()).status,
+        coordinator
+            .handleShareText('', queueCount: 0, now: DateTime.now())
+            .status,
         ShareIntakeStatus.missingUrl,
       );
       expect(
@@ -85,7 +87,9 @@ void main() {
 
     test('routes direct media URLs to the direct-url path', () async {
       final watcher = ClipboardWatcher(
-        bridge: _FakeClipboardProbeBridge(text: 'https://example.com/video.mp4'),
+        bridge: _FakeClipboardProbeBridge(
+          text: 'https://example.com/video.mp4',
+        ),
         enabled: true,
       );
 
@@ -96,7 +100,9 @@ void main() {
 
     test('prompts for page URLs instead of auto-downloading', () async {
       final watcher = ClipboardWatcher(
-        bridge: _FakeClipboardProbeBridge(text: 'https://example.com/watch?v=1'),
+        bridge: _FakeClipboardProbeBridge(
+          text: 'https://example.com/watch?v=1',
+        ),
         enabled: true,
       );
 

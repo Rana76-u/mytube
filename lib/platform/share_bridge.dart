@@ -22,4 +22,9 @@ abstract interface class ShareBridge {
   /// Returns `true` when a chooser was shown, `false` when the platform could
   /// not share (no plugin, no handler, revoked permission).
   Future<bool> shareFile({required String uri, String? mimeType});
+
+  /// Opens a local file with the system's default handler, or the resolver
+  /// when no default is set. Used for audio downloads, which intentionally do
+  /// not create library items.
+  Future<bool> openFile({required String uri, required String mimeType});
 }

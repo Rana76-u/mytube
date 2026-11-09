@@ -10,6 +10,10 @@ import 'package:mytube/app/shell/shell_tabs.dart';
 import 'package:mytube/domain/services/watch_progress_service.dart';
 import 'package:mytube/domain/services/watch_progress_service_provider.dart';
 import 'package:mytube/features/discover/discover_screen.dart';
+import 'package:mytube/features/downloads/download_intake_host.dart';
+import 'package:mytube/features/downloads/download_providers.dart';
+import 'package:mytube/features/downloads/download_service_coordinator.dart';
+import 'package:mytube/features/downloads/ui/downloads_screen.dart';
 import 'package:mytube/features/library/library_screen.dart';
 import 'package:mytube/features/reels/reels_screen.dart';
 import 'package:mytube/features/saved/saved_screen.dart';
@@ -76,6 +80,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
   /// only progress record and a throttle-window position would be lost if the OS
   /// reclaims the process before the next save.
   late final WatchProgressService _watchProgress;
+  late final DownloadServiceCoordinator _downloadService;
+  StreamSubscription<void>? _openDownloadsSubscription;
 
   @override
   void initState() {
@@ -84,21 +90,52 @@ class _MainScaffoldState extends ConsumerState<MainScaffold>
     _mediaSession = ref.read(mediaSessionCoordinatorProvider);
     _mediaSession.setNowPlaying(ref.read(nowPlayingProvider));
     _watchProgress = ref.read(watchProgressServiceProvider);
+    _downloadService = ref.read(downloadServiceCoordinatorProvider);
+    _openDownloadsSubscription = _downloadService.openDownloadsRequests.listen(
+      (_) => _openDownloads(),
+    );
+    unawaited(_downloadService.initialize());
     // Instantiate the app-wide PiP coordinator once so its auto-enter policy and
     // mode subscription live for the shell's lifetime; the Reels / player routes
     // read its `inPip` / `supported` listenables through the same provider.
     ref.read(pipCoordinatorProvider);
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        DownloadIntakeHost.consumeShare(context, ref).then<void>((_) {}),
+      );
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unawaited(_openDownloadsSubscription?.cancel());
     super.dispose();
+  }
+
+  void _openDownloads() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const DownloadsScreen()));
+    });
+  }
+
+  Future<void> _handleResumedIntake() async {
+    final handledShare = await DownloadIntakeHost.consumeShare(context, ref);
+    if (!handledShare && mounted) {
+      await DownloadIntakeHost.onAppResumed(context, ref);
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_handleResumedIntake());
+    }
     // Route lifecycle to playback focus/background policy (P13-02). Reels and
     // the player screen handle their own tab visibility separately.
     _audioFocus.handleLifecycle(state);

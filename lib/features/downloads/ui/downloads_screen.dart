@@ -34,14 +34,22 @@ class DownloadListItem {
     this.menuItems = const [],
   });
 
-  factory DownloadListItem.fromRecord(DownloadRecord record) {
+  factory DownloadListItem.fromRecord(
+    DownloadRecord record, {
+    int? speedBytesPerSecond,
+    int? etaSeconds,
+  }) {
     final link = WebLink.parse(record.sourceUri);
     return DownloadListItem(
       id: record.id,
       title: record.title?.trim().isNotEmpty == true
           ? record.title!
           : (link?.displayDescription ?? 'Download'),
-      status: downloadStatusLine(record),
+      status: downloadStatusLine(
+        record,
+        speedBytesPerSecond: speedBytesPerSecond,
+        etaSeconds: etaSeconds,
+      ),
       section: sectionFor(record.status),
       progress: downloadProgressValue(record) ?? 0,
       indeterminate:
@@ -69,7 +77,12 @@ class DownloadListItem {
 /// Pass [items] to render a scripted list in widget tests. Omit it to load
 /// live records from [downloadsListProvider].
 class DownloadsScreen extends StatelessWidget {
-  const DownloadsScreen({super.key, this.items, this.onMenuAction, this.onPasteLink});
+  const DownloadsScreen({
+    super.key,
+    this.items,
+    this.onMenuAction,
+    this.onPasteLink,
+  });
 
   final List<DownloadListItem>? items;
   final void Function(String id, String action)? onMenuAction;
@@ -97,12 +110,22 @@ class _LiveDownloadsScreen extends ConsumerWidget {
     return AsyncValueWidget<List<DownloadRecord>>(
       value: ref.watch(downloadsListProvider),
       onRetry: () => ref.invalidate(downloadsListProvider),
-      skeleton: (_) => const _DownloadsScaffold(
-        items: [],
-        loading: true,
-      ),
+      skeleton: (_) => const _DownloadsScaffold(items: [], loading: true),
       onData: (records) => _DownloadsScaffold(
-        items: [for (final record in records) DownloadListItem.fromRecord(record)],
+        items: [
+          for (final record in records)
+            DownloadListItem.fromRecord(
+              record,
+              speedBytesPerSecond: ref
+                  .read(downloadsListProvider.notifier)
+                  .telemetryFor(record.id)
+                  ?.speedBytesPerSecond,
+              etaSeconds: ref
+                  .read(downloadsListProvider.notifier)
+                  .telemetryFor(record.id)
+                  ?.etaSeconds,
+            ),
+        ],
         records: records,
         onPasteLink: () => DownloadIntakeHost.openPasteSheet(context, ref),
         onMenuAction: (id, action) =>
@@ -163,9 +186,7 @@ class _DownloadsScaffold extends StatelessWidget {
         ),
       );
       for (final item in values) {
-        children.add(
-          DownloadRow(item: item, onMenuAction: onMenuAction),
-        );
+        children.add(DownloadRow(item: item, onMenuAction: onMenuAction));
       }
     }
 
@@ -241,7 +262,11 @@ class _DownloadsSkeleton extends StatelessWidget {
             child: Shimmer(
               child: Row(
                 children: [
-                  const SkeletonBox(width: 120, height: 68, radius: AppRadius.card),
+                  const SkeletonBox(
+                    width: 120,
+                    height: 68,
+                    radius: AppRadius.card,
+                  ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
@@ -249,7 +274,11 @@ class _DownloadsSkeleton extends StatelessWidget {
                       children: const [
                         SkeletonBox(height: 14, radius: AppRadius.badge),
                         SizedBox(height: AppSpacing.sm),
-                        SkeletonBox(width: 160, height: 12, radius: AppRadius.badge),
+                        SkeletonBox(
+                          width: 160,
+                          height: 12,
+                          radius: AppRadius.badge,
+                        ),
                         SizedBox(height: AppSpacing.sm),
                         SkeletonBox(height: 2, radius: AppRadius.badge),
                       ],
@@ -363,21 +392,29 @@ Future<void> _handleMenu(
   if (record == null) return;
   final manager = ref.read(downloadManagerProvider);
 
+  Result<void>? result;
   switch (action) {
     case 'Pause':
-      await manager.pause(id);
+      result = await manager.pause(id);
     case 'Resume':
-      await manager.resume(id);
+      result = await manager.resume(id);
     case 'Cancel':
-      await manager.cancel(id);
+      result = await manager.cancel(id);
     case 'Retry':
-      await manager.retry(id);
+      result = await manager.retry(id);
     case 'Play':
       await _playDownload(context, ref, record);
+      return;
     case 'Share':
       await _shareDownload(context, ref, record);
+      return;
     case 'Delete file':
       await _confirmDelete(context, ref, record);
+      return;
+  }
+  if (!context.mounted) return;
+  if (result case Err(:final error)) {
+    _showDownloadError(context, error.userMessage);
   }
 }
 
@@ -386,26 +423,42 @@ Future<void> _playDownload(
   WidgetRef ref,
   DownloadRecord record,
 ) async {
-  // Audio uses the same player as video (DL6.3 recorded choice): the existing
-  // VideoPlayerScreen already renders an audio-capable surface.
-  final itemId = record.videoItemId.isNotEmpty
-      ? VideoItemId(record.videoItemId)
-      : VideoItemId(record.id);
-  final loaded = record.videoItemId.isNotEmpty
-      ? await ref.read(videoRepositoryProvider).getItemById(itemId)
-      : null;
-  final summary = switch (loaded) {
-    Ok(:final value) => value,
-    _ => VideoItemSummary(
-      id: itemId,
-      title: record.title ?? 'Download',
-      isFavourite: false,
-      watchProgressMs: 0,
-      createdAt: record.createdAt,
-      primaryProvider: ProviderType.webLink,
-    ),
-  };
+  if (record.mediaKind == DownloadMediaKind.audio) {
+    final storedUri = _shareableFileUri(record.storedUri);
+    if (storedUri == null) {
+      _showDownloadError(context, 'The downloaded audio file is unavailable.');
+      return;
+    }
+    final opened = await ref
+        .read(shareBridgeProvider)
+        .openFile(uri: storedUri, mimeType: _audioMimeType(record.fileName));
+    if (!context.mounted) return;
+    if (!opened) {
+      _showDownloadError(
+        context,
+        'No app is available to play this audio file.',
+      );
+    }
+    return;
+  }
+
+  // VideoPlayerScreen needs a registered video library item.
+  if (record.videoItemId.isEmpty) {
+    _showDownloadError(context, 'This video is not available in the library.');
+    return;
+  }
+  final loaded = await ref
+      .read(videoRepositoryProvider)
+      .getItemById(VideoItemId(record.videoItemId));
   if (!context.mounted) return;
+  final VideoItemSummary? summary = switch (loaded) {
+    Ok(:final value) => value,
+    Err() => null,
+  };
+  if (summary == null) {
+    _showDownloadError(context, 'This video is not available in the library.');
+    return;
+  }
   await Navigator.of(context).push(VideoPlayerScreen.route(summary));
 }
 
@@ -414,11 +467,10 @@ Future<void> _shareDownload(
   WidgetRef ref,
   DownloadRecord record,
 ) async {
-  final stored = record.storedUri;
-  if (stored != null &&
-      (stored.startsWith('content:') || stored.startsWith('file:'))) {
+  final stored = _shareableFileUri(record.storedUri);
+  if (stored != null) {
     final mime = record.mediaKind == DownloadMediaKind.audio
-        ? 'audio/*'
+        ? _audioMimeType(record.fileName)
         : 'video/*';
     final shared = await ref
         .read(shareBridgeProvider)
@@ -445,11 +497,14 @@ Future<void> _shareDownload(
         content: Text(switch (outcome) {
           ShareOutcome.linkCopied => 'Link copied to clipboard.',
           ShareOutcome.sheetOpened => 'Choose an app to share this file.',
-          ShareOutcome.unavailable => "This download can't be shared right now.",
+          ShareOutcome.unavailable =>
+            "This download can't be shared right now.",
         }),
       ),
     );
+    return;
   }
+  _showDownloadError(context, "This download can't be shared right now.");
 }
 
 Future<void> _confirmDelete(
@@ -479,5 +534,35 @@ Future<void> _confirmDelete(
     ),
   );
   if (confirmed != true) return;
-  await ref.read(downloadManagerProvider).deleteDownload(record.id);
+  final result = await ref
+      .read(downloadManagerProvider)
+      .deleteDownload(record.id);
+  if (!context.mounted) return;
+  if (result case Err(:final error)) {
+    _showDownloadError(context, error.userMessage);
+  }
+}
+
+String? _shareableFileUri(String? storedUri) {
+  if (storedUri == null || storedUri.isEmpty) return null;
+  final parsed = Uri.tryParse(storedUri);
+  if (parsed != null &&
+      (parsed.scheme == 'content' || parsed.scheme == 'file')) {
+    return storedUri;
+  }
+  return Uri.file(storedUri).toString();
+}
+
+String _audioMimeType(String fileName) {
+  return switch (fileName.split('.').last.toLowerCase()) {
+    'm4a' => 'audio/mp4',
+    'opus' => 'audio/ogg',
+    'mp3' => 'audio/mpeg',
+    _ => 'audio/*',
+  };
+}
+
+void _showDownloadError(BuildContext context, String message) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }

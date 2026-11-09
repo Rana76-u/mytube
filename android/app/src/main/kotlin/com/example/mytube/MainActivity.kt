@@ -10,12 +10,22 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ShareIntakePlugin.handleIncomingIntent(intent)
+        DownloadServicePlugin.handleActivityIntent(
+            applicationContext,
+            intent,
+            dispatchImmediately = false,
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         ShareIntakePlugin.handleIncomingIntent(intent)
+        DownloadServicePlugin.handleActivityIntent(
+            applicationContext,
+            intent,
+            dispatchImmediately = true,
+        )
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -59,6 +69,9 @@ class MainActivity : FlutterActivity() {
         // SAF-tree copies behind com.example.mytube/publish; app storage stays
         // in Dart (dart:io rename).
         PublishPlugin().also { plugin ->
+            flutterEngine.plugins.add(plugin)
+        }
+        DownloadServicePlugin().also { plugin ->
             flutterEngine.plugins.add(plugin)
         }
     }

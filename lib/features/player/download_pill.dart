@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/app/theme/app_tokens.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/features/downloads/download_controller.dart';
+import 'package:mytube/features/downloads/download_flow_coordinator.dart';
+import 'package:mytube/features/downloads/download_intake_host.dart';
 import 'package:mytube/features/downloads/download_providers.dart';
 
 /// The player's download pill — the VP3.4 slot, now a working action (VP6.4).
@@ -10,8 +12,9 @@ import 'package:mytube/features/downloads/download_providers.dart';
 /// Renders nothing for a local item (or one with no source) and otherwise
 /// mirrors the live download state driven by [DownloadController]: idle offers a
 /// start, an in-flight transfer shows progress and cancels on tap, a finished
-/// copy reads "Downloaded" and removes itself on tap, and a failure offers a
-/// retry. A fresh start is disabled while the device is offline.
+/// copy reads "Downloaded", and a failure offers a retry. Web links enter the
+/// shared probe/options/enqueue flow rather than the direct-HTTP runner. A
+/// fresh start is disabled while the device is offline.
 ///
 /// The widget reads only the controller — no repository, transport or `dart:io`
 /// reaches into here (the layering rule).
@@ -33,6 +36,11 @@ class DownloadPill extends ConsumerWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final (IconData icon, String label, bool active, VoidCallback? action) =
         _describe(controller);
+    final pillAction =
+        controller.status == DownloadPillStatus.idle &&
+            controller.providerType == ProviderType.webLink
+        ? _webLinkAction(context, ref, controller)
+        : action;
 
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -45,12 +53,28 @@ class DownloadPill extends ConsumerWidget {
         ),
         label: Text(label),
         labelStyle: TextStyle(color: active ? colorScheme.primary : null),
-        onPressed: action,
+        onPressed: pillAction,
         backgroundColor: active ? colorScheme.primaryContainer : null,
         side: BorderSide(
           color: active ? colorScheme.primary : colorScheme.outlineVariant,
         ),
       ),
+    );
+  }
+
+  VoidCallback? _webLinkAction(
+    BuildContext context,
+    WidgetRef ref,
+    DownloadController controller,
+  ) {
+    final sourceUri = controller.sourceUri;
+    if (!controller.enabled || sourceUri == null) return null;
+    return () => DownloadIntakeHost.startDownload(
+      context,
+      ref,
+      rawText: sourceUri,
+      origin: DownloadIntakeOrigin.paste,
+      videoItemId: item.id.value,
     );
   }
 
@@ -76,7 +100,7 @@ class DownloadPill extends ConsumerWidget {
         Icons.download_done,
         'Downloaded',
         true,
-        c.remove,
+        null,
       ),
       DownloadPillStatus.failed => (
         Icons.error_outline,

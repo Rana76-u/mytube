@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 import 'package:mytube/core/result.dart';
+import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/data/cache/cache_providers.dart';
 import 'package:mytube/data/cache/cache_usage.dart';
 import 'package:mytube/data/database/app_database.dart' hide SourceLocation;
@@ -243,7 +244,13 @@ void main() {
         repository: downloadRepo,
         resolveRoot: resolveRoot,
         publisherFor: (root) => AppStoragePublisher(downloadsRoot: root),
-        emit: (_, {error}) {},
+        emit:
+            (
+              DownloadRecord _, {
+              AppError? error,
+              int? speedBytesPerSecond,
+              int? etaSeconds,
+            }) {},
       );
 
   group('downloads never disturb other providers (VP6.5)', () {

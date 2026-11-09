@@ -64,6 +64,9 @@ Objective: Design a sleek, responsive, and accessible mobile-first app Similar t
 • Downloads screen (Settings > Downloads):
 	• Sections Active, Queued, Completed, Failed. Row: 120px 16:9 thumbnail, title (2 lines), status line (42% • 3.1 MB/s • 1 min left, Merging, Saving, Completed • 120 MB, Failed with reason), 2px red progress line, 3-dot menu (Pause, Resume, Cancel, Retry, Play, Share, Delete file).
 	• Skeleton shimmer while loading; empty state with a "Paste a link" action.
+	• Video Play opens the registered library item in the app. Audio Play opens the downloaded file with Android ACTION_VIEW; if no installed app handles its audio type, show a clear message. Share uses the system chooser, and Delete file is always a separate confirmed action.
+• Settings > Downloads:
+	• Destination remains selectable between Movies, Music, app storage and a picked folder. When a picked folder is active, a separate accessible action changes that folder; OneDrive remains disabled until connected.
 • Notification: ongoing progress with title, percentage and speed, actions Pause and Cancel; completion opens the Downloads list.
 • Micro-interactions: reuse scale-down (0.95) and haptic on primary buttons; honour reduced motion; no new animation primitives; colours only through theme tokens.
 

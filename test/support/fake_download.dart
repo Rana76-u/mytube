@@ -97,6 +97,8 @@ class FakeDownloadManager implements DownloadManager {
   @override
   Future<Result<int>> pruneInterrupted() async => Result.ok(0);
   @override
+  Future<Result<void>> interruptAll() async => Result.ok(null);
+  @override
   Future<void> dispose() async => _ctl.close();
 
   void emit(DownloadRecord rec, {AppError? error}) =>

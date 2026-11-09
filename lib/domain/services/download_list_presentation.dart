@@ -31,29 +31,35 @@ List<String> downloadMenuActions(DownloadStatus status) => switch (status) {
 };
 
 /// Status line for a download row (DLK-041). Never includes a URL or query.
-String downloadStatusLine(DownloadRecord record) {
-  switch (record.status) {
-    case DownloadStatus.pending:
-    case DownloadStatus.queued:
-      return 'Queued';
-    case DownloadStatus.running:
-      return _runningLine(record);
-    case DownloadStatus.merging:
-      return 'Merging';
-    case DownloadStatus.saving:
-      return 'Saving';
-    case DownloadStatus.paused:
-      return 'Paused';
-    case DownloadStatus.completed:
-      final size = record.sizeBytes ?? record.downloadedBytes;
-      return size > 0 ? 'Completed • ${formatBytes(size)}' : 'Completed';
-    case DownloadStatus.failed:
-      return 'Failed • ${downloadFailureMessage(record.errorCode)}';
-    case DownloadStatus.interrupted:
-      return 'Interrupted — Resume to continue';
-    case DownloadStatus.canceled:
-      return 'Cancelled';
-  }
+String downloadStatusLine(
+  DownloadRecord record, {
+  int? speedBytesPerSecond,
+  int? etaSeconds,
+}) {
+  final status = switch (record.status) {
+    DownloadStatus.pending || DownloadStatus.queued => 'Queued',
+    DownloadStatus.running => _runningLine(record),
+    DownloadStatus.merging => 'Merging',
+    DownloadStatus.saving => 'Saving',
+    DownloadStatus.paused => 'Paused',
+    DownloadStatus.completed =>
+      (record.sizeBytes ?? record.downloadedBytes) > 0
+          ? 'Completed • ${formatBytes(record.sizeBytes ?? record.downloadedBytes)}'
+          : 'Completed',
+    DownloadStatus.failed =>
+      'Failed • ${downloadFailureMessage(record.errorCode)}',
+    DownloadStatus.interrupted => 'Interrupted — Resume to continue',
+    DownloadStatus.canceled => 'Cancelled',
+  };
+  if (record.status != DownloadStatus.running) return status;
+
+  return [
+    status,
+    if (speedBytesPerSecond case final speed? when speed > 0)
+      '${formatBytes(speed)}/s',
+    if (etaSeconds case final eta? when eta >= 0)
+      'ETA ${formatDurationClock(Duration(seconds: eta))}',
+  ].join(' • ');
 }
 
 String _runningLine(DownloadRecord record) {

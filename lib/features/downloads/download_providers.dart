@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show ChangeNotifierProvider;
 
 import 'package:mytube/core/result.dart';
+import 'package:mytube/app/uncaught_app_error.dart';
 import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
@@ -14,6 +15,7 @@ import 'package:mytube/domain/services/playback_source_resolver.dart';
 import 'package:mytube/features/downloads/download_controller.dart';
 import 'package:mytube/features/downloads/download_manager.dart';
 import 'package:mytube/features/downloads/download_publisher.dart';
+import 'package:mytube/features/downloads/download_service_coordinator.dart';
 import 'package:mytube/features/downloads/download_transport.dart';
 import 'package:mytube/features/downloads/network_probe.dart';
 import 'package:mytube/features/downloads/offline_download_resolver.dart';
@@ -85,6 +87,23 @@ final downloadManagerProvider = Provider<DownloadManager>((ref) {
   ref.onDispose(manager.dispose);
   return manager;
 });
+
+/// App-lifetime coordinator for the foreground download service (DL7).
+final downloadServiceCoordinatorProvider = Provider<DownloadServiceCoordinator>(
+  (ref) {
+    final coordinator = DownloadServiceCoordinator(
+      manager: ref.watch(downloadManagerProvider),
+      repository: ref.watch(downloadRepositoryProvider),
+      bridge: ref.watch(downloadServiceBridgeProvider),
+      requestNotificationPermission: () =>
+          ref.read(mediaSessionBridgeProvider).requestNotificationPermission(),
+      onError: (error) =>
+          ref.read(uncaughtAppErrorProvider.notifier).report(error),
+    );
+    ref.onDispose(coordinator.dispose);
+    return coordinator;
+  },
+);
 
 /// The library-registration collaborator the extractor runner calls after a
 /// successful publish (DL4.4, ARCHITECTURE §15.4). It is wired over the shared

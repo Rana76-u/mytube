@@ -15,6 +15,8 @@ import 'package:mytube/features/saved/saved_screen.dart';
 import 'package:mytube/features/settings/settings_screen.dart';
 import 'package:mytube/playback/now_playing.dart';
 import 'package:mytube/playback/playback_session.dart';
+import 'package:mytube/platform/platform_providers.dart';
+import 'package:mytube/platform/share_intake_bridge.dart';
 
 /// Records progress writes so the shell's conflict guard can be asserted
 /// without letting the real service reach the database.
@@ -46,6 +48,19 @@ class _FakeWatchProgress implements WatchProgressService {
 
   @override
   void forget(VideoItemId id) {}
+}
+
+class _FakeShareIntakeBridge implements ShareIntakeBridge {
+  int consumeCalls = 0;
+
+  @override
+  Future<String?> consumeShareText() async {
+    consumeCalls++;
+    return null;
+  }
+
+  @override
+  Future<void> clearPendingShareText() async {}
 }
 
 VideoItemSummary _item({String id = 'vid-1', String title = 'Beach day'}) =>
@@ -185,6 +200,31 @@ void main() {
       expect(MainScaffold.tabLibrary, 2);
       expect(MainScaffold.tabSaved, 3);
       expect(MainScaffold.tabSettings, 4);
+    });
+  });
+
+  group('Download link intake (DL5.1, DL5.2)', () {
+    testWidgets('checks shares on cold start and app resume', (tester) async {
+      final db = AppDatabase.inMemory();
+      addTearDown(db.close);
+      final shareBridge = _FakeShareIntakeBridge();
+      final container = ProviderContainer(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          shareIntakeBridgeProvider.overrideWithValue(shareBridge),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(_harness(container: container));
+      await tester.pump();
+      expect(shareBridge.consumeCalls, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(shareBridge.consumeCalls, 2);
     });
   });
 

@@ -4,7 +4,7 @@ import 'package:mytube/platform/clipboard_probe_bridge.dart';
 
 class ClipboardProbeBridgeImpl implements ClipboardProbeBridge {
   ClipboardProbeBridgeImpl()
-      : _channel = const MethodChannel('com.example.mytube/clipboard_probe');
+    : _channel = const MethodChannel('com.example.mytube/clipboard_probe');
 
   final MethodChannel _channel;
 

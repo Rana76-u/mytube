@@ -27,7 +27,12 @@ import 'package:mytube/sources/source_adapter.dart' show CancellationToken;
 /// A progress/lifecycle snapshot pushed on the manager's event stream
 /// (P12-02, consumed by the player pill in P12-05 / VP6.4).
 class DownloadEvent {
-  const DownloadEvent(this.record, {this.error});
+  const DownloadEvent(
+    this.record, {
+    this.error,
+    this.speedBytesPerSecond,
+    this.etaSeconds,
+  });
 
   /// The record's state at the moment of the event.
   final DownloadRecord record;
@@ -35,7 +40,28 @@ class DownloadEvent {
   /// Populated only for a [DownloadStatus.failed] transition, carrying a
   /// user-safe message. Never contains a token or signed URL.
   final AppError? error;
+
+  /// Current transfer rate. This is live-only telemetry and is not persisted.
+  final int? speedBytesPerSecond;
+
+  /// Estimated seconds remaining, when both size and rate are known.
+  final int? etaSeconds;
 }
+
+class DownloadTelemetry {
+  const DownloadTelemetry({this.speedBytesPerSecond, this.etaSeconds});
+
+  final int? speedBytesPerSecond;
+  final int? etaSeconds;
+}
+
+typedef DownloadEventEmitter =
+    void Function(
+      DownloadRecord record, {
+      AppError? error,
+      int? speedBytesPerSecond,
+      int? etaSeconds,
+    });
 
 /// Parameters for starting a download (P12-02, extended for the link
 /// downloader in DL4.3).
@@ -118,6 +144,9 @@ abstract interface class DownloadManager {
   /// Normalises records left mid-transfer by a crash and removes `.part` files
   /// no live download owns (P12-02 cleanup). Returns files deleted.
   Future<Result<int>> pruneInterrupted();
+
+  /// Stops every live transfer without deleting its partial data.
+  Future<Result<void>> interruptAll();
 
   Future<void> dispose();
 }
@@ -262,6 +291,7 @@ class HttpDownloadManager implements DownloadManager {
       return Result.err(error);
     }
 
+    _emit(record);
     _launch(record, resume: false);
     return Result.ok(record);
   }
@@ -309,6 +339,7 @@ class HttpDownloadManager implements DownloadManager {
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     await _repository.update(updated);
+    _emit(updated);
     _launch(updated, resume: true);
     return Result.ok(null);
   }
@@ -327,6 +358,17 @@ class HttpDownloadManager implements DownloadManager {
     final record = (loaded as Ok<DownloadRecord?>).value;
     if (record == null) return Result.ok(null);
     await _removeFilesAndRow(record);
+    return Result.ok(null);
+  }
+
+  @override
+  Future<Result<void>> interruptAll() async {
+    for (final running in _active.values.toList()) {
+      running.deleteOnStop = false;
+      running.stopStatus = DownloadStatus.interrupted;
+      running.token.cancel();
+      await _persist(running.record, status: DownloadStatus.interrupted);
+    }
     return Result.ok(null);
   }
 
@@ -381,7 +423,9 @@ class HttpDownloadManager implements DownloadManager {
         final resumable = hasPart && record.acceptsRange;
         await _persist(
           record,
-          status: resumable ? DownloadStatus.paused : DownloadStatus.failed,
+          status: resumable
+              ? DownloadStatus.interrupted
+              : DownloadStatus.failed,
         );
       }
     }
@@ -442,6 +486,7 @@ class HttpDownloadManager implements DownloadManager {
             resume: resume,
             token: running.token,
             deleteOnStop: () => running.deleteOnStop,
+            stopStatus: () => running.stopStatus,
           )
           .whenComplete(() => _active.remove(record.id));
       return;
@@ -463,6 +508,17 @@ class HttpDownloadManager implements DownloadManager {
       bool deletePart = false,
       int? downloaded,
     }) async {
+      if (running.deleteOnStop) {
+        if (partFile != null && await partFile.exists()) {
+          try {
+            await partFile.delete();
+          } catch (_) {}
+        }
+        await _repository.deleteRecord(record.id);
+        _emit(record.copyWith(status: DownloadStatus.canceled));
+        _active.remove(record.id);
+        return;
+      }
       if (deletePart && partFile != null && await partFile.exists()) {
         try {
           await partFile.delete();
@@ -497,7 +553,10 @@ class HttpDownloadManager implements DownloadManager {
       headers: directUrlRequestHeaders,
     );
     if (opened case Err(:final error)) {
-      await finish(status: DownloadStatus.failed, error: error);
+      await finish(
+        status: running.stopStatus ?? DownloadStatus.failed,
+        error: running.stopStatus == null ? error : null,
+      );
       return;
     }
     final resp = (opened as Ok<TransportResponse>).value;
@@ -507,6 +566,7 @@ class HttpDownloadManager implements DownloadManager {
     final append = resp.resumed && startBytes > 0;
     int written = append ? startBytes : 0;
     final total = resp.totalLength ?? record.sizeBytes;
+    final transferClock = Stopwatch()..start();
 
     await partFile.parent.create(recursive: true);
     RandomAccessFile raf;
@@ -530,7 +590,26 @@ class HttpDownloadManager implements DownloadManager {
         if (token.isCancelled) break;
         await raf.writeFrom(chunk);
         written += chunk.length;
-        await _persist(record, downloaded: written, size: total);
+        final elapsedMicros = transferClock.elapsedMicroseconds;
+        final transferredThisRun = written - (append ? startBytes : 0);
+        final speed = elapsedMicros > 0
+            ? transferredThisRun *
+                  Duration.microsecondsPerSecond ~/
+                  elapsedMicros
+            : null;
+        final remainingBytes = total == null
+            ? null
+            : (total - written).clamp(0, total).toInt();
+        final eta = speed != null && speed > 0 && remainingBytes != null
+            ? (remainingBytes / speed).ceil().clamp(0, 1 << 31).toInt()
+            : null;
+        await _persist(
+          record,
+          downloaded: written,
+          size: total,
+          speedBytesPerSecond: speed,
+          etaSeconds: eta,
+        );
       }
     } catch (e) {
       await raf.close();
@@ -556,6 +635,17 @@ class HttpDownloadManager implements DownloadManager {
         }
         await _repository.deleteRecord(record.id);
         _emit(record.copyWith(status: DownloadStatus.canceled));
+      } else if (running.stopStatus == DownloadStatus.interrupted) {
+        if (!record.acceptsRange && await partFile.exists()) {
+          try {
+            await partFile.delete();
+          } catch (_) {}
+        }
+        await _persist(
+          record,
+          status: DownloadStatus.interrupted,
+          downloaded: written,
+        );
       } else {
         // Pause: keep the partial for a later resume.
         await _persist(
@@ -584,7 +674,7 @@ class HttpDownloadManager implements DownloadManager {
     }
     await _persist(
       record,
-      status: DownloadStatus.completed,
+      status: running.stopStatus ?? DownloadStatus.completed,
       downloaded: written,
       size: total ?? written,
     );
@@ -601,24 +691,48 @@ class HttpDownloadManager implements DownloadManager {
     int? downloaded,
     int? size,
     AppError? error,
+    int? speedBytesPerSecond,
+    int? etaSeconds,
   }) async {
     // Merge onto the newest live snapshot when this id is mid-transfer, so a
     // terminal write never rolls back progress the loop already recorded.
     final running = _active[base.id];
     final src = running?.record ?? base;
+    final effectiveStatus = running?.stopStatus == DownloadStatus.interrupted
+        ? DownloadStatus.interrupted
+        : status ?? src.status;
     final updated = src.copyWith(
-      status: status ?? src.status,
+      status: effectiveStatus,
       downloadedBytes: downloaded ?? src.downloadedBytes,
       sizeBytes: size ?? src.sizeBytes,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     if (running != null) running.record = updated;
     await _repository.update(updated);
-    _emit(updated, error: error);
+    _emit(
+      updated,
+      error: error,
+      speedBytesPerSecond: speedBytesPerSecond,
+      etaSeconds: etaSeconds,
+    );
   }
 
-  void _emit(DownloadRecord record, {AppError? error}) {
-    if (!_events.isClosed) _events.add(DownloadEvent(record, error: error));
+  void _emit(
+    DownloadRecord record, {
+    AppError? error,
+    int? speedBytesPerSecond,
+    int? etaSeconds,
+  }) {
+    if (!_events.isClosed) {
+      _events.add(
+        DownloadEvent(
+          record,
+          error: error,
+          speedBytesPerSecond: speedBytesPerSecond,
+          etaSeconds: etaSeconds,
+        ),
+      );
+    }
   }
 
   Future<void> _removeFilesAndRow(DownloadRecord record) async {
@@ -679,5 +793,6 @@ class _Running {
   final CancellationToken token = CancellationToken();
   DownloadRecord record;
   bool deleteOnStop = false;
+  DownloadStatus? stopStatus;
   late final Future<void> future;
 }

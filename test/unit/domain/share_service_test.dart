@@ -21,6 +21,12 @@ class _FakeShareBridge implements ShareBridge {
     calls.add((uri: uri, mimeType: mimeType));
     return result;
   }
+
+  @override
+  Future<bool> openFile({
+    required String uri,
+    required String mimeType,
+  }) async => result;
 }
 
 SourceLocation _location({

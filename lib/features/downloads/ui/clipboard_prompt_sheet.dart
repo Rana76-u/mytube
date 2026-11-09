@@ -152,7 +152,9 @@ Future<ClipboardPromptAction?> showClipboardPromptSheet(
     useSafeArea: true,
     backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppRadius.sheet),
+      ),
     ),
     builder: (sheetContext) => ClipboardPromptSheet(
       link: link,

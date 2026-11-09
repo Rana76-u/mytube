@@ -19,19 +19,22 @@ void main() {
       expect(result.reason, 'start');
     });
 
-    test('prompts again when the user wants to confirm before each download', () {
-      final result = coordinator.startDownloadFlow(
-        rawText: 'https://example.com/watch?v=1',
-        origin: DownloadIntakeOrigin.paste,
-        askBeforeEachDownload: true,
-        queuedLinks: const [],
-        libraryLinks: const [],
-      );
+    test(
+      'prompts again when the user wants to confirm before each download',
+      () {
+        final result = coordinator.startDownloadFlow(
+          rawText: 'https://example.com/watch?v=1',
+          origin: DownloadIntakeOrigin.paste,
+          askBeforeEachDownload: true,
+          queuedLinks: const [],
+          libraryLinks: const [],
+        );
 
-      expect(result.ok, isTrue);
-      expect(result.needsOptionsSheet, isTrue);
-      expect(result.reason, 'prompt');
-    });
+        expect(result.ok, isTrue);
+        expect(result.needsOptionsSheet, isTrue);
+        expect(result.reason, 'prompt');
+      },
+    );
 
     test('reports duplicates against queued and library items', () {
       final duplicate = coordinator.startDownloadFlow(

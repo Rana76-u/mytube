@@ -2,10 +2,7 @@ import 'package:flutter/foundation.dart' show immutable;
 
 @immutable
 class ClipboardProbeSnapshot {
-  const ClipboardProbeSnapshot({
-    this.text,
-    this.timestampMs,
-  });
+  const ClipboardProbeSnapshot({this.text, this.timestampMs});
 
   final String? text;
   final int? timestampMs;

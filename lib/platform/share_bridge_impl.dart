@@ -26,4 +26,19 @@ class ShareBridgeImpl implements ShareBridge {
       return false;
     }
   }
+
+  @override
+  Future<bool> openFile({required String uri, required String mimeType}) async {
+    try {
+      final opened = await _shareChannel.invokeMethod<bool>(
+        'openFile',
+        <String, Object?>{'uri': uri, 'mimeType': mimeType},
+      );
+      return opened ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
 }

@@ -12,12 +12,9 @@ import 'package:mytube/features/downloads/extractor_job_spec.dart';
 
 /// Builds the extractor job snapshot and enqueues it (DL6 options / paste).
 class WebLinkEnqueue {
-  WebLinkEnqueue({
-    FormatSelector selector = const FormatSelector(),
-    Uuid uuid = const Uuid(),
-  }) : _selector = selector,
-       _uuid = uuid;
-
+  WebLinkEnqueue({FormatSelector? selector, Uuid? uuid})
+    : _selector = selector ?? const FormatSelector(),
+      _uuid = uuid ?? const Uuid();
   final FormatSelector _selector;
   final Uuid _uuid;
 

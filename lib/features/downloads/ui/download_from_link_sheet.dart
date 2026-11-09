@@ -111,7 +111,9 @@ Future<String?> showDownloadFromLinkSheet(
     useSafeArea: true,
     backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppRadius.sheet),
+      ),
     ),
     builder: (_) => DownloadFromLinkSheet(initialText: initialText),
   );

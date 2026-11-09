@@ -1,3 +1,4 @@
+// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:mytube/app/theme/app_tokens.dart';
 import 'package:mytube/core/ui/pressable.dart';
@@ -49,7 +50,11 @@ class DownloadOptionsSheet extends StatefulWidget {
 }
 
 class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
-  late DownloadPreset _preset = widget.initialPreset ?? DownloadPreset.defaults;
+  late final _initialSelection = _normaliseInitialPreset(
+    widget.initialPreset ?? DownloadPreset.defaults,
+    widget.info,
+  );
+  late DownloadPreset _preset = _initialSelection.preset;
   bool _savePreference = false;
 
   WebMediaInfo? get _info => widget.info;
@@ -61,7 +66,7 @@ class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
         ? 'Unknown length'
         : formatDurationClock(widget.duration!);
     final uploader = widget.uploader ?? 'Unknown uploader';
-    final qualityOptions = downloadQualityOptions(info: _info);
+    final qualityOptions = downloadQualityOptions(info: _info, preset: _preset);
 
     return SafeArea(
       child: Column(
@@ -101,9 +106,21 @@ class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
                   },
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                if (_preset.kind == DownloadMediaKind.video)
-                  _qualitySection(theme, qualityOptions)
-                else
+                if (_preset.kind == DownloadMediaKind.video) ...[
+                  _qualitySection(theme, qualityOptions),
+                  if (_initialSelection.notice case final notice?)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                      ),
+                      child: Text(
+                        notice,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.secondary,
+                        ),
+                      ),
+                    ),
+                ] else
                   _audioSection(),
                 const SizedBox(height: AppSpacing.lg),
                 _destinationRow(),
@@ -162,18 +179,15 @@ class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
     widget.onPresetChanged?.call(next);
   }
 
-  Widget _qualitySection(
-    ThemeData theme,
-    List<DownloadQualityOption> options,
-  ) {
+  Widget _qualitySection(ThemeData theme, List<DownloadQualityOption> options) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Quality', style: theme.textTheme.titleSmall),
         for (final option in options)
           RadioListTile<int>(
-            value: option.maxHeight,
             groupValue: _preset.maxHeight,
+            value: option.maxHeight,
             title: Text(option.label),
             subtitle: Text.rich(
               TextSpan(
@@ -181,7 +195,8 @@ class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
                   TextSpan(text: option.sizeLabel),
                   if (option.codecMayNotPlay)
                     TextSpan(
-                      text: '\nMay not play on this device',
+                      text:
+                          '\n${option.codecNote ?? 'May not play on this device'}',
                       style: TextStyle(color: theme.colorScheme.secondary),
                     ),
                 ],
@@ -311,6 +326,37 @@ class _DownloadOptionsSheetState extends State<DownloadOptionsSheet> {
         PickedFolderDestination() => 'picked',
         OneDriveDestination() => 'onedrive',
       };
+
+  static ({DownloadPreset preset, String? notice}) _normaliseInitialPreset(
+    DownloadPreset preset,
+    WebMediaInfo? info,
+  ) {
+    if (info == null ||
+        preset.kind != DownloadMediaKind.video ||
+        preset.bestQuality) {
+      return (preset: preset, notice: null);
+    }
+
+    final heights =
+        info.playableFormats
+            .where((format) => format.hasVideo && format.height != null)
+            .map((format) => format.height!)
+            .toSet()
+            .toList()
+          ..sort();
+    if (heights.isEmpty || heights.contains(preset.maxHeight)) {
+      return (preset: preset, notice: null);
+    }
+
+    final lower = heights.where((height) => height < preset.maxHeight).toList();
+    final selected = lower.isNotEmpty ? lower.last : heights.first;
+    return (
+      preset: preset.copyWith(maxHeight: selected),
+      notice:
+          '${preset.maxHeight}p is unavailable. Using the nearest available '
+          '${selected}p quality.',
+    );
+  }
 }
 
 class _Header extends StatelessWidget {
@@ -427,7 +473,9 @@ Future<DownloadOptionsResult?> showDownloadOptionsSheet(
     useSafeArea: true,
     backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.sheet)),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppRadius.sheet),
+      ),
     ),
     builder: (_) => FractionallySizedBox(
       heightFactor: 0.92,

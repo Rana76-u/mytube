@@ -2881,8 +2881,10 @@ has confirmed the ADRs and DL0.2 has passed.
     `--`). Throttled progress (~2/sec) parsed from the yt-dlp line; raw output
     is never forwarded — failures reduce to the §15.10 codes
     `extractor_error_map.dart` reads. Compiled against the real engine API
-    (confirmed by the green APK build). Gradle unit test
-    `ExtractorArgsBuilderTest.kt` (JVM, `./gradlew :app:testDebugUnitTest`):
+    (confirmed by the green APK build). The probe rejects non-zero exit codes
+    and maps engine stderr instead of attempting to parse failed output as JSON.
+    Gradle unit tests `ExtractorArgsBuilderTest.kt` and
+    `ExtractorProbeResponseTest.kt` (JVM, `./gradlew :app:testDebugUnitTest`):
     rejects a URL starting with `-`, rejects non-http schemes, asserts no
     forbidden flag ever leaks — 11 assertions across 9 tests, all green.
 -   [x] **DL2.4** Dart implementation and contract tests. --- Done 2026-11-06.
@@ -3054,7 +3056,8 @@ has confirmed the ADRs and DL0.2 has passed.
     `ACTION_SEND` `text/plain`; `ShareIntakePlugin.kt` (`onCreate` and
     `onNewIntent`, clear the intent after delivery); Dart bridge;
     `ShareIntakeCoordinator` with URL extraction, rate limit, queue cap and the
-    "always Download" route. Edit `MainActivity` minimally. Tests: cold start,
+    "always Download" route. The shell consumes pending shares on cold start and
+    app resume; a regression test covers both entry points. Tests: cold start,
     warm start, no URL, two URLs, replay after rotation, rate limit, queue cap.
     Build the APK.
 -   [x] **DL5.2** Clipboard watcher. --- Done. `ClipboardProbePlugin.kt`
@@ -3077,52 +3080,74 @@ has confirmed the ADRs and DL0.2 has passed.
 
 ### DL6 --- Interface
 
--   [ ] **DL6 scaffold started.** --- Basic DL6 UI widgets and settings wiring
-    are in place: clipboard prompt, options sheet, Downloads list screen, and
-    the Downloads settings section are scaffolded. Remaining polish and full
-    flows are still pending.
--   [ ] **DL6.1** Clipboard prompt sheet. --- Todo. Host and shortened path
-    only, three pill actions (Download, Stream, Dismiss), accessible, no query
-    string anywhere. Widget tests.
--   [ ] **DL6.2** Options sheet. --- Todo. Thumbnail, title, uploader and
-    duration; Video | Audio switch; quality rows (Best available first, then
-    heights with size or "Size unknown" and codec notes); audio format and
-    bitrate rows; destination row; "Use these settings next time"; pinned
-    Download button. Pre-filled from the preset. Widget tests including text
-    scale 2.0 and reduced motion.
--   [ ] **DL6.3** Downloads screen. --- Todo. Under Settings -> Downloads (no
-    sixth tab). Active, queued, completed and failed sections, 120 px thumbnail,
-    status line, 2 dp progress line, row menu (Pause, Resume, Cancel, Retry,
-    Play, Share, Delete file), skeleton, empty and error states. Play opens the
-    existing player; audio plays through the same player in audio mode or, if
-    that is not feasible, opens in the system player (record the choice).
--   [ ] **DL6.4** Settings section. --- Todo. "Downloads" section with: ask
-    before each download, type, quality, container, compatibility, audio
-    format and bitrate, destination (with SAF picker and disabled OneDrive),
-    embed metadata, concurrency, clipboard detection, extractor version and
-    "Check for update", the responsibility notice (DLK-063), and a link to the
-    Downloads list. Every control writes through `DownloadPresetNotifier`.
--   [ ] **DL6.5** Player integration. --- Todo. The existing `DownloadPill`
-    works for `webLink` items (start, progress, cancel, retry, completed) via
-    the runner strategy; local-only items still never show it.
--   [ ] **DL6 verification.** --- Todo. Format, analyze, tests. Update
-    `DESIGN.md` §5 if the final UI differs from it.
+-   [x] **DL6 scaffold started.** --- Complete. Clipboard, paste, share and
+    player entry points feed the shared intake flow; options, Downloads and
+    Settings screens are connected to the download pipeline and saved preset.
+-   [x] **DL6.1** Clipboard prompt sheet. --- Complete. Shows only the host and
+    shortened path, with Download, Stream and Dismiss actions; query strings
+    are not rendered. Widget coverage includes the redacted URL and accessible
+    tap target.
+-   [x] **DL6.2** Options sheet. --- Complete. Metadata, Video/Audio selection,
+    quality estimates and codec notes, audio format/bitrate and destination
+    controls are shown; the save-for-next-time choice and pinned Download
+    action use the saved preset. Widget tests cover quality fallback, 200%
+    text scale and reduced motion.
+-   [x] **DL6.3** Downloads screen. --- Complete under Settings (no sixth tab),
+    with live Active, Queued, Completed and Failed sections, skeleton, empty
+    state, status/progress, row actions, surfaced action errors and confirmed
+    deletion. Video Play opens the registered library item. Audio Play uses
+    Android `ACTION_VIEW`. Link intake now shows a cancellable metadata-probe
+    state before a queue record exists, and a successful enqueue offers a
+    shortcut back to the live list. Device verification is listed in
+    `docs/device_testing_downloader.md`.
+-   [x] **DL6.4** Settings section. --- Complete. Saved defaults, destination
+    selection and SAF picker, disabled OneDrive, metadata embedding,
+    concurrency, clipboard detection, extractor version/update, responsibility
+    notice and Downloads link are wired through the preset notifier. A picked
+    folder can be changed or switched to another destination.
+-   [x] **DL6.5** Player integration. --- Complete. Web-link items use the
+    shared probe/options/enqueue flow and preserve the linked library item;
+    progress, cancel and retry remain available, and completed status cannot
+    silently delete a file. Local-only items do not show the pill.
+-   [x] **DL6 verification.** --- Complete. `dart format` and `flutter analyze
+    lib test` pass; focused DL5/DL6/settings/player/share tests pass; the full
+    `flutter test` suite passes (759 tests); `flutter build apk --debug`
+    succeeds. `DESIGN.md` §5 records the system-player route for audio. Physical
+    Android audio-handler and SAF-picker behavior remains device-only and is
+    tracked in `docs/device_testing_downloader.md`.
 
 ### DL7 --- Background execution and notifications
 
--   [ ] **DL7.1** `DownloadService.kt`. --- Todo. Foreground service (type per
-    ADR-026), notification channel, progress, Pause and Cancel actions,
-    completion notification opening the Downloads screen, `onTimeout` marks
-    jobs `interrupted` and calls `stopSelf()`. Manifest permissions. Just-in-
-    time notification permission through the existing flow.
--   [ ] **DL7.2** Dart coordinator. --- Todo. Start the service on the first
-    active job and stop it when the queue empties; reconcile state when the
-    engine reattaches; throttle notification updates.
--   [ ] **DL7.3** Interrupted handling. --- Todo. Network loss, process death,
-    timeout and storage-full all end in `interrupted` or `failed` with Resume
-    or Retry; no phantom completed record. Tests over fakes; device steps in
-    the checklist.
--   [ ] **DL7 verification.** --- Todo. Format, analyze, tests, APK build.
+-   [x] **DL7.1** `DownloadService.kt`. --- Done 2026-11-09. Added the
+    `dataSync` foreground service, low-importance notification channel,
+    throttled progress display, Pause/Cancel actions and a completion
+    notification that opens Downloads. Android 15+ `onTimeout` dispatches
+    interruption and immediately stops the service. Added
+    `FOREGROUND_SERVICE_DATA_SYNC`; reused the existing just-in-time
+    `POST_NOTIFICATIONS` request. Native compilation passed in the debug APK.
+-   [x] **DL7.2** Dart coordinator. --- Done 2026-11-09. The app-lifetime
+    coordinator starts on the first active record, stops when the active queue
+    empties, routes notification actions through `DownloadManager`, reconciles
+    persisted jobs on startup, and throttles updates to one per second. It
+    requests notification permission only when the first job starts and
+    routes a notification tap to the Downloads screen.
+-   [x] **DL7.3** Interrupted handling. --- Done 2026-11-09. Added
+    `interruptAll()` for timeout; resumable partials are kept and persisted as
+    `interrupted`, while non-resumable HTTP partials are removed. Startup
+    normalization now exposes resumable interrupted jobs with Resume/Retry;
+    existing network/storage failures remain Failed with Retry. Tests cover
+    interruption, process-death normalization, action routing and completion.
+-   [x] **DL7 verification.** --- Done 2026-11-09. `dart format lib test`
+    clean; `flutter analyze lib test` reports no issues; targeted downloader
+    and shell tests pass (120); `.\android\gradlew.bat -p android
+    :app:testDebugUnitTest --no-daemon` passes; `flutter build apk --debug`
+    succeeds. Physical Android notification, permission, process-death and
+    `onTimeout` behavior remains unverified; steps are in
+    `docs/device_testing_downloader.md`.
+-   Live-transfer telemetry follow-up: transient speed and ETA now flow from
+    HTTP/extractor progress to the Downloads row and foreground notification.
+    Targeted telemetry/UI tests pass (48); the ignored-range restart case is
+    covered. Unknown size/rate omits estimates; telemetry is not persisted.
 
 ### DL8 --- Stream
 

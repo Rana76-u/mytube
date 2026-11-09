@@ -47,7 +47,7 @@ class ExtractorDownloadRunner {
     required DownloadRepository repository,
     required Future<Result<String>> Function() resolveRoot,
     required DestinationPublisher Function(String downloadsRoot) publisherFor,
-    required void Function(DownloadRecord record, {AppError? error}) emit,
+    required DownloadEventEmitter emit,
     DownloadLibraryRegistrar? registrar,
     // ignore: prefer_initializing_formals
   }) : _extractor = extractor,
@@ -66,7 +66,7 @@ class ExtractorDownloadRunner {
   final DownloadRepository _repository;
   final Future<Result<String>> Function() _resolveRoot;
   final DestinationPublisher Function(String downloadsRoot) _publisherFor;
-  final void Function(DownloadRecord record, {AppError? error}) _emit;
+  final DownloadEventEmitter _emit;
 
   /// Library registration collaborator (DL4.4). Null on hosts/tests without a
   /// wired video repository; a finished download is then simply not turned into
@@ -88,8 +88,10 @@ class ExtractorDownloadRunner {
     required bool resume,
     required CancellationToken token,
     required bool Function() deleteOnStop,
+    DownloadStatus? Function()? stopStatus,
   }) async {
     var current = record;
+    final readStopStatus = stopStatus ?? () => null;
 
     final rootResult = await _resolveRoot();
     if (rootResult case Err(:final error)) {
@@ -97,6 +99,22 @@ class ExtractorDownloadRunner {
       return;
     }
     final rootPath = (rootResult as Ok<String>).value;
+    if (token.isCancelled) {
+      if (deleteOnStop()) {
+        await _extractor.cancel(record.id);
+        await _deleteStaging(rootPath, record.id);
+        await _repository.deleteRecord(record.id);
+        _emit(current.copyWith(status: DownloadStatus.canceled));
+        return;
+      }
+      await _apply(
+        current,
+        status: readStopStatus() == DownloadStatus.interrupted
+            ? DownloadStatus.interrupted
+            : DownloadStatus.paused,
+      );
+      return;
+    }
 
     // The page URL is the durable identity: it must be http(s) or the job is
     // refused before anything reaches the engine (§15.11 argument safety).
@@ -134,6 +152,8 @@ class ExtractorDownloadRunner {
           :final phase,
           :final bytesDone,
           :final bytesTotal,
+          :final speedBps,
+          :final etaSeconds,
         ):
           current = await _apply(
             current,
@@ -144,6 +164,8 @@ class ExtractorDownloadRunner {
             },
             downloaded: bytesDone,
             size: bytesTotal,
+            speedBytesPerSecond: speedBps,
+            etaSeconds: etaSeconds,
           );
         case ExtractorDone(:final stagedPath, :final sizeBytes):
           reachedTerminal = true;
@@ -153,6 +175,7 @@ class ExtractorDownloadRunner {
             destination: destination,
             stagedPath: stagedPath,
             sizeBytes: sizeBytes,
+            stopStatus: readStopStatus,
           );
         case ExtractorFailed(:final error):
           reachedTerminal = true;
@@ -167,6 +190,8 @@ class ExtractorDownloadRunner {
         await _deleteStaging(rootPath, record.id);
         await _repository.deleteRecord(record.id);
         _emit(current.copyWith(status: DownloadStatus.canceled));
+      } else if (readStopStatus() == DownloadStatus.interrupted) {
+        await _apply(current, status: DownloadStatus.interrupted);
       } else {
         // Pause keeps the staged partial; resume re-extracts the same job.
         await _apply(current, status: DownloadStatus.paused);
@@ -213,6 +238,7 @@ class ExtractorDownloadRunner {
     required DownloadDestination destination,
     required String stagedPath,
     int? sizeBytes,
+    required DownloadStatus? Function() stopStatus,
   }) async {
     final saving = await _apply(record, status: DownloadStatus.saving);
     final result = await _publisherFor(rootPath).publish(
@@ -252,6 +278,9 @@ class ExtractorDownloadRunner {
       case Err(:final error):
         // Keep staging: the bytes are downloaded, only the publish failed, so a
         // retry re-publishes rather than re-downloading (§15.7).
+        if (stopStatus() == DownloadStatus.interrupted) {
+          return _apply(saving, status: DownloadStatus.interrupted);
+        }
         return _fail(saving, error);
     }
   }
@@ -266,6 +295,8 @@ class ExtractorDownloadRunner {
     String? storedUri,
     String? videoItemId,
     String? errorCode,
+    int? speedBytesPerSecond,
+    int? etaSeconds,
   }) async {
     final updated = base.copyWith(
       status: status ?? base.status,
@@ -279,7 +310,11 @@ class ExtractorDownloadRunner {
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
     await _repository.update(updated);
-    _emit(updated);
+    _emit(
+      updated,
+      speedBytesPerSecond: speedBytesPerSecond,
+      etaSeconds: etaSeconds,
+    );
     return updated;
   }
 

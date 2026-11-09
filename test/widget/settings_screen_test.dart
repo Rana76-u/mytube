@@ -19,6 +19,8 @@ import 'package:mytube/domain/services/library_refresh_service_provider.dart';
 import 'package:mytube/features/settings/settings_screen.dart';
 import 'package:mytube/platform/platform_providers.dart';
 import 'package:mytube/platform/saf_bridge.dart';
+import 'package:mytube/platform/extractor/extractor_providers.dart';
+import 'package:mytube/platform/extractor/fake_media_extractor.dart';
 
 /// In-memory SAF bridge so the screen never hits a MethodChannel.
 class FakeSafBridge implements SafBridge {
@@ -73,6 +75,9 @@ Widget _harness(
       // Scope changes trigger an immediate library rescan; stub it so the
       // screen never builds the real adapter/bridge pipeline in widget tests.
       libraryRefreshServiceProvider.overrideWith(() => refresh),
+      // The downloads section reads extractor status; provide a fake so the
+      // screen never hits the MethodChannel in widget tests.
+      mediaExtractorProvider.overrideWithValue(FakeMediaExtractor()),
       // The cache row measures storage on first build. Widget tests run in a
       // fake-async zone where the real `path_provider` channel never answers,
       // so every harness gets a cache that resolves to "unavailable" unless
@@ -213,6 +218,18 @@ void main() {
       addTearDown(db.close);
     });
 
+    /// The settings screen now also hosts the Downloads section, which has its
+    /// own switches, so the scan toggle must be located by its title.
+    Finder scanSwitch() => find.descendant(
+      of: find.byWidgetPredicate(
+        (widget) =>
+            widget is SwitchListTile &&
+            widget.title is Text &&
+            (widget.title as Text).data == 'Scan entire device',
+      ),
+      matching: find.byType(Switch),
+    );
+
     testWidgets('renders whole-device toggle on by default and empty folders', (
       tester,
     ) async {
@@ -220,8 +237,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Scan entire device'), findsOneWidget);
-      expect(find.byType(Switch), findsOneWidget);
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      expect(scanSwitch(), findsOneWidget);
+      expect(tester.widget<Switch>(scanSwitch()).value, isTrue);
       expect(find.text('No folders added yet.'), findsOneWidget);
       expect(find.text('Add folder'), findsOneWidget);
     });
@@ -232,10 +249,10 @@ void main() {
       await tester.pumpWidget(_harness(db, saf, refresh));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(Switch));
+      await tester.tap(scanSwitch());
       await tester.pumpAndSettle();
 
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(tester.widget<Switch>(scanSwitch()).value, isFalse);
       expect(refresh.refreshCalls, 1);
       expect(
         await db.appPreferencesDao.getBool(
@@ -254,7 +271,17 @@ void main() {
       await tester.pumpWidget(_harness(db, saf, refresh));
       await tester.pumpAndSettle();
 
-      expect(find.text('Movies'), findsOneWidget);
+      // The SAF folder row shows the decoded name with the raw URI as subtitle.
+      final moviesRow = find.byWidgetPredicate(
+        (widget) =>
+            widget is ListTile &&
+            widget.subtitle is Text &&
+            (widget.subtitle as Text).data == _moviesUri,
+      );
+      expect(
+        find.descendant(of: moviesRow, matching: find.text('Movies')),
+        findsOneWidget,
+      );
       expect(find.byTooltip('Remove folder'), findsOneWidget);
     });
 
@@ -269,7 +296,15 @@ void main() {
 
       expect(saf.released, [_moviesUri]);
       expect(refresh.refreshCalls, 1);
-      expect(find.text('Movies'), findsNothing);
+      // The SAF folder row is gone; the Downloads section may still show its
+      // own "Movies" destination label, so check the folder row specifically.
+      final moviesRow = find.byWidgetPredicate(
+        (widget) =>
+            widget is ListTile &&
+            widget.subtitle is Text &&
+            (widget.subtitle as Text).data == _moviesUri,
+      );
+      expect(moviesRow, findsNothing);
       expect(find.text('No folders added yet.'), findsOneWidget);
     });
 
@@ -284,7 +319,17 @@ void main() {
       await tester.tap(find.text('Add folder'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Movies'), findsOneWidget);
+      // The newly added SAF folder row shows the decoded name with the URI subtitle.
+      final moviesRow = find.byWidgetPredicate(
+        (widget) =>
+            widget is ListTile &&
+            widget.subtitle is Text &&
+            (widget.subtitle as Text).data == _moviesUri,
+      );
+      expect(
+        find.descendant(of: moviesRow, matching: find.text('Movies')),
+        findsOneWidget,
+      );
       expect(refresh.refreshCalls, 1);
       expect(
         find.text('Folder added to scan locations.'),
@@ -312,7 +357,7 @@ void main() {
       await tester.pumpWidget(_harness(db, saf, gated));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(Switch));
+      await tester.tap(scanSwitch());
       await tester.pump();
 
       expect(gated.refreshCalls, 1);
@@ -350,6 +395,15 @@ void main() {
       addTearDown(db.close);
     });
 
+    Future<void> scrollTo(WidgetTester tester, Finder target) async {
+      await tester.scrollUntilVisible(
+        target,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+    }
+
     testWidgets('shows the measured cache size and preview count', (
       tester,
     ) async {
@@ -364,6 +418,7 @@ void main() {
         _harness(db, saf, refresh, cacheController: () => controller),
       );
       await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Storage & cache'));
 
       expect(find.text('Storage & cache'), findsOneWidget);
       expect(find.text('Cache size'), findsOneWidget);
@@ -378,11 +433,17 @@ void main() {
     testWidgets('an unavailable cache states that nothing is cached', (
       tester,
     ) async {
-      // Real controller, cache disabled: a widget test has no device storage.
+      // Stub controller with an empty, non-measuring state: widget tests have
+      // no device storage, so the real controller's async load can't settle.
+      final controller = _StubCacheController(
+        const CacheState(usage: CacheUsage.empty, measuring: false),
+      );
+
       await tester.pumpWidget(
-        _harness(db, saf, refresh, cache: _noDiskCache()),
+        _harness(db, saf, refresh, cacheController: () => controller),
       );
       await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Nothing cached yet.'));
 
       expect(find.text('Nothing cached yet.'), findsOneWidget);
       expect(find.byTooltip('Measure cache again'), findsOneWidget);
@@ -403,12 +464,12 @@ void main() {
         _harness(db, saf, refresh, cacheController: () => controller),
       );
       await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Nothing cached yet.'));
       expect(find.text('Nothing cached yet.'), findsOneWidget);
 
       // Scrolled into view first: the settings list is longer than the test
       // viewport, so the cache rows can sit below the fold.
-      await tester.ensureVisible(find.byTooltip('Measure cache again'));
-      await tester.pumpAndSettle();
+      await scrollTo(tester, find.byTooltip('Measure cache again'));
       await tester.tap(find.byTooltip('Measure cache again'));
       await tester.pumpAndSettle();
 
@@ -427,14 +488,14 @@ void main() {
         _harness(db, saf, refresh, cacheController: () => controller),
       );
       await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Cache limit'));
 
       expect(find.text('Cache limit'), findsOneWidget);
       expect(find.text(CacheLimit.defaultLimit.label), findsOneWidget);
 
       // Scrolled into view first: the settings list is longer than the test
       // viewport, so the trailing dropdown can sit below the fold.
-      await tester.ensureVisible(find.byType(DropdownButton<CacheLimit>));
-      await tester.pumpAndSettle();
+      await scrollTo(tester, find.byType(DropdownButton<CacheLimit>));
       await tester.tap(find.byType(DropdownButton<CacheLimit>));
       await tester.pumpAndSettle();
       // The menu shows every offered budget; pick the 1 GB option.
@@ -463,8 +524,7 @@ void main() {
 
         // The cache section is the last group in the list, so bring the
         // action into the viewport before tapping it.
-        await tester.ensureVisible(find.text('Clear cache'));
-        await tester.pumpAndSettle();
+        await scrollTo(tester, find.text('Clear cache'));
         await tester.tap(find.text('Clear cache'));
         await tester.pumpAndSettle();
         expect(find.text('Clear cache?'), findsOneWidget);
@@ -491,8 +551,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('Clear cache'));
-      await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Clear cache'));
       await tester.tap(find.text('Clear cache'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
@@ -514,8 +573,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('Clear cache'));
-      await tester.pumpAndSettle();
+      await scrollTo(tester, find.text('Clear cache'));
       final tile = tester.widget<ListTile>(
         find.ancestor(
           of: find.text('Clear cache'),

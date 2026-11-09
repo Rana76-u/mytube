@@ -9,7 +9,7 @@ import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/download_preset.dart';
 import 'package:mytube/domain/models/web_media.dart';
 import 'package:mytube/domain/repositories/download_repository.dart';
-import 'package:mytube/domain/services/link_extraction.dart';
+import 'package:mytube/domain/services/clipboard_link_policy.dart';
 import 'package:mytube/features/downloads/clipboard_watcher.dart';
 import 'package:mytube/features/downloads/download_flow_coordinator.dart';
 import 'package:mytube/features/downloads/download_preset_notifier.dart';
@@ -18,6 +18,8 @@ import 'package:mytube/features/downloads/share_intake_coordinator.dart';
 import 'package:mytube/features/downloads/ui/clipboard_prompt_sheet.dart';
 import 'package:mytube/features/downloads/ui/download_from_link_sheet.dart';
 import 'package:mytube/features/downloads/ui/download_options_sheet.dart';
+import 'package:mytube/features/downloads/ui/downloads_screen.dart';
+import 'package:mytube/features/downloads/ui/link_probe_progress_dialog.dart';
 import 'package:mytube/features/downloads/web_link_enqueue.dart';
 import 'package:mytube/features/library/library_actions.dart';
 import 'package:mytube/platform/extractor/extractor_providers.dart';
@@ -31,16 +33,16 @@ abstract final class DownloadIntakeHost {
   static final _share = ShareIntakeCoordinator();
   static bool _clipboardOpen = false;
 
-  static Future<void> consumeShare(BuildContext context, WidgetRef ref) async {
+  static Future<bool> consumeShare(BuildContext context, WidgetRef ref) async {
     String? text;
     try {
       text = await ref.read(shareIntakeBridgeProvider).consumeShareText();
     } catch (_) {
-      return;
+      return false;
     }
-    if (text == null || !context.mounted) return;
+    if (text == null || !context.mounted) return false;
     await ref.read(shareIntakeBridgeProvider).clearPendingShareText();
-    if (!context.mounted) return;
+    if (!context.mounted) return true;
 
     final queued = await _queuedUrls(ref);
     final result = _share.handleShareText(
@@ -48,7 +50,7 @@ abstract final class DownloadIntakeHost {
       queueCount: queued.length,
       now: DateTime.now(),
     );
-    if (!context.mounted) return;
+    if (!context.mounted) return true;
     switch (result.status) {
       case ShareIntakeStatus.accepted when result.link != null:
         await startDownload(
@@ -65,14 +67,14 @@ abstract final class DownloadIntakeHost {
       case ShareIntakeStatus.accepted:
         break;
     }
+    return true;
   }
 
   static Future<void> onAppResumed(BuildContext context, WidgetRef ref) async {
     final preset = ref.read(downloadPresetProvider);
     if (!preset.clipboardDetect) return;
     var decision = await _probeClipboard(ref, preset);
-    if ((decision == null ||
-            decision.decision == ClipboardDecision.ignore) &&
+    if ((decision == null || decision.decision == ClipboardDecision.ignore) &&
         context.mounted) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (!context.mounted) return;
@@ -90,7 +92,10 @@ abstract final class DownloadIntakeHost {
     }
   }
 
-  static Future<void> openPasteSheet(BuildContext context, WidgetRef ref) async {
+  static Future<void> openPasteSheet(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
     final url = await showDownloadFromLinkSheet(context);
     if (url == null || !context.mounted) return;
     await startDownload(
@@ -106,6 +111,7 @@ abstract final class DownloadIntakeHost {
     WidgetRef ref, {
     required String rawText,
     required DownloadIntakeOrigin origin,
+    String? videoItemId,
   }) async {
     await _ensureNotice(context, ref);
     if (!context.mounted) return;
@@ -130,7 +136,13 @@ abstract final class DownloadIntakeHost {
     final link = flow.link;
     if (link == null) return;
 
-    final info = await _probe(context, ref, link.url);
+    final info = await _probe(
+      context,
+      ref,
+      link.url,
+      rawText: rawText,
+      origin: origin,
+    );
     if (!context.mounted || info == null) return;
 
     var preset = ref.read(downloadPresetProvider);
@@ -158,11 +170,12 @@ abstract final class DownloadIntakeHost {
       manager: ref.read(downloadManagerProvider),
       info: info,
       preset: preset,
+      videoItemId: videoItemId,
     );
     if (!context.mounted) return;
     switch (started) {
       case Ok():
-        _snack(context, 'Download started.');
+        _showDownloadStarted(context);
       case Err(:final error):
         await _showError(context, ref, error, rawText: rawText, origin: origin);
     }
@@ -229,20 +242,64 @@ abstract final class DownloadIntakeHost {
   static Future<WebMediaInfo?> _probe(
     BuildContext context,
     WidgetRef ref,
-    Uri url,
-  ) async {
+    Uri url, {
+    required String rawText,
+    required DownloadIntakeOrigin origin,
+  }) async {
     final token = CancellationToken();
-    final result = await ref
+    final probe = ref
         .read(mediaExtractorProvider)
         .probe(url, cancellationToken: token);
-    if (!context.mounted) return null;
+    final result = await showDialog<Result<WebMediaInfo>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => LinkProbeProgressDialog(
+        host: url.host,
+        probe: probe,
+        onCancel: () {
+          token.cancel();
+          Navigator.pop(dialogContext);
+        },
+      ),
+    );
+    if (!context.mounted || result == null) return null;
     switch (result) {
       case Ok(:final value):
         return value;
       case Err(:final error):
-        await _showError(context, ref, error);
+        if (error is DownloadCancelledError) return null;
+        final displayError = error is UnexpectedError
+            ? UnexpectedError(
+                userMessage:
+                    'Could not read video details from this link. Check your '
+                    'connection and try again.',
+                diagnosticMessage: error.diagnosticMessage,
+                cause: error.cause,
+              )
+            : error;
+        await _showError(
+          context,
+          ref,
+          displayError,
+          rawText: rawText,
+          origin: origin,
+        );
         return null;
     }
+  }
+
+  static void _showDownloadStarted(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Download added to the queue.'),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const DownloadsScreen()),
+          ),
+        ),
+      ),
+    );
   }
 
   static Future<List<String>> _queuedUrls(WidgetRef ref) async {
@@ -308,7 +365,7 @@ abstract final class DownloadIntakeHost {
   }) async {
     if (!context.mounted) return;
     final retry = rawText != null && origin != null;
-    await showDialog<void>(
+    await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Could not download'),

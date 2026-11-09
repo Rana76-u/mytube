@@ -212,7 +212,9 @@ class DownloadPresetNotifier extends Notifier<DownloadPreset> {
             ),
           );
         }
-        await patch((p) => p.copyWith(destination: PickedFolderDestination(parsed)));
+        await patch(
+          (p) => p.copyWith(destination: PickedFolderDestination(parsed)),
+        );
         return Result.ok(null);
       case Ok():
         return Result.ok(null);

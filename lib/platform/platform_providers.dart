@@ -3,6 +3,8 @@ import 'package:mytube/platform/audio_focus_bridge.dart';
 import 'package:mytube/platform/audio_focus_bridge_impl.dart';
 import 'package:mytube/platform/clipboard_probe_bridge.dart';
 import 'package:mytube/platform/clipboard_probe_bridge_impl.dart';
+import 'package:mytube/platform/download_service_bridge.dart';
+import 'package:mytube/platform/download_service_bridge_impl.dart';
 import 'package:mytube/platform/http_remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/media_session_bridge.dart';
 import 'package:mytube/platform/media_session_bridge_impl.dart';
@@ -105,3 +107,11 @@ final shareIntakeBridgeProvider = Provider<ShareIntakeBridge>(
 final clipboardProbeBridgeProvider = Provider<ClipboardProbeBridge>(
   (ref) => ClipboardProbeBridgeImpl(),
 );
+
+/// Android foreground-service bridge for active downloads. Missing plugins
+/// degrade to no-ops on non-Android hosts.
+final downloadServiceBridgeProvider = Provider<DownloadServiceBridge>((ref) {
+  final bridge = DownloadServiceBridgeImpl();
+  ref.onDispose(bridge.dispose);
+  return bridge;
+});

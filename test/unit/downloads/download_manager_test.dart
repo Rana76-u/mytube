@@ -220,6 +220,42 @@ void main() {
       expect(progresses, contains(8));
     });
 
+    test('reports live transfer speed and ETA on progress events', () async {
+      final transport = ManualTransport(List<int>.generate(12, (i) => i));
+      final manager = buildManager(transport);
+      addTearDown(manager.dispose);
+      final events = <DownloadEvent>[];
+      final sub = manager.events.listen(events.add);
+      addTearDown(sub.cancel);
+
+      final started = await manager.start(req(sizeBytes: 12));
+      final id = (started as Ok<DownloadRecord>).value.id;
+      await pumpUntil(() => transport.calls.isNotEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      transport.emit([0, 1, 2, 3]);
+      await pumpUntil(
+        () => events.any(
+          (event) =>
+              event.record.status == DownloadStatus.running &&
+              event.speedBytesPerSecond != null &&
+              event.etaSeconds != null,
+        ),
+      );
+
+      final progressEvent = events.lastWhere(
+        (event) =>
+            event.record.status == DownloadStatus.running &&
+            event.speedBytesPerSecond != null &&
+            event.etaSeconds != null,
+      );
+      expect(progressEvent.speedBytesPerSecond, greaterThan(0));
+      expect(progressEvent.etaSeconds, greaterThanOrEqualTo(0));
+
+      await manager.cancel(id);
+      transport.done();
+      await waitUntil(id, (record) => record == null);
+    });
+
     test(
       'cancel mid-transfer deletes the .part file and removes the record',
       () async {
@@ -326,6 +362,59 @@ void main() {
       expect(await finalFile.readAsBytes(), bytes); // truncated + rewritten
     });
 
+    test('ignored range restart reports non-negative live telemetry', () async {
+      final bytes = List<int>.generate(12, (i) => i);
+      final transport = ManualTransport(bytes, supportsRange: false);
+      final manager = buildManager(transport);
+      addTearDown(manager.dispose);
+      final events = <DownloadEvent>[];
+      final subscription = manager.events.listen(events.add);
+      addTearDown(subscription.cancel);
+
+      final seeded = DownloadRecord(
+        id: 'seed',
+        videoItemId: 'item-1',
+        providerType: ProviderType.directUrl,
+        sourceUri: 'https://example.com/video.mp4',
+        fileName: 'seed_video.mp4',
+        sizeBytes: bytes.length,
+        downloadedBytes: 4,
+        status: DownloadStatus.paused,
+        acceptsRange: true,
+        createdAt: 1,
+        updatedAt: 1,
+      );
+      await repo.insert(seeded);
+      await File(
+        p.join(root.path, 'seed_video.mp4.part'),
+      ).writeAsBytes(bytes.sublist(0, 4));
+
+      await manager.resume('seed');
+      await pumpUntil(() => transport.calls.isNotEmpty);
+      expect(transport.calls.single.startBytes, 4);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      transport.emit(bytes.sublist(0, 4));
+      await pumpUntil(
+        () => events.any(
+          (event) =>
+              event.record.status == DownloadStatus.running &&
+              event.record.downloadedBytes == 4 &&
+              event.speedBytesPerSecond != null,
+        ),
+      );
+
+      final progressEvent = events.lastWhere(
+        (event) =>
+            event.record.status == DownloadStatus.running &&
+            event.record.downloadedBytes == 4 &&
+            event.speedBytesPerSecond != null,
+      );
+      expect(progressEvent.speedBytesPerSecond, greaterThan(0));
+      expect(progressEvent.etaSeconds, greaterThanOrEqualTo(0));
+      transport.done();
+      await waitUntil('seed', (record) => record != null && record.isComplete);
+    });
+
     test(
       'a transport failure marks the download failed (keeps partial)',
       () async {
@@ -407,7 +496,7 @@ void main() {
         final manager = buildManager(AutoTransport(const <int>[]));
         addTearDown(manager.dispose);
 
-        // (a) running + resumable + surviving .part → becomes paused, part kept.
+        // (a) running + resumable + surviving .part → interrupted, part kept.
         await repo.insert(
           DownloadRecord(
             id: 'resumable',
@@ -453,7 +542,7 @@ void main() {
         expect((removed as Ok<int>).value, 1);
 
         final resumable = await record('resumable');
-        expect(resumable.status, DownloadStatus.paused);
+        expect(resumable.status, DownloadStatus.interrupted);
         expect(
           await File(p.join(root.path, 'resumable_a.mp4.part')).exists(),
           isTrue,
@@ -466,6 +555,39 @@ void main() {
           await File(p.join(root.path, 'orphan.mp4.part')).exists(),
           isFalse,
         );
+      },
+    );
+
+    test(
+      'interruptAll persists interrupted and preserves resumable partials',
+      () async {
+        final transport = ManualTransport(List<int>.generate(12, (i) => i));
+        final manager = buildManager(transport);
+        addTearDown(manager.dispose);
+        var downloadedBytes = 0;
+        var interruptedEvents = 0;
+        final events = manager.events.listen((event) {
+          downloadedBytes = event.record.downloadedBytes;
+          if (event.record.status == DownloadStatus.interrupted) {
+            interruptedEvents++;
+          }
+        });
+        addTearDown(events.cancel);
+
+        final started = await manager.start(req(sizeBytes: 12));
+        final record0 = (started as Ok<DownloadRecord>).value;
+        await pumpUntil(() => transport.calls.isNotEmpty);
+        transport.emit([0, 1, 2, 3]);
+        await pumpUntil(() => downloadedBytes == 4);
+
+        expect(await manager.interruptAll(), isA<Ok<void>>());
+        expect((await record(record0.id)).status, DownloadStatus.interrupted);
+        transport.done();
+        await pumpUntil(() => interruptedEvents >= 2);
+
+        final partial = File(p.join(root.path, '${record0.fileName}.part'));
+        expect(await partial.exists(), isTrue);
+        expect(await partial.readAsBytes(), [0, 1, 2, 3]);
       },
     );
   });

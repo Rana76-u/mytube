@@ -17,12 +17,22 @@ final _item = VideoItemSummary(
   primaryProvider: ProviderType.directUrl,
 );
 
+final _webLinkItem = VideoItemSummary(
+  id: VideoItemId('v1'),
+  title: 'Clip',
+  isFavourite: false,
+  watchProgressMs: 0,
+  createdAt: 0,
+  primaryProvider: ProviderType.webLink,
+);
+
 /// Builds a bootstrapped controller over fakes and pumps the pill with the
 /// provider overridden to return it, so rendering and tap wiring are tested
 /// without the real persistence / transport graph.
 Future<DownloadController> _pumpPill(
   WidgetTester tester, {
   required List<SourceLocation>? locations,
+  VideoItemSummary? item,
   List<DownloadRecord> existing = const [],
   bool online = true,
 }) async {
@@ -44,7 +54,7 @@ Future<DownloadController> _pumpPill(
         downloadControllerProvider.overrideWith((ref, arg) => controller),
       ],
       child: MaterialApp(
-        home: Scaffold(body: DownloadPill(item: _item)),
+        home: Scaffold(body: DownloadPill(item: item ?? _item)),
       ),
     ),
   );
@@ -90,12 +100,19 @@ void main() {
     });
 
     testWidgets('completed shows "Downloaded"', (tester) async {
-      await _pumpPill(
+      final controller = await _pumpPill(
         tester,
         locations: [loc()],
         existing: [rec(status: DownloadStatus.completed, downloaded: 100)],
       );
       expect(find.text('Downloaded'), findsOneWidget);
+      expect(
+        tester.widget<ActionChip>(find.byKey(DownloadPill.pillKey)).onPressed,
+        isNull,
+        reason:
+            'deleting a completed file belongs in the confirmed list action',
+      );
+      expect(controller.status, DownloadPillStatus.completed);
     });
 
     testWidgets('failed shows "Retry"', (tester) async {
@@ -113,6 +130,23 @@ void main() {
       final chip = tester.widget<ActionChip>(find.byKey(DownloadPill.pillKey));
       expect(chip.onPressed, isNull, reason: 'offline disables a fresh start');
       expect(find.text('Download'), findsOneWidget);
+    });
+
+    testWidgets('web-link items expose the DL6 download flow action', (
+      tester,
+    ) async {
+      final controller = await _pumpPill(
+        tester,
+        locations: [loc(p: ProviderType.webLink)],
+        item: _webLinkItem,
+      );
+
+      expect(controller.providerType, ProviderType.webLink);
+      expect(controller.sourceUri, 'https://example.com/v.mp4');
+      expect(
+        tester.widget<ActionChip>(find.byKey(DownloadPill.pillKey)).onPressed,
+        isNotNull,
+      );
     });
   });
 }

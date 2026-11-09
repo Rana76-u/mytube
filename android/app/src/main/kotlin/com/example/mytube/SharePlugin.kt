@@ -79,6 +79,16 @@ class SharePlugin :
                 }
                 result.success(share(rawUri, mimeType))
             }
+            "openFile" -> {
+                val args = call.arguments as? Map<*, *>
+                val rawUri = args?.get("uri") as? String
+                val mimeType = (args?.get("mimeType") as? String)
+                if (rawUri.isNullOrBlank() || mimeType.isNullOrBlank()) {
+                    result.success(false)
+                    return
+                }
+                result.success(openFile(rawUri, mimeType))
+            }
             else -> result.notImplemented()
         }
     }
@@ -99,6 +109,23 @@ class SharePlugin :
             }
             val chooser = Intent.createChooser(send, null)
             current.startActivity(chooser)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Opens a local media URI in an app that handles its MIME type. */
+    private fun openFile(rawUri: String, mimeType: String): Boolean {
+        val current = activity ?: return false
+        return runCatching {
+            val fileUri = when {
+                rawUri.startsWith("file://") -> fileToContentUri(rawUri) ?: return false
+                else -> Uri.parse(rawUri)
+            }
+            val view = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(fileUri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            current.startActivity(view)
             true
         }.getOrDefault(false)
     }

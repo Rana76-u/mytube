@@ -107,7 +107,13 @@ class ExtractorPlugin :
                 runEngine(result) {
                     val args = ExtractorArgsBuilder.buildProbe(url)
                     val response = executeArgs(url, args, processId, null)
-                    mapOf("json" to response.out)
+                    mapOf(
+                        "json" to ExtractorProbeResponse.json(
+                            response.exitCode,
+                            response.out,
+                            response.err,
+                        ),
+                    )
                 }
             }
             "resolveStream" -> {

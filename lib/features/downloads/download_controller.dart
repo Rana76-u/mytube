@@ -85,6 +85,8 @@ class DownloadController extends ChangeNotifier {
   bool _bootstrapped = false;
 
   DownloadPillStatus get status => _status;
+  ProviderType? get providerType => _providerType;
+  String? get sourceUri => _sourceUri;
 
   /// Whether the pill should accept a tap. A download already in flight or on
   /// disk is independent of connectivity; only a *fresh* start needs a network,
