@@ -17,6 +17,8 @@ import 'package:mytube/domain/services/cache_controller.dart';
 import 'package:mytube/domain/services/library_refresh_service.dart';
 import 'package:mytube/domain/services/library_refresh_service_provider.dart';
 import 'package:mytube/features/settings/settings_screen.dart';
+import 'package:mytube/sources/google_drive/google_drive_providers.dart';
+import 'package:mytube/sources/onedrive/onedrive_providers.dart';
 import 'package:mytube/platform/platform_providers.dart';
 import 'package:mytube/platform/saf_bridge.dart';
 import 'package:mytube/platform/extractor/extractor_providers.dart';
@@ -78,6 +80,10 @@ Widget _harness(
       // The downloads section reads extractor status; provide a fake so the
       // screen never hits the MethodChannel in widget tests.
       mediaExtractorProvider.overrideWithValue(FakeMediaExtractor()),
+      oneDriveConnectionProvider.overrideWith((ref) async => const Ok(false)),
+      googleDriveConnectionProvider.overrideWith(
+        (ref) async => const Ok(false),
+      ),
       // The cache row measures storage on first build. Widget tests run in a
       // fake-async zone where the real `path_provider` channel never answers,
       // so every harness gets a cache that resolves to "unavailable" unless
@@ -353,6 +359,10 @@ void main() {
 
     testWidgets('a running scan shows its phase, ticking elapsed time and a '
         'cancel action', (tester) async {
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final gated = _GatedRefresh();
       await tester.pumpWidget(_harness(db, saf, gated));
       await tester.pumpAndSettle();
@@ -372,6 +382,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       expect(find.textContaining('·  2s'), findsOneWidget);
 
+      await tester.ensureVisible(find.text('Cancel'));
       await tester.tap(find.text('Cancel'));
       await tester.pump();
       expect(gated.cancelCalls, 1);

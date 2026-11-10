@@ -258,6 +258,12 @@ String _removalExplanation(ItemRemovalPlan plan) {
       'This permanently deletes ${_fileCount(plan.originalCount)} from '
       '${_providerPhrase(plan.deletingProviders)}. It cannot be undone.',
     );
+    for (final location in plan.originalsToDelete) {
+      buffer.write(
+        '\n\n• ${_originalName(location)} '
+        '(${_originalProviderLabel(location.providerType)})',
+      );
+    }
   } else {
     buffer.write(
       'This removes the video from your library. Nothing is deleted from its '
@@ -283,6 +289,33 @@ String _removalExplanation(ItemRemovalPlan plan) {
   return buffer.toString();
 }
 
+String _originalName(SourceLocation location) {
+  final displayName = location.displayName?.trim();
+  if (displayName != null && displayName.isNotEmpty) {
+    return displayName.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), ' ');
+  }
+  final uri = Uri.tryParse(location.sourceUri);
+  final pathSegments = uri?.pathSegments ?? const <String>[];
+  final lastSegment = pathSegments.isEmpty ? '' : pathSegments.last;
+  if (lastSegment.isNotEmpty) return lastSegment;
+  return switch (location.providerType) {
+    ProviderType.googleDrive => 'Google Drive file ${location.sourceUri}',
+    ProviderType.oneDrive => 'OneDrive file',
+    ProviderType.cloudflareR2 => 'Cloudflare R2 file',
+    _ => 'Video file',
+  };
+}
+
+String _originalProviderLabel(ProviderType type) => switch (type) {
+  ProviderType.localMediaStore => 'This device',
+  ProviderType.selectedFolder => 'Selected folder',
+  ProviderType.directUrl => 'Direct URL',
+  ProviderType.webLink => 'Web link',
+  ProviderType.oneDrive => 'OneDrive',
+  ProviderType.googleDrive => 'Google Drive',
+  ProviderType.cloudflareR2 => 'Cloudflare R2',
+};
+
 /// What the removal actually did, so a partial delete is never reported as a
 /// success (ADR-017).
 String _removalMessage(ItemRemovalOutcome outcome) {
@@ -290,15 +323,24 @@ String _removalMessage(ItemRemovalOutcome outcome) {
     return 'Removed from library.';
   }
   if (outcome.nothingDeleted) {
-    return "Removed from library. The file couldn't be deleted, so it may still "
-        'be on your device.';
+    const message =
+        "Removed from library. The file couldn't be deleted. It may still "
+        'exist at its source.';
+    return _withFailureMessage(message, outcome.failureMessage);
   }
   if (outcome.isPartial) {
     final total = outcome.deletedOriginals + outcome.undeletedOriginals;
-    return 'Removed from library. ${outcome.undeletedOriginals} of $total files '
+    final message =
+        'Removed from library. ${outcome.undeletedOriginals} of $total files '
         "couldn't be deleted.";
+    return _withFailureMessage(message, outcome.failureMessage);
   }
   return 'Video and ${_fileCount(outcome.deletedOriginals)} deleted.';
+}
+
+String _withFailureMessage(String message, String? failureMessage) {
+  final details = failureMessage?.trim();
+  return details == null || details.isEmpty ? message : '$message $details';
 }
 
 /// `1 file` / `3 files`, so every message reads naturally.

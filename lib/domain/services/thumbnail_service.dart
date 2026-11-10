@@ -7,6 +7,9 @@ import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/platform/remote_thumbnail_fetcher.dart';
 import 'package:mytube/platform/thumbnail_bridge.dart';
 
+typedef ProviderThumbnailFetcher =
+    Future<Result<Uint8List>> Function(String sourceId);
+
 /// Resolves and fetches preview images for library items (P7-01/P7-02/P7-03,
 /// LIB-007, ARCHITECTURE §10).
 ///
@@ -46,6 +49,8 @@ class ThumbnailService {
     ThumbnailDiskCache? diskCache,
     int cacheLimit = defaultCacheLimit,
     Map<String, String> Function(SourceLocation location)? networkHeaders,
+    Map<ProviderType, ProviderThumbnailFetcher> providerThumbnailFetchers =
+        const {},
   }) : _repository = repository, // ignore: prefer_initializing_formals
        // ignore: prefer_initializing_formals
        _bridge = bridge,
@@ -56,7 +61,9 @@ class ThumbnailService {
        // ignore: prefer_initializing_formals
        _cacheLimit = cacheLimit,
        // ignore: prefer_initializing_formals
-       _networkHeaders = networkHeaders;
+       _networkHeaders = networkHeaders,
+       // ignore: prefer_initializing_formals
+       _providerThumbnailFetchers = providerThumbnailFetchers;
 
   final VideoRepository _repository;
   final ThumbnailBridge _bridge;
@@ -72,6 +79,9 @@ class ThumbnailService {
   /// (P4-10), so a preview is fetched under the same identity as playback.
   /// `null` means anonymous — local and future tokenless sources.
   final Map<String, String> Function(SourceLocation location)? _networkHeaders;
+
+  final Map<ProviderType, ProviderThumbnailFetcher>
+  _providerThumbnailFetchers;
 
   /// Default number of decoded previews kept for the session — roughly a
   /// few screenfuls of grid tiles.
@@ -265,6 +275,10 @@ class ThumbnailService {
         return _bytesOrNull(
           await _bridge.getThumbnail(ref.key, maxSidePx: decodeMaxSidePx),
         );
+      case _ThumbnailKind.provider:
+        final fetcher = _providerThumbnailFetchers[location.providerType];
+        if (fetcher == null) return null;
+        return _bytesOrNull(await fetcher(location.sourceUri));
       case _ThumbnailKind.frame:
         return _bytesOrNull(
           await _bridge.getNetworkThumbnail(
@@ -360,6 +374,9 @@ class ThumbnailService {
   /// or `null` when the scheme is not thumbnail-able (e.g. a bare provider
   /// id we do not know how to decode yet).
   static _ThumbnailRef? _resolveRef(SourceLocation location) {
+    if (location.providerType == ProviderType.googleDrive) {
+      return _ThumbnailRef._(location.sourceUri, _ThumbnailKind.provider);
+    }
     final stored = location.thumbnailUri;
     if (stored != null && stored.isNotEmpty) {
       return _ThumbnailRef.of(stored);
@@ -376,6 +393,9 @@ enum _ThumbnailKind {
 
   /// A URL of a *preview image* the app downloads (a provider's poster).
   poster,
+
+  /// A stable provider identity that is resolved through its authenticated API.
+  provider,
 
   /// A playback URL whose frame the native bridge grabs over HTTP (P4-10).
   frame,
@@ -397,6 +417,7 @@ class _ThumbnailRef {
   /// plain URL (which is also how earlier releases cached it).
   String cacheKey(int maxSidePx) => switch (kind) {
     _ThumbnailKind.poster => key,
+    _ThumbnailKind.provider => '$key#provider',
     _ThumbnailKind.local => '$key@${maxSidePx}px',
     // `#frame` keeps a decoded frame from colliding with a poster that
     // happens to be stored under the same URL.

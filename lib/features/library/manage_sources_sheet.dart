@@ -6,6 +6,7 @@ import 'package:mytube/domain/models/app_error.dart';
 import 'package:mytube/domain/models/availability_state.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/availability_check_service_provider.dart';
+import 'package:mytube/sources/google_drive/google_drive_providers.dart';
 
 /// Bottom sheet listing every source location of one logical video item,
 /// with primary selection and availability retry actions (P7-06/P7-07,
@@ -131,6 +132,59 @@ class _ManageSourcesSheetState extends ConsumerState<ManageSourcesSheet> {
     }
   }
 
+  Future<void> _rename(SourceLocation location) async {
+    if (_busy) return;
+    var requestedName = location.displayName ?? '';
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Rename Google Drive file'),
+          content: TextFormField(
+            key: ValueKey('google_drive_rename_input_${location.id}'),
+            autofocus: true,
+            initialValue: requestedName,
+            onChanged: (value) {
+              requestedName = value;
+              setDialogState(() {});
+            },
+            decoration: const InputDecoration(labelText: 'File name'),
+          ),
+          actions: [
+            TextButton(
+              key: const ValueKey('google_drive_rename_cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const ValueKey('google_drive_rename_confirm'),
+              onPressed: requestedName.trim().isEmpty
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(requestedName.trim()),
+              child: const Text('Rename'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || name == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final result = await ref
+        .read(googleDriveFileManagerProvider)
+        .rename(location, name);
+    if (!mounted) return;
+    switch (result) {
+      case Ok():
+        await _loadLocations();
+        if (mounted) setState(() => _busy = false);
+      case Err(:final error):
+        _fail(error);
+    }
+  }
+
   void _fail(AppError error) {
     setState(() {
       _error = error;
@@ -211,6 +265,9 @@ class _ManageSourcesSheetState extends ConsumerState<ManageSourcesSheet> {
                           busy: _busy,
                           onSetPrimary: () => _setPrimary(location),
                           onRecheck: () => _recheck(location),
+                          showRename:
+                              location.providerType == ProviderType.googleDrive,
+                          onRename: () => _rename(location),
                         ),
                     ],
                   ),
@@ -232,6 +289,8 @@ class _SourceRow extends StatelessWidget {
     required this.busy,
     required this.onSetPrimary,
     required this.onRecheck,
+    required this.showRename,
+    required this.onRename,
   });
 
   final SourceLocation location;
@@ -239,6 +298,8 @@ class _SourceRow extends StatelessWidget {
   final bool busy;
   final VoidCallback onSetPrimary;
   final VoidCallback onRecheck;
+  final bool showRename;
+  final VoidCallback onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -302,6 +363,14 @@ class _SourceRow extends StatelessWidget {
             visualDensity: VisualDensity.compact,
             onPressed: busy ? null : onRecheck,
           ),
+          if (showRename)
+            IconButton(
+              key: ValueKey('source_rename_${location.id}'),
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Rename in Google Drive',
+              visualDensity: VisualDensity.compact,
+              onPressed: busy ? null : onRename,
+            ),
         ],
       ),
     );

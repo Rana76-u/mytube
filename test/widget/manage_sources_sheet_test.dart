@@ -8,6 +8,8 @@ import 'package:mytube/domain/repositories/video_repository.dart';
 import 'package:mytube/domain/services/availability_check_service.dart';
 import 'package:mytube/domain/services/availability_check_service_provider.dart';
 import 'package:mytube/features/library/manage_sources_sheet.dart';
+import 'package:mytube/sources/google_drive/google_drive_file_manager.dart';
+import 'package:mytube/sources/google_drive/google_drive_providers.dart';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -37,7 +39,42 @@ class _FakeRepository implements VideoRepository {
   }
 
   @override
+  Future<Result<void>> updateSourceLocationMetadata(
+    String id, {
+    String? displayName,
+    int? durationMs,
+    AvailabilityState? availability,
+    DateTime? lastCheckedAt,
+  }) async {
+    locations = [
+      for (final location in locations)
+        if (location.id == id)
+          _copy(
+            location,
+            displayName: displayName,
+            availability: availability,
+          )
+        else
+          location,
+    ];
+    return const Ok(null);
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+class _FakeGoogleDriveFileManager implements GoogleDriveFileManager {
+  final List<(String, String)> renameCalls = [];
+
+  @override
+  Future<Result<String>> rename(
+    SourceLocation location,
+    String requestedName,
+  ) async {
+    renameCalls.add((location.sourceUri, requestedName));
+    return Ok(requestedName);
+  }
 }
 
 class _FakeAvailabilityService implements AvailabilityCheckService {
@@ -77,12 +114,13 @@ SourceLocation _copy(
   SourceLocation l, {
   bool? isPrimary,
   AvailabilityState? availability,
+  String? displayName,
 }) => SourceLocation(
   id: l.id,
   videoItemId: l.videoItemId,
   providerType: l.providerType,
   sourceUri: l.sourceUri,
-  displayName: l.displayName,
+  displayName: displayName ?? l.displayName,
   availability: availability ?? l.availability,
   lastCheckedAt: l.lastCheckedAt,
   sizeBytes: l.sizeBytes,
@@ -122,12 +160,15 @@ Future<void> _openSheet(
   WidgetTester tester, {
   required _FakeRepository repo,
   required _FakeAvailabilityService service,
+  GoogleDriveFileManager? fileManager,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         videoRepositoryProvider.overrideWith((ref) => repo),
         availabilityCheckServiceProvider.overrideWith((ref) => service),
+        if (fileManager != null)
+          googleDriveFileManagerProvider.overrideWithValue(fileManager),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -220,6 +261,41 @@ void main() {
         );
       },
     );
+
+    testWidgets('renames a Google Drive source through its file manager', (
+      tester,
+    ) async {
+      final repo = _FakeRepository([
+        _loc(
+          id: 'drive-location',
+          providerType: ProviderType.googleDrive,
+          sourceUri: 'drive-file-1',
+          displayName: 'old-name.mp4',
+        ),
+      ]);
+      final manager = _FakeGoogleDriveFileManager();
+      await _openSheet(
+        tester,
+        repo: repo,
+        service: _FakeAvailabilityService(),
+        fileManager: manager,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('source_rename_drive-location')),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('google_drive_rename_input_drive-location')),
+        'new-name.mp4',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('google_drive_rename_confirm')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(manager.renameCalls, [('drive-file-1', 'new-name.mp4')]);
+    });
 
     testWidgets('a revoked MediaStore row routes retry through the permission '
         'flow (AVAIL-002)', (tester) async {

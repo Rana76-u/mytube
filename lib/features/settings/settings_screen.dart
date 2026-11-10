@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/app/theme/theme_mode_notifier.dart';
 import 'package:mytube/core/result.dart';
 import 'package:mytube/features/settings/downloads_settings_section.dart';
+import 'package:mytube/features/settings/google_drive_settings_section.dart';
+import 'package:mytube/features/settings/onedrive_settings_section.dart';
 import 'package:mytube/core/util/format_bytes.dart';
 import 'package:mytube/domain/models/cache_limit.dart';
 import 'package:mytube/domain/services/cache_controller.dart';
@@ -104,6 +106,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return ListView(
       children: [
         const _AppearanceSection(),
+        const OneDriveSettingsSection(),
+        const GoogleDriveSettingsSection(),
         const _SettingsSectionHeader('Video scanning'),
         SwitchListTile(
           title: const Text('Scan entire device'),

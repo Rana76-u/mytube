@@ -307,6 +307,7 @@ void main() {
         report: const SourceDeletionReport(
           deleted: [_mediaStoreOne],
           failed: [_safDocument],
+          failureMessage: 'The folder is read-only.',
         ),
       );
 
@@ -321,6 +322,7 @@ void main() {
       expect(outcome.undeletedOriginals, 1);
       expect(outcome.isPartial, isTrue);
       expect(outcome.nothingDeleted, isFalse);
+      expect(outcome.failureMessage, 'The folder is read-only.');
       // The unlink still succeeds: the user asked to stop seeing the item.
       expect(repository.deletedIds, [_videoId]);
     });

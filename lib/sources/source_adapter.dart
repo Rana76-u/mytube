@@ -56,6 +56,15 @@ abstract interface class VideoSourceAdapter {
   Future<Result<DownloadEligibility>> checkDownloadEligibility(String sourceId);
 }
 
+/// Optional query surface for adapters that report [SourceCapabilities.canSearch].
+abstract interface class SearchableVideoSourceAdapter {
+  /// Searches provider items using [query].
+  Future<Result<SourcePage>> searchVideos(
+    String query, {
+    required CancellationToken cancellationToken,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Value types used by VideoSourceAdapter.
 // ---------------------------------------------------------------------------

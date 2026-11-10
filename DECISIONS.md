@@ -1771,3 +1771,96 @@ share target).
 
 **Consequences.** Full engine flexibility for the owner without opening the
 share path.
+
+## ADR-031 --- OneDrive uses native AppAuth and Graph read-only access
+
+**Status:** Accepted (implementation complete; app-registration and dedicated
+account verification remain owner/device tasks).
+
+**Context.** Phase 9 adds OneDrive as the first cloud source. It must support
+personal and organizational Microsoft accounts, keep tokens outside the
+library database, and resolve playback without making a temporary CDN URL a
+durable source identity.
+
+**Decision.**
+
+- Use `flutter_appauth` 13.0.0 (BSD-3-Clause; maintained native AppAuth
+  wrapper, 160/160 pub points when evaluated) for the external-browser
+  authorization-code flow with PKCE. The Android callback uses Microsoft's
+  `msauth://<package>/<signature-hash>` URI. The client ID and redirect URI
+  are public build-time defines; there is no client secret.
+- Use `flutter_secure_storage` 11.2.0 (BSD-3-Clause; 160/160 pub points when
+  evaluated) for the access/refresh-token record. Android app backup is
+  disabled so encrypted token material is not copied without its Keystore
+  key.
+- Request only delegated Graph `Files.Read` and `offline_access`. Refresh
+  tokens are rotated in secure storage, invalid grants require sign-in again,
+  and concurrent refreshes share one in-flight request.
+- `OneDriveAdapter` uses stable `<driveId>/<itemId>` source IDs, recursively
+  lists drive folders and Graph pages, exposes provider search, and maps
+  provider failures to typed app errors. Playback obtains
+  `@microsoft.graph.downloadUrl` on demand; the signed URL is memory-only and
+  no authorization header is sent to its CDN host.
+- Disconnect clears only the token record. It does not remove source
+  locations, library items, or OneDrive files.
+
+**Consequences.** Unit/widget tests cover token lifecycle, provider paging and
+search, HTTP error mapping, URL privacy, and connection controls. Real Entra
+app registration, dedicated-account sign-in/revocation, playback, and device
+log review are still required before Phase 9 can be marked fully verified;
+setup is documented in `docs/onedrive_setup.md`.
+
+## ADR-032 --- Google Drive uses native Google Sign-In and Drive API v3
+
+**Status:** Accepted (full Drive file management and automated coverage
+complete; Google Cloud app registration and Android device verification remain
+owner tasks).
+
+**Context.** Phase 10 needs access to the owner's Drive for listing and
+playback. The owner additionally requested renaming and explicit deletion of
+Drive files. The app must not store a temporary download or thumbnail URL as a
+source identity. Google's current Android OAuth guidance does not support
+custom-scheme redirects for Android apps, so Google's flow cannot reuse
+OneDrive's AppAuth callback.
+
+**Decision.**
+
+- Use `google_sign_in` 7.2.0 (BSD-3-Clause, Flutter-published, 160/160 pub
+  points when checked) and its Android implementation, which uses native
+  Google sign-in / Credential Manager. Register an Android OAuth client for
+  the package and each signing certificate. The public web-client ID can be
+  set once in `GoogleDriveAuthService` configuration or overridden by
+  `GOOGLE_WEB_CLIENT_ID`. No client secret, `google-services.json`, or Google
+  redirect scheme is required.
+- Request `https://www.googleapis.com/auth/drive`, because the owner
+  explicitly requires file renaming and deletion in addition to listing and
+  playback. The full scope can expose or modify all files in the connected
+  account; users must consent deliberately. Google's OAuth verification and
+  testing-mode rules still apply. The native SDK owns account state and
+  access-token renewal; the app holds only the current access token in memory,
+  clears a rejected token before retrying, and does not persist provider
+  tokens in the database or preferences.
+- `GoogleDriveAdapter` uses a Drive file ID as stable source identity, pages
+  through `files.list`, searches accessible videos, and obtains fresh file
+  metadata before playback. Playback uses the Drive API `alt=media` endpoint
+  with an in-memory authorization header; the media URL itself is not a
+  durable identity.
+- Read Drive's `capabilities.canDownload` before reporting an item eligible
+  for app-managed download. Map authorization, permission, missing-file,
+  rate-limit, and network failures to typed app errors. Disconnect revokes
+  this app's grant but leaves Drive files and library metadata intact.
+- Rename a file only through the explicit Manage Sources action. Permanent
+  deletion uses the registered `ItemOriginalDeleter` and only runs after the
+  ADR-017 per-item confirmation; that dialog lists each filename and provider.
+  Thumbnail links are fetched on demand from Drive metadata, validated as
+  Google-hosted HTTPS URLs, bounded in size/redirects, fetched without the
+  bearer token, and never stored. Cache keys use the stable Drive file ID.
+
+**Consequences.** Unit tests cover the auth service seam, Drive pagination,
+search, metadata, playback URL/header behavior, rename/delete requests,
+thumbnail retrieval, provider status mapping, and HTTP error/retry handling;
+widget tests cover connect/disconnect, configuration errors, source renaming,
+and file-named deletion confirmation. Google Cloud app registration,
+real-account consent/revocation, playback, thumbnail retrieval, rename/delete,
+and device log review remain owner/device prerequisites; setup is documented in
+`docs/google_drive_setup.md`.

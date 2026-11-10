@@ -20,6 +20,7 @@
         android:label="mytube"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
@@ -47,6 +48,18 @@
                 <action android:name="android.intent.action.SEND"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+        <!-- Microsoft AppAuth native redirect (P9-01). The exact callback URI
+             is supplied at build time and registered with the app in Entra. -->
+        <activity
+            android:name="net.openid.appauth.RedirectUriReceiverActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="${appAuthRedirectScheme}"/>
             </intent-filter>
         </activity>
         <!-- Foreground media session + MediaStyle notification (P13-03, PLAY-010).

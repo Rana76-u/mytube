@@ -73,6 +73,7 @@ class ItemRemovalOutcome {
     required this.scope,
     this.deletedOriginals = 0,
     this.undeletedOriginals = 0,
+    this.failureMessage,
     this.recordRemoved = true,
   });
 
@@ -84,6 +85,9 @@ class ItemRemovalOutcome {
 
   /// Originals the provider refused or could not confirm.
   final int undeletedOriginals;
+
+  /// Safe provider explanation when an original could not be deleted.
+  final String? failureMessage;
 
   /// Whether the library record is gone. [ItemRemovalService.remove] only
   /// returns an outcome after a successful delete, so this is false solely for
@@ -102,8 +106,8 @@ class ItemRemovalOutcome {
 /// Declared here rather than on `VideoSourceAdapter` because deletion is not a
 /// capability every adapter needs: only providers that can destroy data
 /// register one, so the set of destructive paths is explicit and testable
-/// (ADR-017). Local files are the only family today; cloud adapters add their
-/// own deleter as they land, without touching the removal flow.
+/// (ADR-017). Local files and Google Drive are registered today; unsupported
+/// cloud providers remain untouched.
 abstract interface class ItemOriginalDeleter {
   /// The provider types whose originals this deleter can destroy.
   Set<ProviderType> get providerTypes;
@@ -254,18 +258,21 @@ class VideoItemRemovalService implements ItemRemovalService {
     }
 
     var deleted = 0;
+    String? failureMessage;
     for (final entry in batches.entries) {
       final result = await entry.key.deleteOriginals(entry.value);
       switch (result) {
         case Ok(:final value):
           deleted += value.deleted.length;
           undeleted += value.failed.length;
+          failureMessage ??= value.failureMessage;
           // Defensive: a deleter that under-reports must not make the user
           // believe a file was deleted when the app cannot confirm it.
           final unreported = entry.value.length - value.total;
           if (unreported > 0) undeleted += unreported;
-        case Err():
+        case Err(:final error):
           undeleted += entry.value.length;
+          failureMessage ??= error.userMessage;
       }
     }
 
@@ -277,6 +284,7 @@ class VideoItemRemovalService implements ItemRemovalService {
         scope: plan.scope,
         deletedOriginals: deleted,
         undeletedOriginals: undeleted,
+        failureMessage: failureMessage,
       ),
     );
   }

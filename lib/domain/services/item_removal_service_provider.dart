@@ -3,18 +3,23 @@ import 'package:mytube/data/repositories/repository_providers.dart';
 import 'package:mytube/domain/services/item_removal_service.dart';
 import 'package:mytube/domain/services/local_file_original_deleter.dart';
 import 'package:mytube/platform/platform_providers.dart';
+import 'package:mytube/sources/google_drive/google_drive_original_deleter.dart';
+import 'package:mytube/sources/google_drive/google_drive_providers.dart';
 
 /// Every provider family whose originals the app can delete (ADR-017).
 ///
 /// Deliberately a short, explicit list: a provider appears here only once it has
 /// a deleter, so the removal flow can never claim to delete something it does
-/// not own. Cloud adapters register their deleter here as they land; until then
-/// their locations fall back to "remove from library".
+/// not own. Supported providers register their deleter here; unsupported
+/// cloud locations fall back to "remove from library".
 final itemOriginalDeletersProvider = Provider<List<ItemOriginalDeleter>>(
   (ref) => [
     LocalFileOriginalDeleter(
       mediaStore: ref.watch(mediaStoreBridgeProvider),
       saf: ref.watch(safBridgeProvider),
+    ),
+    GoogleDriveOriginalDeleter(
+      api: ref.watch(googleDriveApiProvider),
     ),
   ],
 );

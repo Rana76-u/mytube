@@ -29,14 +29,18 @@ VideoItemSummary _item({
   primaryProvider: primaryProvider,
 );
 
-SourceLocation _location(ProviderType providerType, String sourceUri) =>
-    SourceLocation(
-      id: 'loc-$sourceUri',
-      videoItemId: _videoId,
-      providerType: providerType,
-      sourceUri: sourceUri,
-      availability: AvailabilityState.available,
-    );
+SourceLocation _location(
+  ProviderType providerType,
+  String sourceUri, {
+  String? displayName,
+}) => SourceLocation(
+  id: 'loc-$sourceUri',
+  videoItemId: _videoId,
+  providerType: providerType,
+  sourceUri: sourceUri,
+  displayName: displayName,
+  availability: AvailabilityState.available,
+);
 
 ItemRemovalPlan _localPlan({int files = 1}) => ItemRemovalPlan(
   item: _item(),
@@ -217,6 +221,37 @@ void main() {
       expect(service.removeCalls, 0);
     });
 
+    testWidgets('names the exact Google Drive file before deletion', (
+      tester,
+    ) async {
+      final service = _FakeRemovalService(
+        planValue: ItemRemovalPlan(
+          item: _item(primaryProvider: ProviderType.googleDrive),
+          scope: ItemRemovalScope.deleteOriginals,
+          originalsToDelete: [
+            _location(
+              ProviderType.googleDrive,
+              'drive-file-1',
+              displayName: 'cloud-video.mp4',
+            ),
+          ],
+        ),
+      );
+      await _pump(
+        tester,
+        _item(primaryProvider: ProviderType.googleDrive),
+        service: service,
+      );
+
+      await _tapDelete(tester);
+
+      expect(
+        find.textContaining('cloud-video.mp4 (Google Drive)'),
+        findsOneWidget,
+      );
+      expect(service.removeCalls, 0);
+    });
+
     testWidgets('cancelling keeps the item', (tester) async {
       final service = _FakeRemovalService(planValue: _localPlan());
       await _pump(tester, _item(), service: service);
@@ -325,6 +360,7 @@ void main() {
         outcome: const ItemRemovalOutcome(
           scope: ItemRemovalScope.deleteOriginals,
           undeletedOriginals: 1,
+          failureMessage: 'Check Drive access and file permissions.',
         ),
       );
       await _pump(tester, _item(), service: service);
@@ -334,8 +370,8 @@ void main() {
 
       expect(
         find.text(
-          "Removed from library. The file couldn't be deleted, so it may "
-          'still be on your device.',
+          "Removed from library. The file couldn't be deleted. It may still "
+          'exist at its source. Check Drive access and file permissions.',
         ),
         findsOneWidget,
       );

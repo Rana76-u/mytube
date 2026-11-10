@@ -1,21 +1,15 @@
-/// How the portrait player sizes itself (design §4, VP3.2).
+/// How the portrait player sizes itself (VP3.2).
 ///
-/// The page pins a player box above the metadata, and that box always starts
-/// at 16:9 because a pinned sliver needs a concrete extent. Landscape sources
-/// then fill it exactly; a vertical source is pillarboxed inside it by
-/// [VideoSurface]'s Fit until the user asks for `Expand`, which grows the box
-/// to at most [expandedPlayerFraction] of the available height.
-///
-/// Kept pure and framework-free (no `BuildContext`) so the three shapes --
-/// landscape, vertical, vertical-expanded -- are unit-testable without a
-/// device, and so the widget only supplies measurements.
+/// The pinned player follows the source aspect ratio when its dimensions are
+/// known, with a 16:9 minimum and a 70% screen-height maximum. Unknown
+/// dimensions use the minimum. Kept pure and framework-free so the sizing
+/// constraints can be tested without a device.
 library;
 
-/// The tallest fraction of the available height an expanded vertical source
-/// may occupy (design §4: "up to ~70 % of screen height").
-const double expandedPlayerFraction = 0.7;
+/// The tallest fraction of available screen height the player may occupy.
+const double maximumPlayerHeightFraction = 0.7;
 
-/// The 16:9 ratio every player box starts from.
+/// The minimum player box ratio.
 const double playerAspectRatio = 16 / 9;
 
 /// Whether the source is taller than it is wide, from the dimensions the scan
@@ -29,29 +23,27 @@ bool isVerticalVideo(int? widthPx, int? heightPx) {
   return heightPx > widthPx;
 }
 
-/// The height of the portrait player box.
+/// The height of the portrait player box, constrained by the viewport.
 ///
-/// [width] is the page width; [availableHeight] is what is left under the
-/// status bar. Without [expanded] (or with a landscape/square/unknown source)
-/// this is exactly the 16:9 box. With it, a vertical source may grow to its
-/// own aspect ratio, capped at [expandedPlayerFraction] of [availableHeight]
-/// and never smaller than the default box — expanding can only ever add
-/// picture, so the control never shrinks what the user is watching.
-double portraitPlayerHeight({
+/// [width] is always the available page width. Known source dimensions set the
+/// natural height, bounded by a 16:9 minimum and
+/// [maximumPlayerHeightFraction] of [availableHeight]. Unknown dimensions use
+/// the 16:9 minimum.
+double playerHeightForVideo({
   required double width,
   required double availableHeight,
-  required bool expanded,
   int? videoWidth,
   int? videoHeight,
 }) {
-  final letterboxed = width / playerAspectRatio;
-  if (!expanded || !isVerticalVideo(videoWidth, videoHeight)) {
-    return letterboxed;
+  final minimum = width / playerAspectRatio;
+  final maximum = availableHeight * maximumPlayerHeightFraction;
+  final boundedMaximum = maximum < minimum ? minimum : maximum;
+  if (videoWidth == null ||
+      videoHeight == null ||
+      videoWidth <= 0 ||
+      videoHeight <= 0) {
+    return minimum;
   }
-
-  // `isVerticalVideo` guarantees both are non-null and positive here.
-  final natural = width * videoHeight! / videoWidth!;
-  final cap = availableHeight * expandedPlayerFraction;
-  final grown = natural < cap ? natural : cap;
-  return grown < letterboxed ? letterboxed : grown;
+  final natural = width * videoHeight / videoWidth;
+  return natural.clamp(minimum, boundedMaximum);
 }

@@ -211,6 +211,38 @@ void main() {
       expect(bridge.requested, isEmpty);
     });
 
+    test('Google Drive thumbnails use stable IDs and the provider cache', () async {
+      final requestedIds = <String>[];
+      final driveService = ThumbnailService(
+        repository: repo,
+        bridge: bridge,
+        remoteFetcher: fetcher,
+        providerThumbnailFetchers: {
+          ProviderType.googleDrive: (sourceId) async {
+            requestedIds.add(sourceId);
+            return Ok(_kBytes);
+          },
+        },
+      );
+      await _seed(
+        repo,
+        itemId: 'v1',
+        locationId: 'drive-location',
+        sourceUri: 'drive-file-1',
+        thumbnailUri: 'https://temporary.example/expired-thumbnail',
+        providerType: ProviderType.googleDrive,
+      );
+
+      final first = await driveService.thumbnailForVideo('v1');
+      final second = await driveService.thumbnailForVideo('v1');
+
+      expect(first, _kBytes);
+      expect(second, _kBytes);
+      expect(requestedIds, ['drive-file-1']);
+      expect(fetcher.requested, isEmpty);
+      expect(bridge.requested, isEmpty);
+    });
+
     test(
       'falls back to a local content sourceUri when no stored preview',
       () async {

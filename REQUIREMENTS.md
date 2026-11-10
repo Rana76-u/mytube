@@ -113,9 +113,19 @@ local/direct-URL release.
 ### Google Drive --- second cloud provider
 
 -   **GDRIVE-001:** Implement after OneDrive.
--   **GDRIVE-002:** Use Google OAuth and the minimum practical scopes.
+-   **GDRIVE-002:** Use Google OAuth and the full Drive scope needed for the
+    owner's requested file management: list, stream, rename, and explicitly
+    delete Drive videos.
 -   **GDRIVE-003:** List/search and play accessible supported videos.
 -   **GDRIVE-004:** Handle provider restrictions and access errors.
+-   **GDRIVE-005:** Allow renaming a Drive file from its source-management row;
+    never rename it as a side effect of indexing or organization.
+-   **GDRIVE-006:** Allow Drive originals to be deleted only through the
+    explicit, confirmed per-item delete flow (ADR-017), and name every file
+    and provider in the confirmation.
+-   **GDRIVE-007:** Fetch thumbnails through the authenticated provider
+    boundary using the stable Drive file ID; never persist Google's
+    short-lived thumbnail URL.
 
 ### Cloudflare R2 --- third cloud provider
 

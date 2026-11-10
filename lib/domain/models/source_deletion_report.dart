@@ -8,6 +8,7 @@ class SourceDeletionReport {
   const SourceDeletionReport({
     this.deleted = const <String>[],
     this.failed = const <String>[],
+    this.failureMessage,
   });
 
   /// Source ids whose original was removed.
@@ -16,6 +17,9 @@ class SourceDeletionReport {
   /// Source ids whose original still exists (or whose deletion could not be
   /// verified), with the reason left to the caller's message.
   final List<String> failed;
+
+  /// Safe user-facing explanation from the provider, if available.
+  final String? failureMessage;
 
   /// Total ids this report accounts for.
   int get total => deleted.length + failed.length;
@@ -28,6 +32,7 @@ class SourceDeletionReport {
       SourceDeletionReport(
         deleted: [...deleted, ...other.deleted],
         failed: [...failed, ...other.failed],
+        failureMessage: failureMessage ?? other.failureMessage,
       );
 
   @override

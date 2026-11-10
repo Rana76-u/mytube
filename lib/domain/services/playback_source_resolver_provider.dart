@@ -11,11 +11,11 @@ import 'package:mytube/sources/web_link/web_link_adapter_provider.dart';
 /// resolver that lets a completed copy win over the network (P12-03).
 ///
 /// The adapter list combines the bulk-scan registry
-/// ([videoSourceAdaptersProvider] — the local MediaStore/SAF adapter) with the
-/// direct-URL and web-link adapters, which are deliberately excluded from scan
-/// merges but are required for per-item playback resolution. Tests override
-/// this provider with a fake resolver to avoid persistence and network
-/// entirely.
+/// ([videoSourceAdaptersProvider] — local MediaStore/SAF, OneDrive, and Google
+/// Drive) with the direct-URL and web-link adapters, which are deliberately
+/// excluded from scan merges but are required for per-item playback
+/// resolution. Tests override this provider with a fake resolver to avoid
+/// persistence and network entirely.
 final playbackSourceResolverProvider = Provider<PlaybackSourceResolver>((ref) {
   return DefaultPlaybackSourceResolver(
     repository: ref.watch(videoRepositoryProvider),

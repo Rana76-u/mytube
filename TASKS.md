@@ -1295,31 +1295,73 @@ recommendations, pinned collections (`DISCOVERY_PAGE_REDESIGN.md` §16–§21)
 ## Phase 9 --- OneDrive (first cloud provider)
 
 -   [ ] **P9-01** Configure Microsoft app registration, redirect URI,
-    OAuth flow. --- Todo
--   [ ] **P9-02** Implement secure token storage/refresh/reconnect. ---
-    Todo
--   [ ] **P9-03** Implement OneDrive adapter/capability reporting. ---
-    Todo
--   [ ] **P9-04** List/search accessible videos and fetch metadata. ---
-    Todo
--   [ ] **P9-05** Resolve supported streams without treating temporary
-    URLs as permanent identity. --- Todo
--   [ ] **P9-06** Handle revoked consent, missing items, rate limits,
-    and network errors. --- Todo
+    OAuth flow. --- Waiting on owner app registration
+    (native AppAuth/PKCE callback and build-time config are implemented;
+    register `msauth://com.example.mytube/<signature-hash>` and provide
+    the client ID/redirect URI as documented in `docs/onedrive_setup.md`).
+-   [x] **P9-02** Implement secure token storage/refresh/reconnect. ---
+    Done (`flutter_secure_storage`; refresh rotation, invalid-grant
+    reconnect, disconnect, concurrent refresh coalescing; unit tested).
+-   [x] **P9-03** Implement OneDrive adapter/capability reporting. ---
+    Done (registered OneDrive adapter, provider capabilities, search
+    interface, playback resolver and availability-check wiring).
+-   [x] **P9-04** List/search accessible videos and fetch metadata. ---
+    Done (recursive folder listing, Graph paging, search, typed metadata;
+    adapter tests cover nested folders and paged results).
+-   [x] **P9-05** Resolve supported streams without treating temporary
+    URLs as permanent identity. --- Done (stable `driveId/itemId` source
+    IDs; temporary HTTPS download URL is fetched for playback only).
+-   [x] **P9-06** Handle revoked consent, missing items, rate limits,
+    and network errors. --- Done (401 refresh/reconnect, 403 permission,
+    404 missing, 429 rate limit, timeout/network and service errors are
+    typed; Graph client tests cover status mapping and token redaction).
 -   [ ] **P9-07** Test with a dedicated account and audit logs for token
-    leakage. --- Todo
+    leakage. --- Waiting on owner/device verification (automated tests
+    cover token/header handling and diagnostics; real account, consent
+    revocation, playback, and device log review remain).
+
+    **Phase 9 status:** implementation and automated coverage are complete.
+    P9-01 app registration/build values and P9-07 dedicated-account Android
+    verification remain external prerequisites; do not mark the phase green
+    until those checks pass.
 
 ## Phase 10 --- Google Drive
 
--   [ ] **P10-01** Configure Google project/OAuth and minimum scopes.
-    --- Todo
--   [ ] **P10-02** Implement secure token lifecycle. --- Todo
--   [ ] **P10-03** Implement Google Drive adapter. --- Todo
--   [ ] **P10-04** List/search accessible videos and fetch metadata. ---
-    Todo
--   [ ] **P10-05** Resolve supported streams within provider
-    constraints. --- Todo
--   [ ] **P10-06** Handle permission loss and provider errors. --- Todo
+-   [ ] **P10-01** Configure Google project/OAuth and requested scope.
+    --- Waiting on owner Google Cloud app registration (the Android and web
+    OAuth client steps, Drive API enablement, full Drive scope, and the
+    configured web-client-ID location are documented in
+    `docs/google_drive_setup.md`; owner must add the client ID and re-consent).
+-   [x] **P10-02** Implement secure token lifecycle. --- Done
+    (native Google Sign-In owns account state and access-token renewal;
+    rejected tokens are cleared before one retry; app tokens stay in memory).
+-   [x] **P10-03** Implement Google Drive adapter. --- Done
+    (registered adapter, full-scope file management, and connected settings
+    controls).
+-   [x] **P10-04** List/search accessible videos and fetch metadata. ---
+    Done (Drive API pagination, video filtering, search, typed metadata).
+-   [x] **P10-05** Resolve supported streams within provider
+    constraints. --- Done (stable file-ID identity, API media endpoint,
+    in-memory authorization header, Drive download capability check).
+-   [x] **P10-06** Handle permission loss and provider errors. --- Done
+    (typed authorization, permission, missing-item, rate-limit, network, and
+    service errors with one access-token retry).
+-   [x] **P10-07** Rename Drive files and explicitly delete originals. --- Done
+    (rename from Manage Sources; permanent deletion only through the confirmed
+    per-item ADR-017 flow, with named files/providers and partial-result
+    reporting; provider failure messages are retained so denied Drive deletes
+    explain the access or file-permission check).
+-   [x] **P10-08** Fetch and cache Drive thumbnails. --- Done
+    (uses stable file IDs and short-lived provider thumbnail links only inside
+    the authenticated API boundary; never persists the link).
+
+    **Phase 10 status:** implementation and automated coverage are complete.
+    P10-01 Google Cloud app registration, setting the public web client ID in
+    `lib/platform/google_drive/google_drive_auth_service.dart`, granting the
+    full Drive scope, and real-account Android sign-in, rename/delete,
+    thumbnail, playback, revoked-grant, and device-log verification remain
+    owner/device prerequisites; do not mark the phase green until those checks
+    pass.
 
 ## Phase 11 --- Cloudflare R2
 

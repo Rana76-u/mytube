@@ -7,6 +7,7 @@ import 'package:mytube/domain/repositories/video_repository.dart'
     show ProviderType;
 import 'package:mytube/domain/services/thumbnail_service.dart';
 import 'package:mytube/platform/platform_providers.dart';
+import 'package:mytube/sources/google_drive/google_drive_providers.dart';
 import 'package:mytube/sources/direct_url/url_metadata_prober.dart'
     show directUrlRequestHeaders;
 
@@ -16,8 +17,9 @@ import 'package:mytube/sources/direct_url/url_metadata_prober.dart'
 /// [remoteThumbnailFetcherProvider], and the persistent preview cache. The
 /// service owns the session thumbnail cache, so it is a singleton for the app
 /// lifetime.
-final thumbnailServiceProvider = Provider<ThumbnailService>(
-  (ref) => ThumbnailService(
+final thumbnailServiceProvider = Provider<ThumbnailService>((ref) {
+  final driveApi = ref.watch(googleDriveApiProvider);
+  return ThumbnailService(
     repository: ref.watch(videoRepositoryProvider),
     bridge: ref.watch(thumbnailBridgeProvider),
     remoteFetcher: ref.watch(remoteThumbnailFetcherProvider),
@@ -31,8 +33,11 @@ final thumbnailServiceProvider = Provider<ThumbnailService>(
       ProviderType.directUrl => directUrlRequestHeaders,
       _ => const <String, String>{},
     },
-  ),
-);
+    providerThumbnailFetchers: {
+      ProviderType.googleDrive: driveApi.getThumbnail,
+    },
+  );
+});
 
 /// Thumbnail bytes for the logical item with the given id, or `null` when no
 /// thumbnail can be produced — the UI then renders its placeholder (P7-03).
