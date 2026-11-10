@@ -2062,7 +2062,8 @@ checks. Do not start a phase until the previous one is green.
 
 ### Already in place --- keep, do not rebuild
 
-Theme + tokens (`AppTheme`, `AppTokens`), pinned 16:9 player header, tap-to-
+Theme + tokens (`AppTheme`, `AppTokens`), responsive player header (VP8.1),
+tap-to-
 toggle chrome with a 3 s timer, Fit/Fill/Stretch display modes, speed menu,
 docked mini-player with `Hero` + drag-to-dismiss, PiP feature detection and
 auto-enter, media session/notification/audio focus, watch-progress throttling
@@ -2237,7 +2238,8 @@ relative-date helper (it only needs the pluralisation fix in VP1.5).
     the chrome-less PiP branch stay as they are. Update
     `video_player_screen_test` and `video_player_pip_test`;
     `player_pip_button` keeps its key.
--   [x] **VP3.2** Aspect strategy. --- Done (`lib/features/player/player_layout.dart`,
+-   [x] **VP3.2** Aspect strategy. --- Done at implementation time
+    (superseded by VP8.1; `lib/features/player/player_layout.dart`,
     `vertical_expand_notifier.dart`, plus the `Expand` slot in `player_overlay.dart`;
     6 tests in `test/unit/player/player_layout_test.dart` and the 4-test
     `VideoPlayerScreen aspect strategy (VP3.2)` group).
@@ -2697,10 +2699,10 @@ is pending the CPH2719 run per `docs/device_testing_player_v2.md`.
 
 ### Sequencing and definition of done
 
-Order: VP1 → VP2 → VP3 → VP4 → VP5 → VP6 → VP7. Within VP1, VP1.1 and VP1.3
-unblock everything else. VP6.4 must not ship before VP6.2 so the pill is never
-dead. VP4.1/VP4.3/VP5.6 add the gear, CC and lock actions to the VP2.5 bar ---
-those controls must not exist before their feature does.
+Order: VP1 → VP2 → VP3 → VP4 → VP5 → VP6 → VP7 → VP8. Within VP1, VP1.1 and
+VP1.3 unblock everything else. VP6.4 must not ship before VP6.2 so the pill is
+never dead. VP4.1/VP4.3/VP5.6 add the gear, CC and lock actions to the VP2.5 bar
+--- those controls must not exist before their feature does.
 
 Acceptance for the block as a whole (maps to `VIDEO_PLAYER_DESIGN.md` §14):
 bottom-anchored seek bar with buffered range, scrub preview and hidden-state
@@ -2714,6 +2716,36 @@ toggle (VP1.2, VP4.5); vertical and landscape video correct without a playback
 restart (VP3.2, VP5.5); Up Next with badges, overflow menu, now-playing state
 and autoplay (VP3.5); pluralised relative dates (VP1.5); accessibility verified
 (VP7.1); no jank, leaks or console errors (VP7.2, VP7.4).
+
+### VP8 --- Reference controller follow-up
+
+-   [x] **VP8.1** Reference player layout and ambient lighting. --- Done.
+    The player box now follows known source dimensions with a 16:9 minimum
+    and a 70% available-height cap; unknown dimensions use the minimum, and
+    runtime engine dimensions fill in missing library metadata. Removed the
+    manual vertical Expand control. The overlay has a down chevron without a
+    title or back-arrow, keeps PiP/CC/Settings in the top row, orders Playback
+    Speed → Display Mode → Fullscreen in the bottom row, puts elapsed/total in
+    a pill above a seek bar anchored to the bottom edge. Extracted the shared
+    blurred-frame widget so Reels keeps its existing backdrop behavior; the
+    player ambient backlight is subsequently removed in VP8.2.
+    Tests: `player_layout_test`, `player_overlay_test`,
+    `video_player_screen_test`, `video_surface_test` and `reels_screen_test`.
+    Verification: `dart format` on the eight changed Dart source/test files
+    (clean), `flutter analyze lib test` (no issues), and the five targeted
+    widget/unit suites (126 passed).
+
+-   [x] **VP8.2** Compact bottom controls and remove player ambience. --- Done.
+    Removed the ambient backdrop from the dedicated player while preserving
+    Reels' blurred letterbox treatment. Replaced the flexible-wrap bottom
+    controls with a horizontal row: compact time on the left and compact
+    Playback Speed → Display Mode → Fullscreen on the right, immediately above
+    the seeker. The seek track remains at the bottom edge. The visual chips
+    are compact while their menu hit targets remain 48 dp. Updated
+    `VIDEO_PLAYER_DESIGN.md`; added widget assertions for horizontal order,
+    chip dimensions, and bottom-edge seek placement. Verification:
+    `dart format`, `flutter analyze lib test`, `git diff --check`, and the
+    focused player/Reels widget and unit suites (126 passed).
 
 ## Link downloader --- web links, extractor-backed (ADR-021 to ADR-026)
 

@@ -43,10 +43,10 @@ Create or extend a central theme (`AppTheme`, `ThemeExtension` for player colour
 
 ## 4. PAGE LAYOUT (PORTRAIT)
 Structure (top to bottom), inside a `SafeArea`:
-1. **Player region** pinned at the top, aspect ratio 16:9 by default, with a black background and rounded corners only in mini mode.
-   - Landscape videos fill the width.
-   - **Vertical videos** (height > width) should default to "Fit" inside a 16:9 box, with an optional "Expand" (up to ~70% of screen height) toggle. Remember the choice per session.
-   - Remove the permanent app bar over the player. The back button, title, and PiP button live **inside the overlay's top bar**, so they fade with the controls.
+1. **Player region** pinned at the top, full width, with a height derived from the source aspect ratio. Keep a 16:9 minimum and cap the height at 70% of available screen height; unknown dimensions use the minimum.
+   - Preserve the full frame in Fit mode, with no horizontal inset to the player region.
+   - Use a black background behind letterboxing; do not add ambient lighting.
+   - Remove the permanent app bar over the player. The overlay's top-left control is a downward chevron (close/minimise); do not show a title or back-arrow there.
 2. **Scrollable content** below (`CustomScrollView`/`ListView`, independent of the player):
    - **Title** (max 2 lines, tap to expand the description section) with a chevron "...more".
    - **Meta line:** date added in correct relative form ("1 day ago", "3 days ago"), source ("Local"), resolution, file size, duration. Format with proper pluralisation.
@@ -59,14 +59,13 @@ Structure (top to bottom), inside a `SafeArea`:
 ## 5. VIDEO CONTROLLER OVERLAY (the core of this task)
 **Visibility:** appears on tap, auto-hides after 3s of inactivity while playing (never while paused, scrubbing, or the settings sheet is open). Fade with scrim, 200ms. Tapping empty space toggles it.
 
-**Top bar:** back/minimise (chevron-down) on the left; title (single line, ellipsis, only in fullscreen); on the right: PiP, Captions (CC), Settings (gear), plus Lock in fullscreen.
+**Top bar:** downward chevron on the left; on the right: PiP, Captions (CC), Settings (gear), plus Lock in fullscreen. Do not show the title or a back-arrow.
 
 **Center cluster:** Rewind 10s, Play/Pause, Forward 10s. Use a circular translucent scrim (`black @ 40%`), no brown fill. Play/Pause icon morphs with `AnimatedIcon`. Show a spinner while buffering. Show **Replay** on end.
 
 **Bottom bar** (anchored to the bottom edge):
-- Left: `current / total` time (e.g. "0:12 / 13:25"), tabular figures, tap to toggle remaining time.
-- Right: Speed chip, Aspect/Fit toggle, Fullscreen.
-- **Seek bar directly above or along the bottom edge:** a thin 3–4dp track that grows to ~6dp while dragging; played portion red, buffered portion white @ 40%, remaining white @ 20%; a small red thumb (12dp) that scales up to 16–20dp on drag. Expand the hit area to at least 48dp tall. Show a **time bubble and a thumbnail preview** above the thumb while scrubbing, and support haptic ticks at chapter markers if chapters exist.
+- Place a compact horizontal row just above the seek bar: a small `current / total` time label on the left (e.g. "0:12 / 13:25"), tabular figures, tap to toggle remaining time; Playback Speed, Display Mode, then Fullscreen on the right.
+- **Seek bar at the bottom edge:** a thin 3–4dp track that grows to ~6dp while dragging; played portion red, buffered portion white @ 40%, remaining white @ 20%; a small red thumb (12dp) that scales up to 16–20dp on drag. Expand the hit area to at least 48dp tall. Show a **time bubble and a thumbnail preview** above the thumb while scrubbing, and support haptic ticks at chapter markers if chapters exist.
 - When the overlay is hidden, show a **thin mini progress line** (2dp, red) at the very bottom of the player.
 
 **Volume:** no always-visible slider. Handle it through gestures (section 6) and a transient vertical indicator. In fullscreen, optionally show a speaker icon that reveals a slider on tap.

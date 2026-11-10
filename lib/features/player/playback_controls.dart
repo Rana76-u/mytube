@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/app/theme/app_tokens.dart';
+import 'package:mytube/app/theme/player_theme.dart';
 import 'package:mytube/core/util/duration_format.dart';
 import 'package:mytube/features/player/video_display_mode.dart';
 import 'package:mytube/features/player/video_display_mode_notifier.dart';
@@ -303,7 +304,9 @@ class _SettingsRow extends ConsumerWidget {
 
 /// Playback-speed selector capped to [PlaybackControls.speedPresets].
 class SpeedMenu extends ConsumerWidget {
-  const SpeedMenu({super.key});
+  const SpeedMenu({super.key, this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -332,10 +335,29 @@ class SpeedMenu extends ConsumerWidget {
             minHeight: AppSizes.minTapTarget,
           ),
           child: Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(formatSpeed(state.speed)),
-            ),
+            child: compact
+                ? DecoratedBox(
+                    key: const ValueKey('playback_speed_compact_chip'),
+                    decoration: BoxDecoration(
+                      color: PlayerColors.of(context).controlScrim,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.xs,
+                      ),
+                      child: Text(
+                        "${formatSpeed(state.speed)} Speed",
+                        textScaler: TextScaler.noScaling,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(formatSpeed(state.speed)),
+                  ),
           ),
         ),
       ),
@@ -349,7 +371,9 @@ class SpeedMenu extends ConsumerWidget {
 /// Fill/Crop, or Stretch through the app-wide [videoDisplayModeNotifierProvider]
 /// so the choice persists across sources and drives `VideoSurface`.
 class DisplayModeMenu extends ConsumerWidget {
-  const DisplayModeMenu({super.key});
+  const DisplayModeMenu({super.key, this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -373,17 +397,43 @@ class DisplayModeMenu extends ConsumerWidget {
           minHeight: AppSizes.minTapTarget,
         ),
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.fit_screen),
-                const SizedBox(width: 4),
-                Text(mode.label),
-              ],
-            ),
-          ),
+          child: compact
+              ? DecoratedBox(
+                  key: const ValueKey('playback_display_mode_compact_chip'),
+                  decoration: BoxDecoration(
+                    color: PlayerColors.of(context).controlScrim,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.fit_screen, size: 16),
+                        const SizedBox(width: 3),
+                        Text(
+                          mode.label,
+                          textScaler: TextScaler.noScaling,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.fit_screen),
+                      const SizedBox(width: 4),
+                      Text(mode.label),
+                    ],
+                  ),
+                ),
         ),
       ),
     );

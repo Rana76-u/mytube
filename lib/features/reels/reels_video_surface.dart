@@ -1,9 +1,7 @@
-import 'dart:ui' show ImageFilter, TileMode;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mytube/domain/repositories/video_repository.dart';
-import 'package:mytube/domain/services/thumbnail_service_provider.dart';
+import 'package:mytube/features/player/blurred_video_backdrop.dart';
 import 'package:mytube/features/player/video_surface.dart';
 import 'package:mytube/features/reels/reels_fit_policy.dart';
 import 'package:mytube/playback/playback_controller.dart';
@@ -46,63 +44,13 @@ class ReelsVideoSurface extends ConsumerWidget {
         return VideoSurface(
           fit: fit,
           backdrop: reelsShowsBackdrop(fit)
-              ? _BlurredFrameBackdrop(itemId: item.id.value)
+              ? BlurredVideoBackdrop(
+                  itemId: item.id.value,
+                  backdropKey: const ValueKey('reels_blurred_backdrop'),
+                )
               : null,
         );
       },
-    );
-  }
-}
-
-/// Blurred still of the same video, painted behind a letterboxed picture so the
-/// bars read as part of the frame rather than dead space.
-///
-/// Uses the stored thumbnail — already a decoded frame of this exact video —
-/// rather than the live texture: blurring a `Texture` requires pushing it into
-/// an offscreen layer, which is expensive and unreliable on Android. Thumbnails
-/// are decorative by design, so a missing/failed preview simply keeps the black
-/// backdrop [VideoSurface] already paints.
-class _BlurredFrameBackdrop extends ConsumerWidget {
-  const _BlurredFrameBackdrop({required this.itemId});
-
-  final String itemId;
-
-  /// Blur radius in logical pixels. Large enough that a low-resolution
-  /// preview reads as a soft wash rather than a blocky enlargement.
-  static const double _sigma = 24;
-
-  /// Darkening over the blur so the sharper video on top keeps contrast and
-  /// the white caption text stays readable.
-  static const Color _scrim = Color(0x8A000000);
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Soft-fail provider: null means "no preview available", never an error.
-    final bytes = ref.watch(videoThumbnailProvider(itemId)).value;
-    if (bytes == null) {
-      return const SizedBox.shrink();
-    }
-
-    return ImageFiltered(
-      key: const ValueKey('reels_blurred_backdrop'),
-      imageFilter: ImageFilter.blur(
-        sigmaX: _sigma,
-        sigmaY: _sigma,
-        // Mirror rather than decal, so the blurred edge fades to a copy of the
-        // image instead of to transparent black.
-        tileMode: TileMode.mirror,
-      ),
-      child: Image.memory(
-        bytes,
-        fit: BoxFit.cover,
-        filterQuality: FilterQuality.low,
-        // Keep the previous frame while a re-decode lands: the backdrop must
-        // never flash during a swipe.
-        gaplessPlayback: true,
-        color: _scrim,
-        colorBlendMode: BlendMode.srcOver,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-      ),
     );
   }
 }

@@ -11,8 +11,8 @@ import 'package:mytube/features/player/player_chrome_controller.dart';
 import 'package:mytube/features/player/player_seek_bar.dart';
 import 'package:mytube/playback/playback_controller.dart';
 
-/// The player's whole overlay chrome (VP2.5): a top bar, a centre transport
-/// cluster and a bottom bar carrying the seek bar and the settings chips.
+/// The player's whole overlay chrome: top actions, centre transport and a
+/// bottom-anchored timeline with the playback settings row above it.
 ///
 /// Everything sits on the video and fades with it — the host owns visibility
 /// ([PlayerChromeController] decides when it hides) and this widget only draws
@@ -25,9 +25,8 @@ import 'package:mytube/playback/playback_controller.dart';
 ///    gear (VP4.1), captions (VP4.3) and lock (VP5.6) append themselves
 ///    without a rewrite.
 ///
-/// The top bar owns the page chrome too (VP3.1): back/chevron on the left and
-/// the title beside it, so they fade with the controls instead of sitting in a
-/// permanent app bar above the picture.
+/// The top bar starts with a down chevron. The title is intentionally kept out
+/// of the video controls so the picture remains unobstructed.
 ///
 /// Only facts the engine reports are shown: no codec, fps or bitrate.
 class PlayerOverlay extends StatelessWidget {
@@ -36,13 +35,11 @@ class PlayerOverlay extends StatelessWidget {
     required this.state,
     required this.controller,
     required this.chrome,
-    this.title,
     this.onBack,
     this.onMinimise,
+    this.onFullscreen,
     this.actions = const [],
     this.framePreview,
-    this.expanded,
-    this.onToggleExpand,
     this.completedAction,
     this.onSkipToNext,
     this.padding = EdgeInsets.zero,
@@ -56,30 +53,20 @@ class PlayerOverlay extends StatelessWidget {
   /// Holds the chrome up while the user drags the seek bar (VP2.1).
   final PlayerChromeController chrome;
 
-  /// The item title, drawn as one ellipsised line in the top bar.
-  final String? title;
-
-  /// Leaves the page (the arrow, portrait). Null in fullscreen, where the
-  /// chevron is the way out.
+  /// Leaves the player page (portrait).
   final VoidCallback? onBack;
 
-  /// Leaves fullscreen (the chevron).
+  /// Leaves fullscreen.
   final VoidCallback? onMinimise;
 
-  /// Extra top-bar controls (PiP, and later the gear, CC and lock).
+  /// Toggles fullscreen from the bottom-right control.
+  final VoidCallback? onFullscreen;
+
+  /// Extra top-bar controls (PiP, captions, settings and lock).
   final List<Widget> actions;
 
   /// Optional scrub-frame loader for the seek bar (VP1.4).
   final FramePreviewLoader? framePreview;
-
-  /// Whether a vertical source is currently grown past the 16:9 box (VP3.2).
-  /// Drives the glyph only; the host owns the value.
-  final bool? expanded;
-
-  /// Offers the `Expand` control. Null for sources that cannot be expanded
-  /// (landscape or unknown dimensions), which removes the button entirely
-  /// (ADR-012 — no chrome without a target).
-  final VoidCallback? onToggleExpand;
 
   /// The end-of-video action (the autoplay countdown, VP3.5). Host-built, but
   /// drawn only while the engine reports [PlaybackStatus.completed], so the
@@ -125,8 +112,6 @@ class PlayerOverlay extends StatelessWidget {
     final colors = PlayerColors.of(context);
     final enabled = transportEnabled(state);
     final seekable = state.canSeek && enabled && state.duration > Duration.zero;
-    final grown = expanded ?? false;
-
     return IconTheme(
       data: IconThemeData(color: colors.overlayIcon),
       child: DefaultTextStyle.merge(
@@ -148,7 +133,6 @@ class PlayerOverlay extends StatelessWidget {
                     ),
                   ),
                   child: PlayerTopBar(
-                    title: title,
                     onBack: onBack,
                     onMinimise: onMinimise,
                     actions: actions,
@@ -186,7 +170,8 @@ class PlayerOverlay extends StatelessWidget {
                   ],
                 ),
               ),
-              // Bottom: seek bar plus the settings/labels row.
+              // The time and settings sit above the seek bar; the track itself
+              // is the final child so it stays at the bottom edge of the video.
               Align(
                 alignment: Alignment.bottomCenter,
                 child: DecoratedBox(
@@ -199,62 +184,62 @@ class PlayerOverlay extends StatelessWidget {
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                        ),
-                        child: PlayerSeekBar(
-                          key: const ValueKey('player_seek_bar'),
-                          state: state,
-                          controller: controller,
-                          seekable: seekable,
-                          framePreview: framePreview,
-                          onScrubStart: () => chrome.setScrubbing(true),
-                          onScrubEnd: () => chrome.setScrubbing(false),
-                        ),
-                      ),
-                      Padding(
                         padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.md,
+                          AppSpacing.sm,
                           0,
                           AppSpacing.xs,
-                          AppSpacing.xs,
+                          0,
                         ),
-                        // A row at 100 % text, two rows at 200 % (VP7.1): the
-                        // label and the trailing controls each keep a full 48 dp
-                        // target instead of squeezing the digits or clipping a
-                        // button, and nothing is scaled back down.
-                        child: Wrap(
-                          alignment: WrapAlignment.spaceBetween,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: AppSpacing.sm,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             _TimeLabel(state: state),
                             Row(
                               mainAxisSize: MainAxisSize.min,
+
                               children: [
-                                if (onToggleExpand != null)
+                                const SpeedMenu(compact: true),
+                                const SizedBox(width: 6),
+                                const DisplayModeMenu(compact: true),
+                                const SizedBox(width: 3),
+                                if (onFullscreen != null)
                                   IconButton(
-                                    key: const ValueKey('player_expand_button'),
-                                    tooltip: grown
-                                        ? 'Collapse'
-                                        : 'Expand video',
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: onToggleExpand,
+                                    key: ValueKey(
+                                      onMinimise == null
+                                          ? 'player_fullscreen_button'
+                                          : 'player_fullscreen_exit_button',
+                                    ),
+                                    tooltip: onMinimise == null
+                                        ? 'Fullscreen'
+                                        : 'Exit fullscreen',
+                                    onPressed: onFullscreen,
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: colors.controlScrim,
+                                      foregroundColor: colors.overlayIcon,
+                                    ),
                                     icon: Icon(
-                                      grown
-                                          ? Icons.unfold_less
-                                          : Icons.unfold_more,
+                                      onMinimise == null
+                                          ? Icons.fullscreen
+                                          : Icons.fullscreen_exit,
                                     ),
                                   ),
-                                const SpeedMenu(),
-                                if (state.duration > Duration.zero)
-                                  const DisplayModeMenu(),
                               ],
                             ),
                           ],
                         ),
+                      ),
+                      PlayerSeekBar(
+                        key: const ValueKey('player_seek_bar'),
+                        state: state,
+                        controller: controller,
+                        seekable: seekable,
+                        framePreview: framePreview,
+                        onScrubStart: () => chrome.setScrubbing(true),
+                        onScrubEnd: () => chrome.setScrubbing(false),
                       ),
                     ],
                   ),
@@ -268,69 +253,39 @@ class PlayerOverlay extends StatelessWidget {
   }
 }
 
-/// Back/chevron, the title and the host's action slot (VP2.5, VP3.1).
-///
-/// Exactly one leading control is drawn: the back arrow in portrait, the
-/// downwards chevron in fullscreen, nothing when the host supplies neither.
+/// A down chevron and the host's action slot.
 class PlayerTopBar extends StatelessWidget {
   const PlayerTopBar({
     super.key,
-    this.title,
     this.onBack,
     this.onMinimise,
     this.actions = const [],
   });
 
-  /// Drawn with an ellipsis when non-null.
-  final String? title;
-
-  /// Leaves the player page (portrait).
+  /// Leaves the player page (portrait), using the down chevron.
   final VoidCallback? onBack;
 
-  /// Leaves fullscreen (the chevron).
+  /// Leaves fullscreen, using the same down chevron.
   final VoidCallback? onMinimise;
 
   final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
-    final title = this.title;
     return SizedBox(
       height: 48,
       child: Row(
         children: [
-          if (onBack != null)
-            IconButton(
-              key: const ValueKey('player_back_button'),
-              tooltip: 'Back',
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back),
-            )
-          else if (onMinimise != null)
+          if (onBack != null || onMinimise != null)
             IconButton(
               key: const ValueKey('player_minimise_button'),
-              tooltip: 'Minimise',
-              onPressed: onMinimise,
-              icon: const Icon(Icons.keyboard_arrow_down),
+              tooltip: onMinimise == null ? 'Close player' : 'Minimise',
+              onPressed: onMinimise ?? onBack,
+              icon: const Icon(Icons.keyboard_arrow_down, size: 32),
             )
           else
             const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: title == null
-                ? const SizedBox.shrink()
-                : Semantics(
-                    // Names the page for TalkBack before the controls; the text
-                    // itself is already the label, so only the role is added.
-                    header: true,
-                    child: Text(
-                      title,
-                      key: const ValueKey('player_top_bar_title'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                  ),
-          ),
+          const Spacer(),
           ...actions,
           const SizedBox(width: AppSpacing.xs),
         ],
@@ -536,6 +491,7 @@ class _TimeLabelState extends State<_TimeLabel> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = PlayerColors.of(context);
     final state = widget.state;
     final remaining = state.duration - state.position;
     final label = _showRemaining && state.duration > Duration.zero
@@ -563,20 +519,27 @@ class _TimeLabelState extends State<_TimeLabel> {
         child: InkWell(
           key: const ValueKey('player_time_label'),
           onTap: _toggle,
-          // Sizes to the digits (then to the 48 dp minimum) rather than to
-          // whatever width the bar offers: a greedy child would force the
-          // trailing controls onto a second line at every text size.
           child: Align(
             alignment: Alignment.center,
             widthFactor: 1,
             heightFactor: 1,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontFeatures: [FontFeature.tabularFigures()],
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.pillBackground,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.xs,
+                ),
+                child: Text(
+                  label,
+                  textScaler: TextScaler.noScaling,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ),

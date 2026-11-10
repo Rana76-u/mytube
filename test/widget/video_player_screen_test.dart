@@ -50,13 +50,17 @@ VideoItemSummary _item({
 /// Manual fake [PlayerHandle] — house style (no mocking package). Records
 /// engine commands so play/stop/loop-off are observable without a device.
 class _FakeHandle implements PlayerHandle {
+  _FakeHandle({this.videoSize});
+
+  final Size? videoSize;
+
   int playCalls = 0;
   int disposeCalls = 0;
   int seekCalls = 0;
   final List<bool> loopingCalls = <bool>[];
 
   @override
-  PlayerSnapshot get snapshot => const PlayerSnapshot(
+  PlayerSnapshot get snapshot => PlayerSnapshot(
     initialized: true,
     playing: true,
     buffering: false,
@@ -65,6 +69,7 @@ class _FakeHandle implements PlayerHandle {
     duration: Duration(seconds: 10),
     speed: 1.0,
     volume: 1.0,
+    videoSize: videoSize,
   );
 
   // Completed-style empty stream: teardown cancels immediately, never
@@ -361,7 +366,7 @@ void main() {
       expect(find.byType(PlayerOverlay), findsOneWidget);
       // The title appears twice by design: in the overlay top bar and in the
       // metadata block under the docked player (VP3.1, plan M5).
-      expect(find.text('My Video'), findsNWidgets(2));
+      expect(find.text('My Video'), findsOneWidget);
       expect(find.byKey(const ValueKey('player_title')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('player_action_toolbar')),
@@ -432,9 +437,9 @@ void main() {
       // playing (P5-08) — the first non-idle tick reports at least once.
       expect(progress.reportCalls, greaterThanOrEqualTo(1));
 
-      // Tap the overlay's back arrow — pageBack() only pops the root route,
+      // Tap the overlay's down chevron — pageBack() only pops the root route,
       // and the player here is a pushed route above the home button page.
-      await tester.tap(find.byTooltip('Back'));
+      await tester.tap(find.byTooltip('Close player'));
       await tester.pumpAndSettle();
 
       // Teardown contract: the route is gone and dispose() force-flushed the
@@ -450,7 +455,7 @@ void main() {
   });
 
   group('VideoPlayerScreen overlay chrome (VP2)', () {
-    testWidgets('draws the seek bar, the transport and the top-bar action', (
+    testWidgets('draws the transport, seek bar and reference controls', (
       tester,
     ) async {
       final container = buildContainer();
@@ -461,21 +466,120 @@ void main() {
       expect(find.byKey(const ValueKey('player_play_pause')), findsOneWidget);
       expect(find.byKey(const ValueKey('player_rewind_10')), findsOneWidget);
       expect(find.byKey(const ValueKey('player_forward_10')), findsOneWidget);
-      // The fullscreen toggle moved into the overlay's action slot; its key
-      // is unchanged.
+      // Fullscreen is the trailing control in the bottom settings row.
       expect(
         find.byKey(const ValueKey('player_fullscreen_button')),
         findsOneWidget,
       );
-      // Portrait's own chrome lives in the overlay too (VP3.1): the back
-      // arrow and the title, and no fullscreen chevron.
-      expect(find.byKey(const ValueKey('player_back_button')), findsOneWidget);
+      // The top-left down chevron replaces both the back arrow and title.
       expect(
-        find.byKey(const ValueKey('player_top_bar_title')),
+        find.byKey(const ValueKey('player_minimise_button')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('player_top_bar_title')), findsNothing);
+      expect(find.byKey(const ValueKey('player_back_button')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('player_captions_button')),
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('player_minimise_button')),
+        find.byKey(const ValueKey('player_settings_button')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(PlayerTopBar),
+          matching: find.byKey(const ValueKey('player_fullscreen_button')),
+        ),
+        findsNothing,
+      );
+      final speedX = tester
+          .getCenter(
+            find.descendant(
+              of: find.byType(PlayerOverlay),
+              matching: find.byKey(const ValueKey('playback_speed_menu')),
+            ),
+          )
+          .dx;
+      final displayX = tester
+          .getCenter(
+            find.descendant(
+              of: find.byType(PlayerOverlay),
+              matching: find.byKey(
+                const ValueKey('playback_display_mode_menu'),
+              ),
+            ),
+          )
+          .dx;
+      final fullscreenX = tester
+          .getCenter(
+            find.descendant(
+              of: find.byType(PlayerOverlay),
+              matching: find.byKey(const ValueKey('player_fullscreen_button')),
+            ),
+          )
+          .dx;
+      expect(speedX, lessThan(displayX));
+      expect(displayX, lessThan(fullscreenX));
+      final timeX = tester
+          .getCenter(find.byKey(const ValueKey('player_time_label')))
+          .dx;
+      expect(timeX, lessThan(speedX));
+      final timeY = tester
+          .getCenter(find.byKey(const ValueKey('player_time_label')))
+          .dy;
+      final speedY = tester
+          .getCenter(
+            find.descendant(
+              of: find.byType(PlayerOverlay),
+              matching: find.byKey(
+                const ValueKey('playback_speed_compact_chip'),
+              ),
+            ),
+          )
+          .dy;
+      final displayY = tester
+          .getCenter(
+            find.descendant(
+              of: find.byType(PlayerOverlay),
+              matching: find.byKey(
+                const ValueKey('playback_display_mode_compact_chip'),
+              ),
+            ),
+          )
+          .dy;
+      expect(speedY, closeTo(displayY, 1));
+      expect(timeY, closeTo(speedY, 6));
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('playback_speed_compact_chip')))
+            .height,
+        lessThan(32),
+      );
+      expect(
+        tester
+            .getSize(
+              find.byKey(const ValueKey('playback_display_mode_compact_chip')),
+            )
+            .height,
+        lessThan(32),
+      );
+      final timeText = tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(const ValueKey('player_time_label')),
+          matching: find.byType(Text),
+        ),
+      );
+      expect(timeText.style?.fontSize, 12);
+      final playerRect = tester.getRect(
+        find.byKey(const ValueKey('player_video_area')),
+      );
+      final seekRect = tester.getRect(
+        find.byKey(const ValueKey('player_seek_bar')),
+      );
+      expect(seekRect.bottom, closeTo(playerRect.bottom, 0.5));
+      expect(
+        find.byKey(const ValueKey('video_surface_backdrop')),
         findsNothing,
       );
     });
@@ -488,7 +592,10 @@ void main() {
       // The permanent bar is gone: the picture owns the top of the page and
       // everything the bar carried fades with the controls instead.
       expect(find.byType(AppBar), findsNothing);
-      expect(find.byKey(const ValueKey('player_back_button')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('player_minimise_button')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const ValueKey('player_pip_button')),
         findsNothing,
@@ -588,7 +695,7 @@ void main() {
       expect(handles.single.seekCalls, 1);
     });
 
-    testWidgets('fullscreen hands back, title and chevron to the overlay', (
+    testWidgets('fullscreen keeps the title out and uses the down chevron', (
       tester,
     ) async {
       final container = buildContainer();
@@ -598,12 +705,9 @@ void main() {
       unawaited(container.read(fullscreenControllerProvider.notifier).enter());
       await tester.pumpAndSettle();
 
-      // No app bar: the overlay top bar carries the title and the way back.
+      // No app bar or title: the same down chevron exits fullscreen.
       expect(find.byType(AppBar), findsNothing);
-      expect(
-        find.byKey(const ValueKey('player_top_bar_title')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('player_top_bar_title')), findsNothing);
       expect(
         find.byKey(const ValueKey('player_minimise_button')),
         findsOneWidget,
@@ -612,16 +716,22 @@ void main() {
         find.byKey(const ValueKey('player_fullscreen_exit_button')),
         findsOneWidget,
       );
+      expect(
+        find.descendant(
+          of: find.byType(PlayerTopBar),
+          matching: find.byKey(const ValueKey('player_fullscreen_exit_button')),
+        ),
+        findsNothing,
+      );
 
       await tester.tap(find.byKey(const ValueKey('player_minimise_button')));
       await tester.pumpAndSettle();
 
       expect(container.read(fullscreenControllerProvider), isFalse);
-      // Back to the page: the arrow returns, the chevron goes.
-      expect(find.byKey(const ValueKey('player_back_button')), findsOneWidget);
+      // Back to the page: the down-chevron still has the same affordance.
       expect(
         find.byKey(const ValueKey('player_minimise_button')),
-        findsNothing,
+        findsOneWidget,
       );
     });
 
@@ -772,8 +882,8 @@ void main() {
     });
   });
 
-  group('VideoPlayerScreen aspect strategy (VP3.2)', () {
-    testWidgets('a vertical source starts letterboxed and expands on demand', (
+  group('VideoPlayerScreen responsive aspect sizing (VP3.2)', () {
+    testWidgets('a vertical source sizes automatically up to the height cap', (
       tester,
     ) async {
       usePortraitWindow(tester);
@@ -781,53 +891,46 @@ void main() {
       addTearDown(container.dispose);
       await pumpPlayer(tester, container, widthPx: 1080, heightPx: 1920);
 
-      expect(playerHeight(tester), closeTo(400 * 9 / 16, 0.5));
-
-      final expand = find.byKey(const ValueKey('player_expand_button'));
-      expect(expand, findsOneWidget);
-      expect(tester.widget<IconButton>(expand).tooltip, 'Expand video');
-
-      await tester.tap(expand);
-      await tester.pumpAndSettle();
-
-      // 9:16 wants ~711 px; the box stops at 70 % of the window instead.
-      expect(playerHeight(tester), closeTo(800 * expandedPlayerFraction, 0.5));
-      expect(tester.widget<IconButton>(expand).tooltip, 'Collapse');
+      expect(
+        playerHeight(tester),
+        closeTo(800 * maximumPlayerHeightFraction, 0.5),
+      );
+      expect(find.byKey(const ValueKey('player_expand_button')), findsNothing);
     });
 
-    testWidgets('remembers the expanded choice while the session lasts', (
+    testWidgets('uses a known nonstandard ratio while keeping full width', (
       tester,
     ) async {
       usePortraitWindow(tester);
       final container = buildContainer();
       addTearDown(container.dispose);
-      await pumpPlayer(tester, container, widthPx: 1080, heightPx: 1920);
+      await pumpPlayer(tester, container, widthPx: 1080, heightPx: 1440);
 
-      await tester.tap(find.byKey(const ValueKey('player_expand_button')));
-      await tester.pumpAndSettle();
-
-      // Leave the page and come back through the same container.
-      await tester.pumpWidget(const SizedBox.shrink());
-      await pumpPlayer(tester, container, widthPx: 1080, heightPx: 1920);
-
-      expect(playerHeight(tester), closeTo(800 * expandedPlayerFraction, 0.5));
+      expect(playerHeight(tester), closeTo(400 * 4 / 3, 0.5));
       expect(
-        tester
-            .widget<IconButton>(
-              find.byKey(const ValueKey('player_expand_button')),
-            )
-            .tooltip,
-        'Collapse',
+        tester.getSize(find.byKey(const ValueKey('player_video_area'))).width,
+        400,
       );
     });
 
-    testWidgets('a landscape source fills the width and offers no expand', (
+    testWidgets('uses runtime dimensions when library dimensions are unknown', (
       tester,
     ) async {
       usePortraitWindow(tester);
+      final container = buildContainer(
+        handleFactory: () => _FakeHandle(videoSize: const Size(1080, 1440)),
+      );
+      addTearDown(container.dispose);
+      await pumpPlayer(tester, container);
+
+      expect(playerHeight(tester), closeTo(400 * 4 / 3, 0.5));
+    });
+
+    testWidgets('ultrawide sources respect the minimum height', (tester) async {
+      usePortraitWindow(tester);
       final container = buildContainer();
       addTearDown(container.dispose);
-      await pumpPlayer(tester, container, widthPx: 1920, heightPx: 1080);
+      await pumpPlayer(tester, container, widthPx: 2560, heightPx: 1080);
 
       expect(playerHeight(tester), closeTo(400 * 9 / 16, 0.5));
       expect(find.byKey(const ValueKey('player_expand_button')), findsNothing);

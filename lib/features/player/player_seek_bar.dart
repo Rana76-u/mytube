@@ -62,7 +62,7 @@ class PlayerSeekBar extends StatefulWidget {
   final Duration step;
 
   /// Hit area height (Material's minimum touch target).
-  static const double hitHeight = 48;
+  static const double hitHeight = 7;
 
   /// Track thickness at rest / under the finger.
   static const double trackHeight = 3;

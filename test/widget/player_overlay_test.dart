@@ -169,9 +169,9 @@ void main() {
   Future<void> pumpOverlay(
     WidgetTester tester, {
     PlaybackState? state,
-    String? title,
     VoidCallback? onBack,
     VoidCallback? onMinimise,
+    VoidCallback? onFullscreen,
     List<Widget> actions = const [],
     Widget? completedAction,
     VoidCallback? onSkipToNext,
@@ -205,9 +205,9 @@ void main() {
                         state: live,
                         controller: controller,
                         chrome: chrome,
-                        title: title,
                         onBack: onBack,
                         onMinimise: onMinimise,
+                        onFullscreen: onFullscreen,
                         actions: actions,
                         completedAction: completedAction,
                         onSkipToNext: onSkipToNext,
@@ -233,40 +233,35 @@ void main() {
       );
 
   group('PlayerOverlay top bar (VP2.5, VP3.1)', () {
-    testWidgets('draws the title as one ellipsised line', (tester) async {
-      await pumpOverlay(tester);
-      expect(find.byKey(const ValueKey('player_top_bar_title')), findsNothing);
-
-      await pumpOverlay(tester, title: 'My Video');
-      final title = tester.widget<Text>(
-        find.byKey(const ValueKey('player_top_bar_title')),
-      );
-      expect(title.data, 'My Video');
-      expect(title.maxLines, 1);
-      // A long title must not push the actions off the bar.
-      expect(title.overflow, TextOverflow.ellipsis);
-    });
-
-    testWidgets('back replaces the chevron when the host supplies one', (
+    testWidgets('omits the title and uses a down chevron for portrait exit', (
       tester,
     ) async {
       var backs = 0;
-      var minimised = 0;
-      await pumpOverlay(
-        tester,
-        onBack: () => backs++,
-        onMinimise: () => minimised++,
-      );
+      await pumpOverlay(tester, onBack: () => backs++);
 
-      // Exactly one leading control: the arrow wins in portrait.
-      expect(find.byKey(const ValueKey('player_back_button')), findsOneWidget);
+      expect(find.byKey(const ValueKey('player_top_bar_title')), findsNothing);
+      final close = tester.widget<IconButton>(
+        find.byKey(const ValueKey('player_minimise_button')),
+      );
+      expect(close.tooltip, 'Close player');
+      expect(close.icon, isA<Icon>());
+      expect((close.icon as Icon).icon, Icons.keyboard_arrow_down);
+      await tester.tap(find.byKey(const ValueKey('player_minimise_button')));
+      expect(backs, 1);
+    });
+
+    testWidgets('the down chevron invokes the portrait exit callback', (
+      tester,
+    ) async {
+      var backs = 0;
+      await pumpOverlay(tester, onBack: () => backs++);
+
       expect(
         find.byKey(const ValueKey('player_minimise_button')),
-        findsNothing,
+        findsOneWidget,
       );
-      await tester.tap(find.byKey(const ValueKey('player_back_button')));
+      await tester.tap(find.byKey(const ValueKey('player_minimise_button')));
       expect(backs, 1);
-      expect(minimised, 0);
     });
 
     testWidgets('offers the minimise chevron only when the host can leave', (
@@ -772,18 +767,9 @@ void main() {
   });
 
   group('PlayerOverlay semantics (VP7.1)', () {
-    testWidgets('announces the video title as the page header', (tester) async {
-      final semantics = tester.ensureSemantics();
-      await pumpOverlay(tester, title: 'My Video');
-
-      // getSemantics walks up from the Text to the role that wraps it.
-      final node = tester.getSemantics(
-        find.byKey(const ValueKey('player_top_bar_title')),
-      );
-      expect(node.label, 'My Video');
-      expect(node.getSemanticsData().flagsCollection.isHeader, isTrue);
-
-      semantics.dispose();
+    testWidgets('does not place a title in the overlay bar', (tester) async {
+      await pumpOverlay(tester, onBack: () {});
+      expect(find.byKey(const ValueKey('player_top_bar_title')), findsNothing);
     });
 
     testWidgets('the time label is a button that names the toggle', (
@@ -874,14 +860,17 @@ void main() {
     testWidgets('every control in the bar keeps a 48 dp target', (
       tester,
     ) async {
-      await pumpOverlay(tester, onBack: () {});
+      await pumpOverlay(tester, onBack: () {}, onFullscreen: () {});
 
       for (final key in [
         'player_time_label',
-        'player_back_button',
+        'player_minimise_button',
         'player_play_pause',
         'player_rewind_10',
         'player_forward_10',
+        'playback_speed_menu',
+        'playback_display_mode_menu',
+        'player_fullscreen_button',
       ]) {
         final size = tester.getSize(find.byKey(ValueKey(key)));
         expect(
@@ -903,7 +892,6 @@ void main() {
       await pumpOverlay(
         tester,
         textScale: 2.0,
-        title: 'A rather long video title that has to ellipsise',
         actions: [
           IconButton(
             key: const ValueKey('extra'),

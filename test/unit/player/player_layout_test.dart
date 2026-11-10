@@ -20,61 +20,46 @@ void main() {
     });
   });
 
-  group('portraitPlayerHeight (VP3.2)', () {
+  group('playerHeightForVideo (VP3.2)', () {
     double height({
       double width = 400,
       double available = 800,
-      bool expanded = false,
       int? videoWidth = 1920,
       int? videoHeight = 1080,
-    }) => portraitPlayerHeight(
+    }) => playerHeightForVideo(
       width: width,
       availableHeight: available,
-      expanded: expanded,
       videoWidth: videoWidth,
       videoHeight: videoHeight,
     );
 
-    test('every source starts in a 16:9 box', () {
+    test('uses the 16:9 minimum for a 16:9 or unknown source', () {
       expect(height(), 400 * 9 / 16);
-      expect(height(videoWidth: 1080, videoHeight: 1920), 400 * 9 / 16);
+      expect(height(videoWidth: 1920, videoHeight: 1080), 400 * 9 / 16);
       expect(height(videoWidth: null, videoHeight: null), 400 * 9 / 16);
     });
 
-    test('expanding a 9:16 source grows it to the 70 % cap', () {
-      // Natural height would be ~711 px, far past the cap of 560 px.
-      final expanded = height(
-        expanded: true,
-        videoWidth: 1080,
-        videoHeight: 1920,
+    test('matches the source ratio while it remains under the height cap', () {
+      expect(
+        height(videoWidth: 1080, videoHeight: 1440),
+        closeTo(400 * 4 / 3, 0.001),
       );
-      expect(expanded, 800 * expandedPlayerFraction);
     });
 
-    test('a mildly vertical source grows only to its own aspect ratio', () {
-      // 4:5 at 400 px wide is 500 px tall, under the 560 px cap.
-      final expanded = height(
-        expanded: true,
-        videoWidth: 1080,
-        videoHeight: 1350,
+    test('caps a vertical source at 70% of available height', () {
+      expect(
+        height(videoWidth: 1080, videoHeight: 1920),
+        800 * maximumPlayerHeightFraction,
       );
-      expect(expanded, 500);
     });
 
-    test('expanding never shrinks the picture below the 16:9 box', () {
-      // A 4:3 source is not vertical, and a tiny available height must not
-      // make the player shorter than the default.
+    test('keeps ultrawide videos above the 16:9 minimum', () {
+      expect(height(videoWidth: 2560, videoHeight: 1080), 400 * 9 / 16);
+    });
+
+    test('never shrinks below the minimum when the viewport is short', () {
       expect(
-        height(expanded: true, videoWidth: 1440, videoHeight: 1080),
-        400 * 9 / 16,
-      );
-      expect(
-        height(
-          available: 200,
-          expanded: true,
-          videoWidth: 1080,
-          videoHeight: 1920,
-        ),
+        height(available: 200, videoWidth: 1080, videoHeight: 1920),
         400 * 9 / 16,
       );
     });

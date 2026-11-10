@@ -28,7 +28,6 @@ import 'package:mytube/features/player/player_settings_sheet.dart';
 import 'package:mytube/features/player/player_up_next.dart';
 import 'package:mytube/features/player/scrub_preview_service.dart';
 import 'package:mytube/features/player/video_display_mode_notifier.dart';
-import 'package:mytube/features/player/vertical_expand_notifier.dart';
 import 'package:mytube/features/player/video_loop_notifier.dart';
 import 'package:mytube/features/player/video_surface.dart';
 import 'package:mytube/playback/now_playing.dart';
@@ -48,10 +47,11 @@ import 'package:mytube/sources/source_adapter.dart';
 /// `video_player` type appears here).
 ///
 /// Layout follows DESIGN.md §5: one [CustomScrollView] whose first sliver is a
-/// pinned 16:9 player, so the video stays docked while the metadata, the action
-/// toolbar and "Up Next" scroll beneath it. The page has no permanent app bar
-/// (VP3.1): back, title and PiP live in the overlay top bar and fade with the
-/// controls. The overlay chrome ([PlayerOverlay]) is driven by
+/// pinned aspect-sized player, so the video stays docked while the metadata,
+/// action toolbar and "Up Next" scroll beneath it. The page has no permanent
+/// app bar (VP3.1): the overlay uses a down chevron and keeps PiP, captions and
+/// settings with the controls, without drawing a title. The overlay chrome
+/// ([PlayerOverlay]) is driven by
 /// [PlayerChromeController] — tap toggles it and it auto-hides after 3 s of
 /// playback (VP2.1) — while [PlayerGestureLayer] owns double taps, the scrub
 /// drag, and (in fullscreen) brightness, volume and pinch. Swiping the portrait
@@ -152,6 +152,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
   /// the same status never re-hits the plugin.
   bool _screenAwake = false;
 
+  /// Runtime dimensions are used when the library metadata has none.
+  Size? _playbackVideoSize;
+
   /// Set when this page already decided the session's fate (docked by a drag),
   /// so `dispose` does not collapse it a second time.
   bool _sessionHandedOff = false;
@@ -175,6 +178,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     WidgetsBinding.instance.addObserver(this);
     _item = widget.item;
     _controller = ref.read(playbackControllerProvider);
+    _playbackVideoSize = _controller.state.value.videoSize;
+    _controller.state.addListener(_handlePlaybackVideoSizeChanged);
     _watchProgress = ref.read(watchProgressServiceProvider);
     _session = ref.read(playbackSessionProvider.notifier);
     _fullscreen = ref.read(fullscreenControllerProvider.notifier);
@@ -197,6 +202,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     // `ref` is unsafe here (the element is already deactivated), hence the
     // captured references (house rule: cancel work, release resources).
     _playToken++;
+    _controller.state.removeListener(_handlePlaybackVideoSizeChanged);
     _chrome.dispose();
     _locked.dispose();
     _scrollController.dispose();
@@ -296,6 +302,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     if (item.id == _item.id) return;
     final previous = _item;
     unawaited(_watchProgress.flush(previous.id));
+    _playbackVideoSize = null;
     // The previous item's memoised location is not this item's source, and a
     // later return to it may see changed sources (VP2.4).
     _preview?.invalidate();
@@ -311,6 +318,22 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     ref.read(playbackQueueProvider.notifier).remove(item.id);
     ref.read(playbackSessionProvider.notifier).adopt(item);
     unawaited(_startPlayback());
+  }
+
+  void _handlePlaybackVideoSizeChanged() {
+    final next = _controller.state.value.videoSize;
+    if (next == _playbackVideoSize) return;
+    _playbackVideoSize = next;
+    if (mounted && (_item.widthPx == null || _item.heightPx == null)) {
+      setState(() {});
+    }
+  }
+
+  Size? get _effectiveVideoSize {
+    if (_item.widthPx != null && _item.heightPx != null) {
+      return Size(_item.widthPx!.toDouble(), _item.heightPx!.toDouble());
+    }
+    return _playbackVideoSize;
   }
 
   /// Registers the watch-progress listener on the current controller exactly
@@ -379,7 +402,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
     if (_scrollController.hasClients) {
       _savedScrollOffset = _scrollController.offset;
     }
-    final vertical = isVerticalVideo(_item.widthPx, _item.heightPx);
+    final size = _effectiveVideoSize;
+    final vertical = isVerticalVideo(size?.width.round(), size?.height.round());
     unawaited(
       ref
           .read(fullscreenControllerProvider.notifier)
@@ -456,8 +480,8 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       }
     });
 
-    // Android PiP captures the whole Flutter window, so every overlay chrome —
-    // the app bar and the playback controls — must disappear while floating
+    // Android PiP captures the whole Flutter window, so every overlay control
+    // must disappear while floating
     // (PLAY-010). A chrome-less body leaves only the video for the float window.
     return ValueListenableBuilder<bool>(
       valueListenable: pip.inPip,
@@ -475,15 +499,15 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
           guard: () => _locked.value,
           onToggleFullscreen: _toggleFullscreen,
           child: PopScope(
-            // Every way out of the page — back gesture, app bar, system pop —
-            // hands the item to the mini player before teardown (ADR-014).
+            // Every way out of the page — back gesture, down chevron, system
+            // pop — hands the item to the mini player before teardown (ADR-014).
             onPopInvokedWithResult: (didPop, _) {
               if (didPop) _collapseSessionIfMine();
             },
             child: Scaffold(
               backgroundColor: fullscreen ? Colors.black : null,
-              // No app bar (VP3.1): back, title and PiP fade with the overlay, so
-              // the picture owns the top of the page and nothing is duplicated.
+              // No app bar (VP3.1): controls fade with the overlay and the
+              // picture owns the top of the page without a duplicate title.
               body: fullscreen ? _buildFullscreen(pip) : _buildPage(pip),
             ),
           ),
@@ -510,6 +534,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       item: _item,
       controller: _controller,
       chrome: _chrome,
+      onFullscreen: _toggleFullscreen,
       overlayPadding: overlayPadding,
       // Fullscreen has no app bar either, so the chevron is the way back to the
       // page (VP2.5).
@@ -531,20 +556,17 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
 
   /// The normal page: pinned player, then metadata, actions and Up Next.
   Widget _buildPage(PipCoordinator pip) {
-    // The pinned header needs a concrete extent. 16:9 at the page width is the
-    // default for every source; a vertical one may grow past it when the user
-    // asks for Expand (VP3.2).
+    // Follow the source aspect ratio within a 16:9 minimum and a 70% viewport
+    // height maximum (VP3.2).
     final media = MediaQuery.of(context);
-    final expanded = ref.watch(verticalExpandNotifierProvider);
     final loop = ref.watch(videoLoopNotifierProvider);
-    final vertical = isVerticalVideo(_item.widthPx, _item.heightPx);
-    final playerHeight = portraitPlayerHeight(
-      width: media.size.width,
-      // The page sits in a SafeArea, so the status bar is not available.
-      availableHeight: media.size.height - media.padding.top,
-      expanded: expanded,
-      videoWidth: _item.widthPx,
-      videoHeight: _item.heightPx,
+    final size = _effectiveVideoSize;
+    final playerHeight = playerHeightForVideo(
+      width: media.size.width - media.padding.left - media.padding.right,
+      availableHeight:
+          media.size.height - media.padding.top - media.padding.bottom,
+      videoWidth: size?.width.round(),
+      videoHeight: size?.height.round(),
     );
 
     // The player sits under the status bar (design §4 keeps the page in a
@@ -565,17 +587,9 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
                 item: _item,
                 controller: _controller,
                 chrome: _chrome,
-                // Back is the overlay's arrow, not an app bar's (VP3.1).
+                onFullscreen: _enterFullscreen,
                 onBack: () => Navigator.of(context).maybePop(),
                 topActions: _topBarActions(pip: pip, fullscreen: false),
-                // Only a vertical source can be expanded, so only it carries
-                // the control (VP3.2).
-                expanded: vertical && expanded,
-                onToggleExpand: vertical
-                    ? () => ref
-                          .read(verticalExpandNotifierProvider.notifier)
-                          .toggle()
-                    : null,
                 onDragDown: (delta) => _dragDown += delta,
                 onDragEnd: (velocity) => _handleDockDrag(velocity),
                 framePreview: _framePreview,
@@ -695,7 +709,7 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
       ),
       icon: const Icon(Icons.settings_outlined),
     ),
-    if (fullscreen) ...[
+    if (fullscreen)
       // Lock mode (VP5.6) lives only in fullscreen: it hides the chrome and
       // freezes every gesture, leaving the tap-to-reveal unlock affordance.
       IconButton(
@@ -703,22 +717,6 @@ class _VideoPlayerScreenState extends ConsumerState<VideoPlayerScreen>
         tooltip: 'Lock',
         onPressed: () => _setLocked(true),
         icon: const Icon(Icons.lock_outline),
-      ),
-      IconButton(
-        key: const ValueKey('player_fullscreen_exit_button'),
-        tooltip: 'Exit fullscreen',
-        onPressed: () {
-          unawaited(ref.read(fullscreenControllerProvider.notifier).exit());
-          _revealChrome();
-        },
-        icon: const Icon(Icons.fullscreen_exit),
-      ),
-    ] else
-      IconButton(
-        key: const ValueKey('player_fullscreen_button'),
-        tooltip: 'Fullscreen',
-        onPressed: _enterFullscreen,
-        icon: const Icon(Icons.fullscreen),
       ),
   ];
 
@@ -745,6 +743,7 @@ class _PlayerBox extends StatelessWidget {
     required this.item,
     required this.controller,
     required this.chrome,
+    required this.onFullscreen,
     required this.topActions,
     required this.onDragDown,
     required this.onDragEnd,
@@ -753,8 +752,6 @@ class _PlayerBox extends StatelessWidget {
     required this.onUnlock,
     this.onBack,
     this.onMinimise,
-    this.expanded = false,
-    this.onToggleExpand,
     this.completedAction,
     this.onSkipToNext,
     this.overlayPadding = EdgeInsets.zero,
@@ -767,19 +764,17 @@ class _PlayerBox extends StatelessWidget {
   /// Owns chrome visibility; the overlay and gestures both report into it.
   final PlayerChromeController chrome;
 
-  /// Host controls for the overlay top bar (PiP, fullscreen).
+  /// Toggles fullscreen from the bottom-right control.
+  final VoidCallback onFullscreen;
+
+  /// Host controls for the overlay top bar (PiP, captions, settings and lock).
   final List<Widget> topActions;
 
-  /// Leaves the page (portrait). Null in fullscreen, which uses the chevron.
+  /// Leaves the player page (portrait).
   final VoidCallback? onBack;
 
-  /// Leaves fullscreen; null hides the chevron (portrait shows the arrow).
+  /// Leaves fullscreen.
   final VoidCallback? onMinimise;
-
-  /// Whether the portrait box is grown past 16:9 for a vertical source, and
-  /// the control that flips it (VP3.2). Null hides the control.
-  final bool expanded;
-  final VoidCallback? onToggleExpand;
 
   /// Swipe-down bookkeeping for the mini-player dock (ADR-014).
   final void Function(double delta) onDragDown;
@@ -893,13 +888,11 @@ class _PlayerBox extends StatelessWidget {
                           state: state,
                           controller: controller,
                           chrome: chrome,
-                          title: item.title,
                           onBack: onBack,
                           onMinimise: onMinimise,
+                          onFullscreen: onFullscreen,
                           actions: topActions,
                           framePreview: framePreview,
-                          expanded: expanded,
-                          onToggleExpand: onToggleExpand,
                           completedAction: completedAction,
                           onSkipToNext: onSkipToNext,
                           padding: overlayPadding,
